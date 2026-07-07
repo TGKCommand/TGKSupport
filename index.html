@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Contact TGK Motorsport Support</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#ffffff;--bg2:#f7f8fa;--bg3:#f0f2f5;--bg4:#e9ebee;
+  --border:#e2e6eb;--border2:#c8cdd5;
+  --text:#111827;--text2:#374151;--text3:#6b7280;
+  --teal:#0d9488;--teal-d:#0f766e;
+  --orange:#ea580c;
+  --red:#dc2626;--red-dim:rgba(220,38,38,.09);
+  --r:6px;--r-lg:10px;--font:'DM Sans',sans-serif;
+}
+html,body{min-height:100%;font-family:var(--font);background:var(--bg3);color:var(--text);-webkit-font-smoothing:antialiased}
+body{display:flex;align-items:flex-start;justify-content:center;padding:40px 16px}
+.wrap{width:100%;max-width:520px}
+.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-lg);padding:32px;box-shadow:0 1px 4px rgba(0,0,0,.06);position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--teal),var(--orange) 60%,transparent)}
+.brand{font-size:11px;font-weight:800;color:var(--teal);letter-spacing:.18em;text-transform:uppercase;margin-bottom:6px}
+h1{font-size:20px;font-weight:700;margin-bottom:6px}
+.sub{font-size:13px;color:var(--text3);margin-bottom:24px}
+.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
+.form-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)}
+.form-input{width:100%;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:10px 12px;font-size:14px;outline:none;transition:border-color .15s;font-family:inherit}
+.form-input:focus{border-color:var(--teal)}
+textarea.form-input{resize:vertical;min-height:110px}
+.req{color:var(--red)}
+.btn-submit{width:100%;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:var(--r);background:var(--orange);color:#fff;cursor:pointer;transition:opacity .15s;margin-top:6px}
+.btn-submit:hover{opacity:.9}
+.btn-submit:disabled{opacity:.5;cursor:not-allowed}
+.err{color:var(--red);font-size:12.5px;margin-top:4px;min-height:16px}
+.success{text-align:center;padding:20px 0}
+.success .check{width:52px;height:52px;border-radius:50%;background:rgba(22,163,74,.12);color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 16px}
+.success h2{font-size:18px;margin-bottom:8px}
+.success p{font-size:13.5px;color:var(--text3);line-height:1.6}
+.footer-note{text-align:center;margin-top:14px;font-size:11px;color:var(--text3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card" id="card">
+    <div class="brand">TGK MOTORSPORT</div>
+    <h1>Contact Support</h1>
+    <p class="sub">Tell us what's going on and our team will follow up by email as soon as possible.</p>
+
+    <form id="ticketForm">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Name <span class="req">*</span></label>
+          <input class="form-input" id="f-name" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Email <span class="req">*</span></label>
+          <input class="form-input" id="f-email" type="email" required>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Order Number</label>
+          <input class="form-input" id="f-order" placeholder="e.g. 10482">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Part Number</label>
+          <input class="form-input" id="f-pn" placeholder="If known">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Subject <span class="req">*</span></label>
+        <input class="form-input" id="f-subject" placeholder="Brief summary of the issue" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Message <span class="req">*</span></label>
+        <textarea class="form-input" id="f-message" placeholder="Describe what's happening in as much detail as you can..." required></textarea>
+      </div>
+      <div class="err" id="formErr"></div>
+      <button type="submit" class="btn-submit" id="submitBtn">Submit Request</button>
+    </form>
+  </div>
+  <div class="footer-note">TGK Motorsport · We typically respond within 1–2 business days</div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
+  e.preventDefault();
+  const errEl = document.getElementById('formErr');
+  const btn = document.getElementById('submitBtn');
+  errEl.textContent = '';
+
+  const name = document.getElementById('f-name').value.trim();
+  const email = document.getElementById('f-email').value.trim();
+  const order = document.getElementById('f-order').value.trim();
+  const pn = document.getElementById('f-pn').value.trim();
+  const subject = document.getElementById('f-subject').value.trim();
+  const message = document.getElementById('f-message').value.trim();
+
+  if(!name || !email || !subject || !message){
+    errEl.textContent = 'Please fill in all required fields.';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try{
+    const { error } = await sb.from('tickets').insert({
+      source: 'website',
+      status: 'open',
+      priority: 'medium',
+      subject,
+      description: message,
+      customer_name: name,
+      customer_email: email,
+      order_number: order || null,
+      pn: pn || null
+    });
+    if(error) throw error;
+
+    document.getElementById('card').innerHTML = `
+      <div class="success">
+        <div class="check">✓</div>
+        <h2>Request Submitted</h2>
+        <p>Thanks, ${escapeHtml(name)} — we've received your request and a member of our team<br>will follow up at <strong>${escapeHtml(email)}</strong> soon.</p>
+      </div>
+    `;
+  }catch(err){
+    errEl.textContent = 'Something went wrong: ' + err.message;
+    btn.disabled = false;
+    btn.textContent = 'Submit Request';
+  }
+});
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
