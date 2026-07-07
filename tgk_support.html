@@ -255,7 +255,7 @@ const S = {
   dealers: [],
   team: [],
   activeTicket: null,
-  filters: { status: '', priority: '', source: '', q: '' },
+  filters: { status: '', priority: '', source: '', tag: '', q: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -410,9 +410,12 @@ function subscribeRealtime(){
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'ticket_messages' }, payload=>{
       const m = payload.new;
       if(!S.messages[m.ticket_id]) S.messages[m.ticket_id] = [];
-      S.messages[m.ticket_id].push(m);
-      if(S.activeTicket && S.activeTicket.id === m.ticket_id){
-        document.getElementById('threadBox').innerHTML = renderThread(S.messages[m.ticket_id], showingNotes);
+      const alreadyHave = S.messages[m.ticket_id].some(x=>x.id===m.id);
+      if(!alreadyHave){
+        S.messages[m.ticket_id].push(m);
+        if(S.activeTicket && S.activeTicket.id === m.ticket_id){
+          document.getElementById('threadBox').innerHTML = renderThread(S.messages[m.ticket_id], showingNotes);
+        }
       }
     })
     .subscribe();
@@ -438,8 +441,10 @@ function handleTicketRealtime(payload){
 const NAV = [
   { id:'dashboard', label:'Dashboard' },
   { id:'tickets', label:'Tickets', badgeKey:'tickets' },
+  { id:'customers', label:'Customer Lookup' },
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
   { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
+  { id:'reports', label:'Reports' },
 ];
 
 function renderNav(){
@@ -478,6 +483,8 @@ function renderPage(){
   if(S.page === 'tickets') return renderTicketsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
+  if(S.page === 'customers') return renderCustomerLookup();
+  if(S.page === 'reports') return renderReports();
 }
 
 /* ============================================================
@@ -533,7 +540,11 @@ function renderTicketsList(){
         <option value="">All Sources</option>
         ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${S.filters.source===s?'selected':''}>${label(s)}</option>`).join('')}
       </select>
-      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',q:''}; renderTicketsList()">Clear</button>
+      <select class="form-input" style="width:auto" onchange="S.filters.tag=this.value; renderTicketsList()">
+        <option value="">All Tags</option>
+        ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${S.filters.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
+      </select>
+      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',q:''}; renderTicketsList()">Clear</button>
     </div>
     ${ticketTable(filteredTickets())}
   `;
@@ -545,6 +556,7 @@ function filteredTickets(){
   if(f.status) list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
+  if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
   if(f.q){
     const q = f.q.toLowerCase();
     list = list.filter(t=>
@@ -565,12 +577,13 @@ function isActiveClaim(status){ return !CLAIM_DONE_STATUSES.includes(status); }
 
 const STATUS_PILL = { open:'pill-teal', pending:'pill-yellow', waiting_customer:'pill-orange', resolved:'pill-green', closed:'pill-muted' };
 const PRIORITY_PILL = { low:'pill-muted', medium:'pill-yellow', high:'pill-orange', urgent:'pill-red' };
+const TICKET_CATEGORIES = ['Shipping','Warranty/Defect','Billing','Return/Refund','Part Compatibility','General Question','Other'];
 
 function ticketTable(list){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
   return `<div class="tbl-wrap"><table>
     <thead><tr>
-      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Source</th><th>Priority</th><th>Status</th><th>Updated</th>
+      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
     </tr></thead>
     <tbody>
       ${list.map(t=>`
@@ -580,6 +593,7 @@ function ticketTable(list){
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
+          <td>${(t.tags||[]).slice(0,2).map(tag=>`<span class="pill pill-muted" style="margin-right:3px">${escapeHtml(tag)}</span>`).join('')}${(t.tags||[]).length>2?`<span style="font-size:10px;color:var(--text3)">+${t.tags.length-2}</span>`:''}</td>
           <td><span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span></td>
           <td><span class="pill ${STATUS_PILL[t.status]||'pill-muted'}">${label(t.status)}</span></td>
           <td class="pn">${timeAgo(t.updated_at)}</td>
@@ -688,23 +702,66 @@ function openSendToERPModal(ticketId, kind){
   const defaultIssue = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
   const kindLabel = kind==='warranty' ? 'Warranty Claim' : 'Shipment Error';
 
+  const warrantyFields = `
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Type</label>
+      <select class="form-input" id="erpResolutionType">
+        <option value="">— Not decided yet —</option>
+        <option value="replacement">Replacement</option>
+        <option value="refund">Refund</option>
+        <option value="repair">Repair</option>
+        <option value="denied">Denied</option>
+      </select>
+    </div>`;
+
+  const shipErrorFields = `
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Error Type</label>
+        <select class="form-input" id="erpErrorType">
+          <option value="Wrong Item">Wrong Item</option>
+          <option value="Wrong Qty">Wrong Qty</option>
+          <option value="Missing">Missing</option>
+          <option value="Damaged">Damaged</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Resolution Type</label>
+        <select class="form-input" id="erpResolutionType">
+          <option value="">— Not decided yet —</option>
+          <option value="reship">Reship</option>
+          <option value="send_more">Send More</option>
+          <option value="customer_keeps">Customer Keeps</option>
+          <option value="return_required">Return Required</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Expected Qty</label><input class="form-input" id="erpExpectedQty" type="number" min="0"></div>
+      <div class="form-group"><label class="form-label">Shipped Qty</label><input class="form-input" id="erpShippedQty" type="number" min="0"></div>
+    </div>`;
+
   const ov = document.getElementById('modalOverlay');
   ov.classList.remove('hidden');
   ov.innerHTML = `
     <div class="modal">
       <div class="modal-title">Review Before Sending — ${kindLabel}</div>
-      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table. Review everything below — your warehouse team acts on exactly what's here.</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table, mirroring the same form your team uses in the ERP itself. Review everything below.</div>
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="erpOrder" value="${escapeHtml(t.order_number)}"></div>
         <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
       </div>
       <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
-      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue Description</label><textarea class="form-input" id="erpIssue" rows="5" style="resize:vertical">${escapeHtml(defaultIssue)}</textarea></div>
-      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Status</label>
-        <select class="form-input" id="erpStatus">
-          <option value="Open" selected>Open</option>
-        </select>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue Description</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultIssue)}</textarea></div>
+      ${kind==='warranty' ? warrantyFields : shipErrorFields}
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-input" id="erpStatus">
+            <option value="Open" selected>Open</option>
+            ${kind==='shipment_error' ? '<option value="Reshipping">Reshipping</option>' : ''}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
       </div>
+      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="confirmSendToERP('${ticketId}','${kind}')">Create ${kindLabel}</button>
@@ -721,8 +778,19 @@ async function confirmSendToERP(ticketId, kind){
     pn: document.getElementById('erpPn').value.trim(),
     customer_name: document.getElementById('erpCustomer').value.trim() || null,
     issue: document.getElementById('erpIssue').value.trim() || null,
-    status: document.getElementById('erpStatus').value
+    status: document.getElementById('erpStatus').value,
+    resolution_type: document.getElementById('erpResolutionType').value || null,
+    claim_cost: document.getElementById('erpClaimCost').value ? parseFloat(document.getElementById('erpClaimCost').value) : null,
+    tracking_number: document.getElementById('erpTracking').value.trim() || null
   };
+  if(kind==='shipment_error'){
+    payload.error_type = document.getElementById('erpErrorType').value;
+    const expQty = document.getElementById('erpExpectedQty').value;
+    const shpQty = document.getElementById('erpShippedQty').value;
+    if(expQty) payload.expected_qty = parseInt(expQty, 10);
+    if(shpQty) payload.shipped_qty = parseInt(shpQty, 10);
+    payload.return_required = payload.resolution_type === 'return_required';
+  }
   if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
 
   try{
@@ -744,14 +812,205 @@ async function confirmSendToERP(ticketId, kind){
     renderNav();
     renderTicketPanel(updated);
   }catch(e){
-    toast('Failed to send to ERP: ' + e.message, true);
+    toast('Failed to send to ERP: ' + e.message + ' — if this mentions a missing column, tell me the exact error and I\'ll match your actual schema.', true);
   }
 }
 window.confirmSendToERP = confirmSendToERP;
 
+
 /* ============================================================
-   TICKET DETAIL PANEL
+   CUSTOMER / ORDER HISTORY LOOKUP
    ============================================================ */
+let customerSearchResults = null;
+
+function renderCustomerLookup(){
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="filter-bar">
+      <div class="search-wrap" style="max-width:400px">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="custSearchInput" placeholder="Search by customer email or order number..." onkeydown="if(event.key==='Enter')runCustomerSearch()">
+      </div>
+      <button class="btn btn-primary" onclick="runCustomerSearch()">Search</button>
+    </div>
+    <div id="custSearchResults">
+      <div class="empty">Search by email or order number to see everything tied to a customer — tickets, orders, warranty claims, and shipment errors, all in one place.</div>
+    </div>
+  `;
+}
+
+async function runCustomerSearch(){
+  const q = document.getElementById('custSearchInput').value.trim();
+  const box = document.getElementById('custSearchResults');
+  if(!q){ box.innerHTML = `<div class="empty">Enter an email or order number.</div>`; return; }
+  box.innerHTML = `<div class="empty">Searching...</div>`;
+
+  try{
+    const isEmail = q.includes('@');
+    let salesRows = [], ticketRows = [];
+
+    if(isEmail){
+      [salesRows, ticketRows] = await Promise.all([
+        sb.from('sales').select('*').ilike('customer_email', q).then(r=>r.data||[]),
+        sb.from('tickets').select('*').ilike('customer_email', q).order('created_at',{ascending:false}).then(r=>r.data||[])
+      ]);
+    } else {
+      [salesRows, ticketRows] = await Promise.all([
+        sb.from('sales').select('*').eq('order_number', q).then(r=>r.data||[]),
+        sb.from('tickets').select('*').eq('order_number', q).order('created_at',{ascending:false}).then(r=>r.data||[])
+      ]);
+    }
+
+    const orderNumbers = [...new Set([...salesRows.map(s=>s.order_number), ...ticketRows.map(t=>t.order_number)].filter(Boolean))];
+    let warrantyRows = [], shipErrRows = [];
+    if(orderNumbers.length){
+      [warrantyRows, shipErrRows] = await Promise.all([
+        sb.from('warranty_claims').select('*').in('order_number', orderNumbers).then(r=>r.data||[]),
+        sb.from('shipment_errors').select('*').in('order_number', orderNumbers).then(r=>r.data||[])
+      ]);
+    }
+
+    if(!salesRows.length && !ticketRows.length && !warrantyRows.length && !shipErrRows.length){
+      box.innerHTML = `<div class="empty">No records found for "${escapeHtml(q)}".</div>`;
+      return;
+    }
+
+    box.innerHTML = `
+      ${ticketRows.length ? `
+        <div class="panel-title" style="border:none">Support Tickets (${ticketRows.length})</div>
+        ${ticketTable(ticketRows)}
+      ` : ''}
+      ${salesRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Orders (${salesRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Qty</th><th>Fulfillment</th><th>Tracking</th><th>Date</th></tr></thead>
+        <tbody>${salesRows.map(s=>`<tr>
+          <td>#${escapeHtml(s.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(s.pn||'—')}</td>
+          <td>${s.quantity??s.qty??'—'}</td>
+          <td><span class="pill pill-muted">${escapeHtml(s.fulfillment_status||'—')}</span></td>
+          <td class="pn">${escapeHtml(s.tracking_number||'—')}</td>
+          <td class="pn">${s.sale_date||timeAgo(s.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+      ${warrantyRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Warranty Claims (${warrantyRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Issue</th><th>Date</th></tr></thead>
+        <tbody>${warrantyRows.map(w=>`<tr>
+          <td>#${escapeHtml(w.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(w.pn||'—')}</td>
+          <td><span class="pill ${isActiveClaim(w.status)?'pill-orange':'pill-green'}">${escapeHtml(w.status||'—')}</span></td>
+          <td>${escapeHtml((w.issue||'').slice(0,80))}${(w.issue||'').length>80?'…':''}</td>
+          <td class="pn">${timeAgo(w.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+      ${shipErrRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Shipment Errors (${shipErrRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Issue</th><th>Date</th></tr></thead>
+        <tbody>${shipErrRows.map(e=>`<tr>
+          <td>#${escapeHtml(e.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(e.pn||'—')}</td>
+          <td><span class="pill ${isActiveClaim(e.status)?'pill-orange':'pill-green'}">${escapeHtml(e.status||'—')}</span></td>
+          <td>${escapeHtml((e.issue||'').slice(0,80))}${(e.issue||'').length>80?'…':''}</td>
+          <td class="pn">${timeAgo(e.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+    `;
+  }catch(e){
+    box.innerHTML = `<div class="empty">Search failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+window.runCustomerSearch = runCustomerSearch;
+
+/* ============================================================
+   REPORTS
+   ============================================================ */
+function barRow(label, count, max, color){
+  const pct = max > 0 ? Math.round((count/max)*100) : 0;
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:140px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(label)}</div>
+    <div style="flex:1;background:var(--bg4);border-radius:4px;height:16px;overflow:hidden">
+      <div style="width:${pct}%;background:${color||'var(--teal)'};height:100%;border-radius:4px"></div>
+    </div>
+    <div style="width:36px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--text2)">${count}</div>
+  </div>`;
+}
+
+function renderReports(){
+  const el = document.getElementById('content');
+  const t = S.tickets;
+
+  const weeks = [];
+  for(let i=7;i>=0;i--){
+    const start = new Date(); start.setDate(start.getDate() - i*7); start.setHours(0,0,0,0);
+    const end = new Date(start); end.setDate(end.getDate()+7);
+    const count = t.filter(x=>{ const d=new Date(x.created_at); return d>=start && d<end; }).length;
+    weeks.push({ label: start.toLocaleDateString('en-US',{month:'short',day:'numeric'}), count });
+  }
+  const maxWeek = Math.max(1, ...weeks.map(w=>w.count));
+
+  const bySource = {};
+  t.forEach(x=> bySource[x.source] = (bySource[x.source]||0)+1);
+  const maxSource = Math.max(1, ...Object.values(bySource), 1);
+
+  const byTag = {};
+  t.forEach(x=> (x.tags||[]).forEach(tag=> byTag[tag] = (byTag[tag]||0)+1));
+  const maxTag = Math.max(1, ...Object.values(byTag), 1);
+
+  const byAssignee = {};
+  t.forEach(x=> { const key = x.assigned_to || 'Unassigned'; byAssignee[key] = (byAssignee[key]||0)+1; });
+  const maxAssignee = Math.max(1, ...Object.values(byAssignee), 1);
+
+  const resolved = t.filter(x=>x.resolved_at);
+  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
+  const medianDays = (()=>{
+    if(!resolved.length) return '—';
+    const days = resolved.map(x=>(new Date(x.resolved_at)-new Date(x.created_at))/86400000).sort((a,b)=>a-b);
+    const mid = Math.floor(days.length/2);
+    return (days.length%2 ? days[mid] : (days[mid-1]+days[mid])/2).toFixed(1);
+  })();
+
+  const byOrder = {};
+  t.forEach(x=>{ if(x.order_number) byOrder[x.order_number] = (byOrder[x.order_number]||0)+1; });
+  const repeatOrders = Object.entries(byOrder).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  el.innerHTML = `
+    <div class="kpi-grid kpi-grid-4">
+      <div class="kpi"><div class="kpi-label">Total Tickets</div><div class="kpi-value">${t.length}</div></div>
+      <div class="kpi kpi-teal"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Median Resolution (days)</div><div class="kpi-value">${medianDays}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Repeat-Issue Orders</div><div class="kpi-value">${repeatOrders.length}</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Ticket Volume — Last 8 Weeks</div>
+      ${weeks.map(w=>barRow(w.label, w.count, maxWeek)).join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel">
+        <div class="panel-title">By Source</div>
+        ${Object.entries(bySource).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(label(k), v, maxSource, 'var(--orange)')).join('') || '<div class="empty">No data</div>'}
+      </div>
+      <div class="panel">
+        <div class="panel-title">By Assignee</div>
+        ${Object.entries(byAssignee).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxAssignee, 'var(--blue)')).join('') || '<div class="empty">No data</div>'}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">By Tag</div>
+      ${Object.keys(byTag).length ? Object.entries(byTag).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxTag, 'var(--purple)')).join('') : '<div class="empty">No tags applied yet — add tags to tickets to see this breakdown.</div>'}
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Orders With Multiple Tickets (possible repeat/unresolved issues)</div>
+      ${repeatOrders.length ? `<div class="tbl-wrap"><table><thead><tr><th>Order Number</th><th>Ticket Count</th></tr></thead>
+        <tbody>${repeatOrders.map(([ord,c])=>`<tr class="rowlink" onclick="goPage('tickets'); setTimeout(()=>{S.filters.q='${ord}'; renderTicketsList();},50)"><td>#${escapeHtml(ord)}</td><td class="pn">${c}</td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">No repeat-issue orders detected.</div>'}
+    </div>
+  `;
+}
+
 let showingNotes = false;
 
 async function openTicket(id){
@@ -793,6 +1052,7 @@ function renderTicketPanel(t){
       ${t.description ? `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
         ${escapeHtml(t.description).replace(/\n/g,'<br>')}
+        ${renderAttachments(t.attachments)}
       </div>` : ''}
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Status</label>
@@ -820,6 +1080,22 @@ function renderTicketPanel(t){
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Customer Name</label><input class="form-input" value="${escapeHtml(t.customer_name||'')}" onchange="updateTicketField('${t.id}','customer_name',this.value)"></div>
         <div class="form-group"><label class="form-label">Customer Email</label><input class="form-input" value="${escapeHtml(t.customer_email||'')}" onchange="updateTicketField('${t.id}','customer_email',this.value)"></div>
+      </div>
+      ${(t.customer_email || t.order_number) ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="goPage('customers'); setTimeout(()=>{document.getElementById('custSearchInput').value='${escapeHtml(t.customer_email||t.order_number||'').replace(/'/g,"\\'")}'; runCustomerSearch(); closePanel();},50)">View Full Customer History</button>` : ''}
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Category / Tags</label>
+        <select class="form-input" style="margin-bottom:6px" onchange="if(this.value) addTicketTag('${t.id}', this.value); this.value='';">
+          <option value="">+ Add category...</option>
+          ${TICKET_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
+        </select>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+          ${(t.tags||[]).map(tag=>`<span class="pill pill-teal" style="cursor:pointer" title="Click to remove" onclick="removeTicketTag('${t.id}','${tag.replace(/'/g,"\\'")}')">${escapeHtml(tag)} ✕</span>`).join('') || '<span style="font-size:11.5px;color:var(--text3)">No tags yet</span>'}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input class="form-input" id="customTagInput_${t.id}" placeholder="Custom tag..." onkeydown="if(event.key==='Enter'){addTicketTag('${t.id}', this.value); this.value='';}">
+          <button class="btn btn-sm" onclick="const inp=document.getElementById('customTagInput_${t.id}'); addTicketTag('${t.id}', inp.value); inp.value='';">Add</button>
+        </div>
       </div>
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" value="${escapeHtml(t.order_number||'')}" onchange="updateTicketField('${t.id}','order_number',this.value); lookupOrderForTicket('${t.id}', this.value)"></div>
@@ -855,9 +1131,11 @@ function renderTicketPanel(t){
       <div id="threadBox">${renderThread(msgs, false)}</div>
       <div style="margin-top:12px">
         <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
-        <div class="checkbox-row">
-          <input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label>
+        <div class="checkbox-row" style="justify-content:space-between">
+          <span><input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label></span>
+          <label class="btn btn-sm" style="cursor:pointer;margin:0">📎 Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
         </div>
+        <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
         <div class="checkbox-row" id="emailChkRow" style="display:${t.customer_email?'flex':'none'}">
           <input type="checkbox" id="emailChk" ${t.customer_email?'checked':''}>
           <label for="emailChk">Also email this reply to ${t.customer_email ? escapeHtml(t.customer_email) : 'the customer (no email on file)'}</label>
@@ -867,6 +1145,7 @@ function renderTicketPanel(t){
     <div class="tk-foot">
       <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="sendMessage('${t.id}')">Send</button>
       ${t.status!=='closed' ? `<button class="btn btn-teal" onclick="updateTicketField('${t.id}','status','resolved')">Mark Resolved</button>` : ''}
+      <button class="btn" onclick="openMergeModal('${t.id}')">Merge Into...</button>
     </div>
   `;
 }
@@ -879,6 +1158,18 @@ function switchThreadTab(conv){
 }
 window.switchThreadTab = switchThreadTab;
 
+function renderAttachments(attachments){
+  if(!attachments || !attachments.length) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+    ${attachments.map(a=>{
+      const isImg = /\.(png|jpe?g|gif|webp)$/i.test(a.url||a.name||'');
+      return isImg
+        ? `<a href="${a.url}" target="_blank"><img src="${a.url}" alt="${escapeHtml(a.name||'attachment')}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
+        : `<a href="${a.url}" target="_blank" class="src-tag">📎 ${escapeHtml(a.name||'file')}</a>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
@@ -886,6 +1177,7 @@ function renderThread(msgs, notesOnly){
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)">✉ Emailed</span>':''}</div>
       <div>${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
+      ${renderAttachments(m.attachments)}
     </div>
   `).join('');
 }
@@ -908,6 +1200,26 @@ async function updateTicketField(id, field, value){
 }
 window.updateTicketField = updateTicketField;
 
+async function addTicketTag(ticketId, tag){
+  tag = (tag||'').trim();
+  if(!tag) return;
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t) return;
+  const tags = Array.from(new Set([...(t.tags||[]), tag]));
+  await updateTicketField(ticketId, 'tags', tags);
+  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+}
+window.addTicketTag = addTicketTag;
+
+async function removeTicketTag(ticketId, tag){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t) return;
+  const tags = (t.tags||[]).filter(x=>x!==tag);
+  await updateTicketField(ticketId, 'tags', tags);
+  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+}
+window.removeTicketTag = removeTicketTag;
+
 async function deleteTicket(id){
   const t = S.tickets.find(x=>x.id===id);
   if(!t) return;
@@ -926,6 +1238,142 @@ async function deleteTicket(id){
 }
 window.deleteTicket = deleteTicket;
 
+function openMergeModal(sourceId){
+  const source = S.tickets.find(x=>x.id===sourceId);
+  if(!source) return;
+  const candidates = S.tickets.filter(x=>x.id!==sourceId && !x.merged_into_id);
+
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Merge Ticket #${source.ticket_number} Into...</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">All messages from this ticket move to the target ticket. This ticket gets closed and marked as merged — it stays in the system for reference but won't show in active queues.</div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Search Target Ticket</label>
+        <input class="form-input" id="mergeSearchInput" placeholder="Search by ticket number or subject..." oninput="renderMergeCandidates('${sourceId}', this.value)">
+      </div>
+      <div id="mergeCandidateList" style="max-height:280px;overflow-y:auto">
+        ${renderMergeCandidateRows(candidates.slice(0,20), sourceId)}
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+window.openMergeModal = openMergeModal;
+
+function renderMergeCandidateRows(candidates, sourceId){
+  if(!candidates.length) return `<div class="empty">No matching tickets.</div>`;
+  return candidates.map(c=>`
+    <div class="rowlink" style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center" onclick="confirmMerge('${sourceId}','${c.id}')">
+      <div>
+        <div style="font-size:12.5px;font-weight:500">#${c.ticket_number} — ${escapeHtml(c.subject)}</div>
+        <div style="font-size:11px;color:var(--text3)">${escapeHtml(c.customer_name||c.customer_email||'—')} · ${label(c.status)}</div>
+      </div>
+      <button class="btn btn-sm btn-teal">Merge Here</button>
+    </div>
+  `).join('');
+}
+
+function renderMergeCandidates(sourceId, query){
+  const q = query.trim().toLowerCase();
+  let candidates = S.tickets.filter(x=>x.id!==sourceId && !x.merged_into_id);
+  if(q){
+    candidates = candidates.filter(c=>
+      String(c.ticket_number).includes(q) ||
+      (c.subject||'').toLowerCase().includes(q) ||
+      (c.customer_name||'').toLowerCase().includes(q) ||
+      (c.customer_email||'').toLowerCase().includes(q)
+    );
+  }
+  document.getElementById('mergeCandidateList').innerHTML = renderMergeCandidateRows(candidates.slice(0,20), sourceId);
+}
+window.renderMergeCandidates = renderMergeCandidates;
+
+async function confirmMerge(sourceId, targetId){
+  const source = S.tickets.find(x=>x.id===sourceId);
+  const target = S.tickets.find(x=>x.id===targetId);
+  if(!source || !target) return;
+  if(!confirm(`Merge ticket #${source.ticket_number} into #${target.ticket_number}? This moves all its messages and closes #${source.ticket_number}.`)) return;
+
+  try{
+    // Move all messages from source to target
+    const { error: moveErr } = await sb.from('ticket_messages').update({ ticket_id: targetId }).eq('ticket_id', sourceId);
+    if(moveErr) throw moveErr;
+
+    // Drop a system note in the target thread noting the merge
+    await sb.from('ticket_messages').insert({
+      ticket_id: targetId,
+      sender_type: 'system',
+      sender_name: 'System',
+      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}.`,
+      is_internal_note: true
+    });
+
+    // Close and flag the source ticket
+    const { data: updatedSource, error: srcErr } = await sb.from('tickets')
+      .update({ status:'closed', merged_into_id: targetId, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', sourceId).select().single();
+    if(srcErr) throw srcErr;
+
+    const { data: updatedTarget, error: tgtErr } = await sb.from('tickets')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', targetId).select().single();
+    if(tgtErr) throw tgtErr;
+
+    const si = S.tickets.findIndex(x=>x.id===sourceId);
+    if(si!==-1) S.tickets[si] = updatedSource;
+    const ti = S.tickets.findIndex(x=>x.id===targetId);
+    if(ti!==-1) S.tickets[ti] = updatedTarget;
+    delete S.messages[sourceId];
+    await loadMessages(targetId);
+
+    closeModal();
+    closePanel();
+    toast(`Merged into ticket #${updatedTarget.ticket_number}`);
+    renderNav();
+    renderPage();
+  }catch(e){
+    toast('Merge failed: ' + e.message, true);
+  }
+}
+window.confirmMerge = confirmMerge;
+
+let pendingMsgAttachments = [];
+
+async function handleMsgFileSelect(input){
+  const files = Array.from(input.files||[]);
+  if(!files.length) return;
+  const preview = document.getElementById('msgAttachPreview');
+  for(const file of files){
+    const chipId = 'up_' + Math.random().toString(36).slice(2);
+    preview.insertAdjacentHTML('beforeend', `<span class="src-tag" id="${chipId}">Uploading ${escapeHtml(file.name)}...</span>`);
+    try{
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const { error: upErr } = await sb.storage.from('ticket-attachments').upload(path, file);
+      if(upErr) throw upErr;
+      const { data: pub } = sb.storage.from('ticket-attachments').getPublicUrl(path);
+      pendingMsgAttachments.push({ name: file.name, url: pub.publicUrl });
+      const chip = document.getElementById(chipId);
+      if(chip) chip.outerHTML = `<span class="src-tag">📎 ${escapeHtml(file.name)} <span style="cursor:pointer;color:var(--red)" onclick="removePendingAttachment('${pub.publicUrl}', this.parentElement)">✕</span></span>`;
+    }catch(e){
+      const chip = document.getElementById(chipId);
+      if(chip) chip.outerHTML = `<span class="src-tag" style="color:var(--red)">Failed: ${escapeHtml(file.name)}</span>`;
+      toast('Upload failed: ' + e.message, true);
+    }
+  }
+  input.value = '';
+}
+window.handleMsgFileSelect = handleMsgFileSelect;
+
+function removePendingAttachment(url, chipEl){
+  pendingMsgAttachments = pendingMsgAttachments.filter(a=>a.url!==url);
+  if(chipEl) chipEl.remove();
+}
+window.removePendingAttachment = removePendingAttachment;
+
 async function sendMessage(ticketId){
   const box = document.getElementById('msgBox');
   const isNote = document.getElementById('isNoteChk').checked;
@@ -941,13 +1389,17 @@ async function sendMessage(ticketId){
       sender_type: 'staff',
       sender_name: S.user.email,
       body,
-      is_internal_note: isNote
+      is_internal_note: isNote,
+      attachments: pendingMsgAttachments
     }).select().single();
     if(error) throw error;
     if(!S.messages[ticketId]) S.messages[ticketId] = [];
     S.messages[ticketId].push(data);
     box.value = '';
     document.getElementById('isNoteChk').checked = false;
+    pendingMsgAttachments = [];
+    const preview = document.getElementById('msgAttachPreview');
+    if(preview) preview.innerHTML = '';
     document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
     await sb.from('tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticketId);
 

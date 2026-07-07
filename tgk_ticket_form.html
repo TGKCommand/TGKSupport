@@ -79,6 +79,22 @@ textarea.form-input{resize:vertical;min-height:110px}
         <label class="form-label">Message <span class="req">*</span></label>
         <textarea class="form-input" id="f-message" placeholder="Describe what's happening in as much detail as you can..." required></textarea>
       </div>
+      <div class="form-group">
+        <label class="form-label">Photos (optional)</label>
+        <input class="form-input" id="f-files" type="file" multiple accept="image/*,.pdf">
+      </div>
+
+      <!-- Honeypot: hidden from real visitors via CSS, bots that auto-fill every field will trip this -->
+      <div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true">
+        <label>Leave this field blank</label>
+        <input type="text" id="f-website" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Quick check: what is <span id="mathLabel">?</span>? <span class="req">*</span></label>
+        <input class="form-input" id="f-mathAnswer" type="number" inputmode="numeric" required>
+      </div>
+
       <div class="err" id="formErr"></div>
       <button type="submit" class="btn-submit" id="submitBtn">Submit Request</button>
     </form>
@@ -91,11 +107,35 @@ const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const pageLoadTime = Date.now();
+const mathA = Math.floor(Math.random()*8)+2;
+const mathB = Math.floor(Math.random()*8)+2;
+document.getElementById('mathLabel').textContent = `${mathA} + ${mathB}`;
+
 document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
   e.preventDefault();
   const errEl = document.getElementById('formErr');
   const btn = document.getElementById('submitBtn');
   errEl.textContent = '';
+
+  // Honeypot — real visitors never see or fill this field
+  if(document.getElementById('f-website').value.trim()){
+    errEl.textContent = 'Something went wrong. Please try again.';
+    return;
+  }
+
+  // Timing check — bots submit near-instantly; humans take at least a couple seconds
+  if(Date.now() - pageLoadTime < 2500){
+    errEl.textContent = 'Please take a moment to review the form before submitting.';
+    return;
+  }
+
+  // Simple math challenge
+  const mathAnswer = parseInt(document.getElementById('f-mathAnswer').value, 10);
+  if(mathAnswer !== mathA + mathB){
+    errEl.textContent = "That answer does not look right — please check the math question.";
+    return;
+  }
 
   const name = document.getElementById('f-name').value.trim();
   const email = document.getElementById('f-email').value.trim();
@@ -103,6 +143,7 @@ document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
   const pn = document.getElementById('f-pn').value.trim();
   const subject = document.getElementById('f-subject').value.trim();
   const message = document.getElementById('f-message').value.trim();
+  const files = Array.from(document.getElementById('f-files').files||[]);
 
   if(!name || !email || !subject || !message){
     errEl.textContent = 'Please fill in all required fields.';
@@ -113,6 +154,15 @@ document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
   btn.textContent = 'Submitting...';
 
   try{
+    const attachments = [];
+    for(const file of files){
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const { error: upErr } = await sb.storage.from('ticket-attachments').upload(path, file);
+      if(upErr){ console.warn('Attachment upload failed:', upErr.message); continue; }
+      const { data: pub } = sb.storage.from('ticket-attachments').getPublicUrl(path);
+      attachments.push({ name: file.name, url: pub.publicUrl });
+    }
+
     const { error } = await sb.from('tickets').insert({
       source: 'website',
       status: 'open',
@@ -122,7 +172,8 @@ document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
       customer_name: name,
       customer_email: email,
       order_number: order || null,
-      pn: pn || null
+      pn: pn || null,
+      attachments
     });
     if(error) throw error;
 
