@@ -3,197 +3,1627 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Contact TGK Motorsport Support</title>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>TGK Support Center</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#ffffff;--bg2:#f7f8fa;--bg3:#f0f2f5;--bg4:#e9ebee;
+  --bg:#ffffff;--bg2:#f7f8fa;--bg3:#f0f2f5;--bg4:#e9ebee;--bg5:#dde0e5;
   --border:#e2e6eb;--border2:#c8cdd5;
   --text:#111827;--text2:#374151;--text3:#6b7280;
-  --teal:#0d9488;--teal-d:#0f766e;
-  --orange:#ea580c;
+  --teal:#0d9488;--teal-d:#0f766e;--teal-dim:rgba(13,148,136,.09);
+  --orange:#ea580c;--orange-d:#c2410c;--orange-dim:rgba(234,88,12,.09);
   --red:#dc2626;--red-dim:rgba(220,38,38,.09);
-  --r:6px;--r-lg:10px;--font:'DM Sans',sans-serif;
+  --green:#16a34a;--green-dim:rgba(22,163,74,.09);
+  --yellow:#d97706;--yellow-dim:rgba(217,119,6,.09);
+  --blue:#2563eb;--blue-dim:rgba(37,99,235,.09);
+  --purple:#7c3aed;--purple-dim:rgba(124,58,237,.09);
+  --r:6px;--r-lg:10px;--font:'DM Sans',sans-serif;--mono:'JetBrains Mono',monospace;
 }
-html,body{min-height:100%;font-family:var(--font);background:var(--bg3);color:var(--text);-webkit-font-smoothing:antialiased}
-body{display:flex;align-items:flex-start;justify-content:center;padding:40px 16px}
-.wrap{width:100%;max-width:520px}
-.card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-lg);padding:32px;box-shadow:0 1px 4px rgba(0,0,0,.06);position:relative;overflow:hidden}
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,var(--teal),var(--orange) 60%,transparent)}
-.brand{font-size:11px;font-weight:800;color:var(--teal);letter-spacing:.18em;text-transform:uppercase;margin-bottom:6px}
-h1{font-size:20px;font-weight:700;margin-bottom:6px}
-.sub{font-size:13px;color:var(--text3);margin-bottom:24px}
-.form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px}
-.form-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3)}
-.form-input{width:100%;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:10px 12px;font-size:14px;outline:none;transition:border-color .15s;font-family:inherit}
+html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;overflow:hidden;-webkit-font-smoothing:antialiased}
+body{font-size:13px}
+input,button,select,textarea{font-family:var(--font)}
+.shell{display:flex;height:100vh;overflow:hidden}
+
+/* Sidebar */
+.sidebar-wrap{width:220px;min-width:220px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0;height:100vh;overflow:hidden}
+.sidebar{flex:1;overflow-y:auto;display:flex;flex-direction:column}
+.sidebar-logo{padding:14px 16px 12px;border-bottom:1px solid var(--border);position:relative}
+.sidebar-logo::after{content:'';position:absolute;bottom:-1px;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--teal),var(--orange) 60%,transparent)}
+.sidebar-brand{font-size:11px;font-weight:800;color:var(--teal);letter-spacing:.18em;text-transform:uppercase}
+.sidebar-brand small{display:block;font-size:15px;font-weight:700;color:var(--text);letter-spacing:0;text-transform:none;margin-top:2px}
+.sidebar-section{padding:14px 14px 4px;font-size:9.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text3);opacity:.85}
+.nav-item{display:flex;align-items:center;gap:9px;padding:8px 14px;margin:1px 8px;border-radius:8px;cursor:pointer;transition:all .12s;border:1px solid transparent;background:transparent;width:calc(100% - 16px);text-align:left;color:var(--text2);font-size:12.5px;font-weight:500;outline:none}
+.nav-item:hover{background:var(--bg3);color:var(--text)}
+.nav-item.active{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.2)}
+.nav-dot{width:5px;height:5px;border-radius:50%;background:var(--text3);flex-shrink:0;transition:all .15s}
+.nav-item.active .nav-dot{background:var(--teal)}
+.nav-badge{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--text3);background:var(--bg4);border:1px solid var(--border);padding:1px 6px;border-radius:10px;min-width:22px;text-align:center;margin-left:auto}
+.nav-item.active .nav-badge{color:var(--teal);background:var(--teal-dim);border-color:rgba(13,148,136,.22)}
+.nav-item.alert-nav .nav-badge{color:var(--red);background:var(--red-dim);border-color:rgba(224,85,85,.25)}
+.sidebar-footer{margin-top:auto;padding:10px 14px 14px;border-top:1px solid var(--border);flex-shrink:0}
+.sync-pill{display:flex;align-items:center;gap:7px;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:5px 10px}
+.sync-dot{width:7px;height:7px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.sync-dot.ok{background:var(--green)}
+.sync-label{font-size:11px;color:var(--text2);flex:1;font-weight:500}
+.sync-sub{font-size:10px;color:var(--text3)}
+
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.topbar{height:52px;background:var(--bg3);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:10px;flex-shrink:0;z-index:10;position:relative}
+.topbar::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,var(--teal) 0%,var(--teal) 30%,var(--orange) 70%,transparent 100%);opacity:.7}
+.topbar-title{font-size:15px;font-weight:700;color:var(--text);letter-spacing:.01em}
+.topbar-actions{margin-left:auto;display:flex;align-items:center;gap:7px}
+.content{flex:1;overflow-y:auto;overflow-x:auto;padding:20px 24px;position:relative}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;font-size:12px;font-weight:600;border-radius:var(--r);border:1px solid var(--border2);background:var(--bg4);color:var(--text2);cursor:pointer;transition:all .12s;letter-spacing:.01em}
+.btn:hover{background:var(--bg5);color:var(--text);transform:translateY(-1px)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none}
+.btn-primary{background:var(--orange);border-color:var(--orange);color:#fff}
+.btn-primary:hover{background:var(--orange-d);border-color:var(--orange-d)}
+.btn-teal{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.22)}
+.btn-teal:hover{background:rgba(13,148,136,.13);border-color:rgba(13,148,136,.35)}
+.btn-sm{padding:4px 10px;font-size:11px}
+
+/* Panels / KPIs */
+.panel{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-lg);padding:18px;margin-bottom:16px;box-shadow:0 1px 4px rgba(0,0,0,.07)}
+.panel-title{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--text2);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.kpi-grid{display:grid;gap:10px;margin-bottom:18px}
+.kpi-grid-4{grid-template-columns:repeat(4,1fr)}
+.kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px}
+.kpi-label{font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text3)}
+.kpi-value{font-size:24px;font-weight:600;line-height:1.1;font-family:var(--mono);margin-top:4px}
+.kpi-sub{font-size:10.5px;color:var(--text3);margin-top:3px}
+.kpi-orange .kpi-value{color:var(--orange)}
+.kpi-red .kpi-value{color:var(--red)}
+.kpi-teal .kpi-value{color:var(--teal)}
+
+/* Table */
+.tbl-wrap{overflow:visible;border-radius:10px;border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+thead th{background:var(--bg3);padding:10px 12px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);border-bottom:1px solid var(--border);white-space:nowrap}
+tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+tbody tr:last-child{border-bottom:none}
+tbody tr:hover td{background:var(--bg3)}
+tbody td{padding:10px 12px;color:var(--text2);vertical-align:middle;font-size:12.5px}
+td.main-col{color:var(--text);font-weight:500}
+.rowlink{cursor:pointer}
+.rowlink:hover td{background:var(--teal-dim)!important}
+.pn{font-family:var(--mono);font-size:12px;color:var(--text3)}
+
+/* Pills */
+.pill{display:inline-flex;align-items:center;padding:2.5px 9px;font-size:10.5px;font-weight:600;border-radius:10px;border:1px solid transparent}
+.pill-teal{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.2)}
+.pill-orange{background:var(--orange-dim);color:var(--orange);border-color:rgba(224,123,40,.2)}
+.pill-red{background:var(--red-dim);color:var(--red);border-color:rgba(224,85,85,.2)}
+.pill-green{background:var(--green-dim);color:var(--green);border-color:rgba(76,175,125,.2)}
+.pill-yellow{background:var(--yellow-dim);color:var(--yellow);border-color:rgba(212,168,67,.2)}
+.pill-muted{background:var(--bg4);color:var(--text3);border-color:var(--border)}
+.src-tag{font-size:10.5px;color:var(--text3);border:1px solid var(--border);padding:2px 8px;border-radius:6px}
+
+/* Filters */
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.search-wrap{position:relative;flex:1;min-width:200px;max-width:300px}
+.search-wrap input{width:100%;padding:7px 10px 7px 30px;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-size:12.5px;outline:none;transition:border-color .15s}
+.search-wrap input:focus{border-color:var(--teal)}
+.search-icon{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text3);font-size:13px;pointer-events:none}
+.form-input{width:100%;background:var(--bg4);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);padding:9px 11px;font-size:12.5px;outline:none;transition:border-color .15s}
 .form-input:focus{border-color:var(--teal)}
-textarea.form-input{resize:vertical;min-height:110px}
-.req{color:var(--red)}
-.btn-submit{width:100%;padding:12px;font-size:14px;font-weight:700;border:none;border-radius:var(--r);background:var(--orange);color:#fff;cursor:pointer;transition:opacity .15s;margin-top:6px}
-.btn-submit:hover{opacity:.9}
-.btn-submit:disabled{opacity:.5;cursor:not-allowed}
-.err{color:var(--red);font-size:12.5px;margin-top:4px;min-height:16px}
-.success{text-align:center;padding:20px 0}
-.success .check{width:52px;height:52px;border-radius:50%;background:rgba(22,163,74,.12);color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 16px}
-.success h2{font-size:18px;margin-bottom:8px}
-.success p{font-size:13.5px;color:var(--text3);line-height:1.6}
-.footer-note{text-align:center;margin-top:14px;font-size:11px;color:var(--text3)}
+select.form-input{cursor:pointer}
+
+/* Modal / overlay */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.overlay.hidden{display:none}
+.modal{background:var(--bg2);border:1px solid var(--border2);border-radius:var(--r-lg);width:480px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 16px 48px rgba(0,0,0,.14)}
+.modal-title{font-size:14px;font-weight:700;margin-bottom:18px}
+.form-row{display:grid;gap:10px;margin-bottom:12px}
+.form-row.cols-2{grid-template-columns:1fr 1fr}
+.form-group{display:flex;flex-direction:column;gap:4px}
+.form-label{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--text3)}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--border)}
+
+/* Slide-over ticket panel (styled after the ERP's cart panel) */
+#tk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:600;display:none}
+#tk-overlay.open{display:block}
+#tk-panel{position:fixed;top:0;right:0;bottom:0;width:520px;max-width:96vw;background:var(--bg);border-left:1px solid var(--border2);z-index:601;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:-4px 0 24px rgba(0,0,0,.12)}
+#tk-panel.open{transform:translateX(0)}
+.tk-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);gap:10px;flex-shrink:0;background:var(--bg2)}
+.tk-head-title{font-size:14px;font-weight:700;color:var(--text);flex:1}
+.tk-close{background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer;padding:2px 6px;border-radius:4px}
+.tk-close:hover{background:var(--bg4);color:var(--text)}
+.tk-body{flex:1;overflow-y:auto;padding:16px 18px}
+.tk-foot{padding:14px 18px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg);display:flex;gap:8px}
+
+.linked-box{background:var(--bg3);border:1px solid var(--border);border-radius:var(--r-lg);padding:12px 14px;margin:10px 0;font-size:12.5px;color:var(--text2)}
+.linked-box .lk-title{font-weight:700;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}
+
+.tabs-row{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:14px}
+.tab{padding:8px 14px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text3);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .12s}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--teal);border-bottom-color:var(--teal)}
+
+.msg{border-radius:var(--r-lg);padding:10px 13px;margin-bottom:8px;font-size:12.5px;line-height:1.5}
+.msg.customer{background:var(--blue-dim)}
+.msg.staff{background:var(--teal-dim)}
+.msg.system{background:var(--bg3);color:var(--text3);font-style:italic}
+.msg.note{background:var(--orange-dim);border:1px dashed var(--orange)}
+.msg .meta{font-size:10.5px;color:var(--text3);margin-bottom:3px;display:flex;gap:6px;align-items:center;font-weight:600}
+.checkbox-row{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--text3);margin-top:6px}
+
+#toast{position:fixed;bottom:20px;right:20px;background:var(--bg4);border:1px solid var(--border2);color:var(--text);padding:9px 16px;border-radius:var(--r);font-size:12.5px;z-index:999;opacity:0;transition:opacity .2s;pointer-events:none;font-weight:500;box-shadow:0 6px 20px rgba(0,0,0,.1)}
+#toast.show{opacity:1}
+#toast.err{border-color:rgba(220,38,38,.4);color:var(--red)}
+
+.empty{text-align:center;padding:40px;color:var(--text3);font-size:12.5px}
+
+/* Login gate */
+#auth-gate{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center}
+#auth-gate.hidden{display:none}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:5px;border:2px solid var(--bg2)}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="card" id="card">
-    <div class="brand">TGK MOTORSPORT</div>
-    <h1>Contact Support</h1>
-    <p class="sub">Tell us what's going on and our team will follow up by email as soon as possible.</p>
 
-    <form id="ticketForm">
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Name <span class="req">*</span></label>
-          <input class="form-input" id="f-name" required>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Email <span class="req">*</span></label>
-          <input class="form-input" id="f-email" type="email" required>
-        </div>
+<div id="auth-gate">
+  <div style="width:100%;max-width:380px;padding:16px">
+    <div class="panel" style="padding:36px 32px">
+      <div style="text-align:center;margin-bottom:28px">
+        <div style="font-size:11px;font-weight:800;color:var(--teal);letter-spacing:.18em;text-transform:uppercase;margin-bottom:6px">TGK MOTORSPORT</div>
+        <div style="font-size:22px;font-weight:700;color:var(--text)">Support Center</div>
+        <div style="font-size:12px;color:var(--text3);margin-top:4px">Sign in to continue</div>
       </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label">Order Number</label>
-          <input class="form-input" id="f-order" placeholder="e.g. 10482">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Part Number</label>
-          <input class="form-input" id="f-pn" placeholder="If known">
-        </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Email</label>
+        <input type="email" id="login-email" class="form-input" placeholder="you@tgkmotorsport.com" autocomplete="email">
       </div>
-      <div class="form-group">
-        <label class="form-label">Subject <span class="req">*</span></label>
-        <input class="form-input" id="f-subject" placeholder="Brief summary of the issue" required>
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Password</label>
+        <input type="password" id="login-password" class="form-input" placeholder="Password" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
       </div>
-      <div class="form-group">
-        <label class="form-label">Message <span class="req">*</span></label>
-        <textarea class="form-input" id="f-message" placeholder="Describe what's happening in as much detail as you can..." required></textarea>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Photos (optional)</label>
-        <input class="form-input" id="f-files" type="file" multiple accept="image/*,.pdf">
-      </div>
-
-      <!-- Honeypot: hidden from real visitors via CSS, bots that auto-fill every field will trip this -->
-      <div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true">
-        <label>Leave this field blank</label>
-        <input type="text" id="f-website" name="website" tabindex="-1" autocomplete="off">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Quick check: what is <span id="mathLabel">?</span>? <span class="req">*</span></label>
-        <input class="form-input" id="f-mathAnswer" type="number" inputmode="numeric" required>
-      </div>
-
-      <div class="err" id="formErr"></div>
-      <button type="submit" class="btn-submit" id="submitBtn">Submit Request</button>
-    </form>
+      <div id="login-error" style="color:var(--red);font-size:12px;min-height:18px;margin-bottom:6px"></div>
+      <button id="login-btn" class="btn btn-primary" style="width:100%;padding:10px;font-size:13px;justify-content:center" onclick="doLogin()">Sign In</button>
+    </div>
+    <div style="text-align:center;margin-top:10px;font-size:10px;color:var(--text3)">TGK Support · Access restricted</div>
   </div>
-  <div class="footer-note">TGK Motorsport · We typically respond within 1–2 business days</div>
 </div>
 
+<div id="tgk-app" style="display:none;height:100%;width:100%;overflow:hidden">
+<div class="shell">
+
+  <div class="sidebar-wrap">
+    <div class="sidebar">
+      <div class="sidebar-logo">
+        <div class="sidebar-brand">TGK MOTORSPORT<small>Support</small></div>
+      </div>
+      <div class="sidebar-section">Overview</div>
+      <div id="navList"></div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="sync-pill">
+        <span class="sync-dot ok"></span>
+        <span class="sync-label" id="userLabel">—</span>
+      </div>
+      <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-title" id="pageTitle">Dashboard</div>
+      <div class="topbar-actions">
+        <button class="btn btn-primary" onclick="openNewTicket()">+ New Ticket</button>
+      </div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+
+</div>
+</div>
+
+<div id="modalOverlay" class="overlay hidden"></div>
+
+<div id="tk-overlay" onclick="closePanel()"></div>
+<div id="tk-panel"></div>
+
+<div id="toast"></div>
+
 <script>
+/* ============================================================
+   CONFIG — same Supabase project as the ERP
+   ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const pageLoadTime = Date.now();
-const mathA = Math.floor(Math.random()*8)+2;
-const mathB = Math.floor(Math.random()*8)+2;
-document.getElementById('mathLabel').textContent = `${mathA} + ${mathB}`;
+const IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours, matches the ERP
 
-document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
-  e.preventDefault();
-  const errEl = document.getElementById('formErr');
-  const btn = document.getElementById('submitBtn');
+/* ============================================================
+   STATE
+   ============================================================ */
+const S = {
+  user: null,
+  role: 'customer_service',
+  page: 'dashboard',
+  tickets: [],
+  messages: {},
+  warranty: [],
+  shipErrors: [],
+  dealers: [],
+  team: [],
+  activeTicket: null,
+  filters: { status: '', priority: '', source: '', tag: '', q: '' },
+  lastActivity: Date.now()
+};
+window.S = S;
+
+/* ============================================================
+   TOAST
+   ============================================================ */
+let toastTimer = null;
+function toast(msg, isErr){
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.toggle('err', !!isErr);
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(()=> el.classList.remove('show'), 3200);
+}
+window.toast = toast;
+
+function isUserActivelyWorking(){
+  const ae = document.activeElement;
+  if(!ae) return false;
+  const tag = ae.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+document.addEventListener('mousemove', ()=> S.lastActivity = Date.now());
+document.addEventListener('keydown', ()=> S.lastActivity = Date.now());
+setInterval(()=>{
+  if(Date.now() - S.lastActivity > IDLE_TIMEOUT_MS){
+    sb.auth.signOut();
+    location.reload();
+  }
+}, 60000);
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+async function doLogin(){
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-password').value;
+  const errEl = document.getElementById('login-error');
   errEl.textContent = '';
-
-  // Honeypot — real visitors never see or fill this field
-  if(document.getElementById('f-website').value.trim()){
-    errEl.textContent = 'Something went wrong. Please try again.';
-    return;
-  }
-
-  // Timing check — bots submit near-instantly; humans take at least a couple seconds
-  if(Date.now() - pageLoadTime < 2500){
-    errEl.textContent = 'Please take a moment to review the form before submitting.';
-    return;
-  }
-
-  // Simple math challenge
-  const mathAnswer = parseInt(document.getElementById('f-mathAnswer').value, 10);
-  if(mathAnswer !== mathA + mathB){
-    errEl.textContent = "That answer does not look right — please check the math question.";
-    return;
-  }
-
-  const name = document.getElementById('f-name').value.trim();
-  const email = document.getElementById('f-email').value.trim();
-  const order = document.getElementById('f-order').value.trim();
-  const pn = document.getElementById('f-pn').value.trim();
-  const subject = document.getElementById('f-subject').value.trim();
-  const message = document.getElementById('f-message').value.trim();
-  const files = Array.from(document.getElementById('f-files').files||[]);
-
-  if(!name || !email || !subject || !message){
-    errEl.textContent = 'Please fill in all required fields.';
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-
+  if(!email || !pass){ errEl.textContent = 'Enter email and password.'; return; }
   try{
-    const attachments = [];
-    for(const file of files){
-      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
-      const { error: upErr } = await sb.storage.from('ticket-attachments').upload(path, file);
-      if(upErr){ console.warn('Attachment upload failed:', upErr.message); continue; }
-      const { data: pub } = sb.storage.from('ticket-attachments').getPublicUrl(path);
-      attachments.push({ name: file.name, url: pub.publicUrl });
-    }
-
-    const { error } = await sb.from('tickets').insert({
-      source: 'website',
-      status: 'open',
-      priority: 'medium',
-      subject,
-      description: message,
-      customer_name: name,
-      customer_email: email,
-      order_number: order || null,
-      pn: pn || null,
-      attachments
-    });
+    const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
     if(error) throw error;
-
-    document.getElementById('card').innerHTML = `
-      <div class="success">
-        <div class="check">✓</div>
-        <h2>Request Submitted</h2>
-        <p>Thanks, ${escapeHtml(name)} — we've received your request and a member of our team<br>will follow up at <strong>${escapeHtml(email)}</strong> soon.</p>
-      </div>
-    `;
-  }catch(err){
-    errEl.textContent = 'Something went wrong: ' + err.message;
-    btn.disabled = false;
-    btn.textContent = 'Submit Request';
+    await afterLogin(data.user);
+  }catch(e){
+    errEl.textContent = e.message || 'Login failed.';
   }
-});
+}
+window.doLogin = doLogin;
+
+async function doLogout(){
+  await sb.auth.signOut();
+  location.reload();
+}
+window.doLogout = doLogout;
+
+async function afterLogin(user){
+  S.user = user;
+  let lookupError = null;
+  let row = null;
+  try{
+    const { data, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    if(error) throw error;
+    row = data;
+  }catch(e){
+    lookupError = e;
+  }
+  S.role = (row && row.role) ? row.role : null;
+
+  if(!['admin','customer_service'].includes(S.role)){
+    let msg = 'Your account does not have Support Center access.';
+    if(lookupError){
+      msg += ` (profiles lookup failed: ${lookupError.message})`;
+      console.error('profiles lookup error:', lookupError);
+    } else if(!row){
+      msg += ` No profiles row found for user id ${user.id}.`;
+    } else {
+      msg += ` Role on file: "${row.role}".`;
+    }
+    document.getElementById('login-error').textContent = msg;
+    console.log('Support Center access check — user:', user.email, 'row:', row, 'error:', lookupError);
+    await sb.auth.signOut();
+    return;
+  }
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('tgk-app').style.display = 'block';
+  document.getElementById('userLabel').textContent = user.email;
+  await loadAll();
+  renderNav();
+  goPage('dashboard');
+  subscribeRealtime();
+}
+
+(async function checkSession(){
+  const { data } = await sb.auth.getSession();
+  if(data && data.session){ await afterLogin(data.session.user); }
+})();
+
+/* ============================================================
+   DATA LOADING
+   ============================================================ */
+async function fetchAll(queryFn, pageSize=1000){
+  let all = [], from = 0;
+  while(true){
+    const { data, error } = await queryFn(from, from + pageSize - 1);
+    if(error) throw error;
+    all = all.concat(data || []);
+    if(!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+async function loadAll(){
+  try{
+    const [tickets, warranty, shipErrors, dealers, team] = await Promise.all([
+      fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
+      fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
+      fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
+      sb.from('dealers').select('id,name,email').then(r=>r.data||[]),
+      sb.from('team_members').select('email,display_name').then(r=>r.data||[])
+    ]);
+    S.tickets = tickets;
+    S.warranty = warranty;
+    S.shipErrors = shipErrors;
+    S.dealers = dealers;
+    S.team = team;
+  }catch(e){
+    toast('Failed to load data: ' + e.message, true);
+  }
+}
+
+async function loadMessages(ticketId){
+  const { data, error } = await sb.from('ticket_messages').select('*').eq('ticket_id', ticketId).order('created_at',{ascending:true});
+  if(error){ toast('Failed to load messages', true); return []; }
+  S.messages[ticketId] = data;
+  return data;
+}
+
+/* ============================================================
+   REALTIME
+   ============================================================ */
+function subscribeRealtime(){
+  sb.channel('support-tickets')
+    .on('postgres_changes', { event:'*', schema:'public', table:'tickets' }, payload=>{
+      if(isUserActivelyWorking() && S.page==='ticket_detail') return;
+      handleTicketRealtime(payload);
+    })
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'ticket_messages' }, payload=>{
+      const m = payload.new;
+      if(!S.messages[m.ticket_id]) S.messages[m.ticket_id] = [];
+      const alreadyHave = S.messages[m.ticket_id].some(x=>x.id===m.id);
+      if(!alreadyHave){
+        S.messages[m.ticket_id].push(m);
+        if(S.activeTicket && S.activeTicket.id === m.ticket_id){
+          document.getElementById('threadBox').innerHTML = renderThread(S.messages[m.ticket_id], showingNotes);
+        }
+      }
+    })
+    .subscribe();
+}
+
+function handleTicketRealtime(payload){
+  const idx = S.tickets.findIndex(t=>t.id === (payload.new?.id || payload.old?.id));
+  if(payload.eventType === 'INSERT'){
+    if(idx === -1) S.tickets.unshift(payload.new);
+    toast('New ticket: ' + payload.new.subject);
+  } else if(payload.eventType === 'UPDATE'){
+    if(idx !== -1) S.tickets[idx] = payload.new;
+  } else if(payload.eventType === 'DELETE'){
+    if(idx !== -1) S.tickets.splice(idx,1);
+  }
+  renderNav();
+  if(S.page === 'tickets' || S.page === 'dashboard') renderPage();
+}
+
+/* ============================================================
+   NAV / ROUTER
+   ============================================================ */
+const NAV = [
+  { id:'dashboard', label:'Dashboard' },
+  { id:'tickets', label:'Tickets', badgeKey:'tickets' },
+  { id:'customers', label:'Customer Lookup' },
+  { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
+  { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
+  { id:'reports', label:'Reports' },
+];
+
+function renderNav(){
+  const nav = document.getElementById('navList');
+  nav.innerHTML = NAV.map(n=>{
+    let badge = '';
+    let alertClass = '';
+    if(n.badgeKey==='tickets'){
+      const c = S.tickets.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
+      if(c) badge = `<span class="nav-badge">${c}</span>`;
+    }
+    if(n.badgeKey==='warranty'){
+      const c = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id)).length;
+      if(c){ badge = `<span class="nav-badge">${c}</span>`; alertClass='alert-nav'; }
+    }
+    if(n.badgeKey==='shiperrors'){
+      const c = S.shipErrors.filter(e=>isActiveClaim(e.status) && !S.tickets.some(t=>t.shipment_error_id===e.id)).length;
+      if(c){ badge = `<span class="nav-badge">${c}</span>`; alertClass='alert-nav'; }
+    }
+    return `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
+      <span class="nav-dot"></span>${n.label}${badge}
+    </button>`;
+  }).join('');
+}
+
+function goPage(id){
+  S.page = id;
+  renderNav();
+  document.getElementById('pageTitle').textContent = (NAV.find(n=>n.id===id)||{}).label || 'Dashboard';
+  renderPage();
+}
+window.goPage = goPage;
+
+function renderPage(){
+  if(S.page === 'dashboard') return renderDashboard();
+  if(S.page === 'tickets') return renderTicketsList();
+  if(S.page === 'warranty') return renderWarrantyList();
+  if(S.page === 'shiperrors') return renderShipErrorsList();
+  if(S.page === 'customers') return renderCustomerLookup();
+  if(S.page === 'reports') return renderReports();
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function renderDashboard(){
+  const t = S.tickets;
+  const open = t.filter(x=>x.status==='open').length;
+  const urgent = t.filter(x=>x.priority==='urgent' && !['resolved','closed'].includes(x.status)).length;
+  const today = t.filter(x=> new Date(x.created_at).toDateString() === new Date().toDateString()).length;
+  const resolved = t.filter(x=>x.resolved_at);
+  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
+  const bySource = {};
+  t.forEach(x=> bySource[x.source] = (bySource[x.source]||0)+1);
+
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="kpi-grid kpi-grid-4">
+      <div class="kpi"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
+      <div class="kpi kpi-teal"><div class="kpi-label">New Today</div><div class="kpi-value">${today}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Tickets by Source</div>
+      ${Object.entries(bySource).map(([k,v])=>`<span class="src-tag" style="margin-right:8px">${k}: ${v}</span>`).join('') || '<span style="font-size:12.5px;color:var(--text3)">No tickets yet</span>'}
+    </div>
+    <div class="panel-title" style="border:none;margin-top:4px">Recent Tickets</div>
+    ${ticketTable(t.slice(0,10))}
+  `;
+}
+
+/* ============================================================
+   TICKETS LIST
+   ============================================================ */
+function renderTicketsList(){
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="filter-bar">
+      <div class="search-wrap">
+        <span class="search-icon">🔍</span>
+        <input type="text" placeholder="Search subject, customer, order #..." value="${S.filters.q}" oninput="S.filters.q=this.value; renderTicketsList()">
+      </div>
+      <select class="form-input" style="width:auto" onchange="S.filters.status=this.value; renderTicketsList()">
+        <option value="">All Statuses</option>
+        ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}" ${S.filters.status===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.filters.priority=this.value; renderTicketsList()">
+        <option value="">All Priorities</option>
+        ${['low','medium','high','urgent'].map(s=>`<option value="${s}" ${S.filters.priority===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.filters.source=this.value; renderTicketsList()">
+        <option value="">All Sources</option>
+        ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${S.filters.source===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.filters.tag=this.value; renderTicketsList()">
+        <option value="">All Tags</option>
+        ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${S.filters.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
+      </select>
+      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',q:''}; renderTicketsList()">Clear</button>
+    </div>
+    ${ticketTable(filteredTickets())}
+  `;
+}
+
+function filteredTickets(){
+  let list = S.tickets.slice();
+  const f = S.filters;
+  if(f.status) list = list.filter(t=>t.status===f.status);
+  if(f.priority) list = list.filter(t=>t.priority===f.priority);
+  if(f.source) list = list.filter(t=>t.source===f.source);
+  if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
+  if(f.q){
+    const q = f.q.toLowerCase();
+    list = list.filter(t=>
+      (t.subject||'').toLowerCase().includes(q) ||
+      (t.customer_name||'').toLowerCase().includes(q) ||
+      (t.customer_email||'').toLowerCase().includes(q) ||
+      (t.order_number||'').toLowerCase().includes(q) ||
+      (t.pn||'').toLowerCase().includes(q)
+    );
+  }
+  return list;
+}
+
+function label(s){ return (s||'').replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase()); }
+
+const CLAIM_DONE_STATUSES = ['Resolved','Closed','Denied'];
+function isActiveClaim(status){ return !CLAIM_DONE_STATUSES.includes(status); }
+
+const STATUS_PILL = { open:'pill-teal', pending:'pill-yellow', waiting_customer:'pill-orange', resolved:'pill-green', closed:'pill-muted' };
+const PRIORITY_PILL = { low:'pill-muted', medium:'pill-yellow', high:'pill-orange', urgent:'pill-red' };
+const TICKET_CATEGORIES = ['Shipping','Warranty/Defect','Billing','Return/Refund','Part Compatibility','General Question','Other'];
+
+function ticketTable(list){
+  if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
+  return `<div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
+    </tr></thead>
+    <tbody>
+      ${list.map(t=>`
+        <tr class="rowlink" onclick="openTicket('${t.id}')">
+          <td class="pn">#${t.ticket_number}</td>
+          <td class="main-col">${escapeHtml(t.subject)}</td>
+          <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
+          <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
+          <td><span class="src-tag">${label(t.source)}</span></td>
+          <td>${(t.tags||[]).slice(0,2).map(tag=>`<span class="pill pill-muted" style="margin-right:3px">${escapeHtml(tag)}</span>`).join('')}${(t.tags||[]).length>2?`<span style="font-size:10px;color:var(--text3)">+${t.tags.length-2}</span>`:''}</td>
+          <td><span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span></td>
+          <td><span class="pill ${STATUS_PILL[t.status]||'pill-muted'}">${label(t.status)}</span></td>
+          <td class="pn">${timeAgo(t.updated_at)}</td>
+        </tr>
+      `).join('')}
+    </tbody>
+  </table></div>`;
+}
 
 function escapeHtml(s){
+  if(s==null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+function timeAgo(dstr){
+  if(!dstr) return '—';
+  const diff = Date.now() - new Date(dstr).getTime();
+  const mins = Math.floor(diff/60000);
+  if(mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins/60);
+  if(hrs < 24) return hrs + 'h ago';
+  return Math.floor(hrs/24) + 'd ago';
+}
+
+/* ============================================================
+   WARRANTY / SHIPMENT ERROR QUEUES (convert-to-ticket)
+   ============================================================ */
+function renderWarrantyList(){
+  const el = document.getElementById('content');
+  const unlinked = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id));
+  el.innerHTML = `
+    <p style="font-size:12.5px;color:var(--text3);margin-bottom:14px">Active warranty claims (not yet Resolved/Closed/Denied in the ERP) without a linked support ticket. Create a ticket to start a customer conversation thread.</p>
+    ${!unlinked.length ? '<div class="tbl-wrap"><div class="empty">All active warranty claims have linked tickets.</div></div>' : `
+    <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Cost</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+      ${unlinked.map(w=>`
+        <tr>
+          <td>${w.order_number?'#'+escapeHtml(w.order_number):'—'}</td>
+          <td class="pn">${escapeHtml(w.pn||'—')}</td>
+          <td>${escapeHtml(w.status||'—')}</td>
+          <td class="pn">${w.claim_cost ? '$'+Number(w.claim_cost).toFixed(2) : '—'}</td>
+          <td class="pn">${timeAgo(w.created_at)}</td>
+          <td><button class="btn btn-sm btn-teal" onclick="convertToTicket('warranty','${w.id}')">Create Ticket</button></td>
+        </tr>
+      `).join('')}
+    </tbody></table></div>`}
+  `;
+}
+
+function renderShipErrorsList(){
+  const el = document.getElementById('content');
+  const unlinked = S.shipErrors.filter(e=>isActiveClaim(e.status) && !S.tickets.some(t=>t.shipment_error_id===e.id));
+  el.innerHTML = `
+    <p style="font-size:12.5px;color:var(--text3);margin-bottom:14px">Active shipment errors (not yet Resolved/Closed/Denied in the ERP) without a linked support ticket.</p>
+    ${!unlinked.length ? '<div class="tbl-wrap"><div class="empty">All active shipment errors have linked tickets.</div></div>' : `
+    <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Cost</th><th>Created</th><th></th></tr></thead>
+    <tbody>
+      ${unlinked.map(e=>`
+        <tr>
+          <td>${e.order_number?'#'+escapeHtml(e.order_number):'—'}</td>
+          <td class="pn">${escapeHtml(e.pn||'—')}</td>
+          <td>${escapeHtml(e.status||'—')}</td>
+          <td class="pn">${e.claim_cost ? '$'+Number(e.claim_cost).toFixed(2) : '—'}</td>
+          <td class="pn">${timeAgo(e.created_at)}</td>
+          <td><button class="btn btn-sm btn-teal" onclick="convertToTicket('shipment_error','${e.id}')">Create Ticket</button></td>
+        </tr>
+      `).join('')}
+    </tbody></table></div>`}
+  `;
+}
+
+async function convertToTicket(kind, recordId){
+  const record = kind==='warranty' ? S.warranty.find(w=>w.id===recordId) : S.shipErrors.find(e=>e.id===recordId);
+  if(!record){ toast('Record not found', true); return; }
+  const subject = kind==='warranty'
+    ? `Warranty claim — order #${record.order_number||'?'} / ${record.pn||'?'}`
+    : `Shipment error — order #${record.order_number||'?'} / ${record.pn||'?'}`;
+  const payload = {
+    source: kind==='warranty' ? 'warranty' : 'shipment_error',
+    status: 'open',
+    priority: 'medium',
+    subject,
+    order_number: record.order_number || null,
+    pn: record.pn || null,
+    warranty_claim_id: kind==='warranty' ? record.id : null,
+    shipment_error_id: kind==='shipment_error' ? record.id : null,
+  };
+  try{
+    const { data, error } = await sb.from('tickets').insert(payload).select().single();
+    if(error) throw error;
+    S.tickets.unshift(data);
+    toast('Ticket #' + data.ticket_number + ' created');
+    goPage('tickets');
+    openTicket(data.id);
+  }catch(e){
+    toast('Failed to create ticket: ' + e.message, true);
+  }
+}
+function openSendToERPModal(ticketId, kind){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t){ toast('Ticket not found', true); return; }
+  if(!t.order_number){ toast('Add an order number to this ticket first', true); return; }
+  if(!t.pn){ toast('Add a part number to this ticket first — use the order lookup to pick one', true); return; }
+
+  const msgs = (S.messages[ticketId]||[]).filter(m=>!m.is_internal_note);
+  const latest = msgs.length ? msgs[msgs.length-1].body : '';
+  const defaultIssue = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
+  const kindLabel = kind==='warranty' ? 'Warranty Claim' : 'Shipment Error';
+
+  const warrantyFields = `
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Type</label>
+      <select class="form-input" id="erpResolutionType">
+        <option value="">— Not decided yet —</option>
+        <option value="replacement">Replacement</option>
+        <option value="refund">Refund</option>
+        <option value="repair">Repair</option>
+        <option value="denied">Denied</option>
+      </select>
+    </div>`;
+
+  const shipErrorFields = `
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Error Type</label>
+        <select class="form-input" id="erpErrorType">
+          <option value="Wrong Item">Wrong Item</option>
+          <option value="Wrong Qty">Wrong Qty</option>
+          <option value="Missing">Missing</option>
+          <option value="Damaged">Damaged</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Resolution Type</label>
+        <select class="form-input" id="erpResolutionType">
+          <option value="">— Not decided yet —</option>
+          <option value="reship">Reship</option>
+          <option value="send_more">Send More</option>
+          <option value="customer_keeps">Customer Keeps</option>
+          <option value="return_required">Return Required</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Expected Qty</label><input class="form-input" id="erpExpectedQty" type="number" min="0"></div>
+      <div class="form-group"><label class="form-label">Shipped Qty</label><input class="form-input" id="erpShippedQty" type="number" min="0"></div>
+    </div>`;
+
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Review Before Sending — ${kindLabel}</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table, mirroring the same form your team uses in the ERP itself. Review everything below.</div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="erpOrder" value="${escapeHtml(t.order_number)}"></div>
+        <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue Description</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultIssue)}</textarea></div>
+      ${kind==='warranty' ? warrantyFields : shipErrorFields}
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-input" id="erpStatus">
+            <option value="Open" selected>Open</option>
+            ${kind==='shipment_error' ? '<option value="Reshipping">Reshipping</option>' : ''}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmSendToERP('${ticketId}','${kind}')">Create ${kindLabel}</button>
+      </div>
+    </div>
+  `;
+}
+window.openSendToERPModal = openSendToERPModal;
+
+async function confirmSendToERP(ticketId, kind){
+  const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
+  const payload = {
+    order_number: document.getElementById('erpOrder').value.trim(),
+    pn: document.getElementById('erpPn').value.trim(),
+    customer_name: document.getElementById('erpCustomer').value.trim() || null,
+    issue: document.getElementById('erpIssue').value.trim() || null,
+    status: document.getElementById('erpStatus').value,
+    resolution_type: document.getElementById('erpResolutionType').value || null,
+    claim_cost: document.getElementById('erpClaimCost').value ? parseFloat(document.getElementById('erpClaimCost').value) : null,
+    tracking_number: document.getElementById('erpTracking').value.trim() || null
+  };
+  if(kind==='shipment_error'){
+    payload.error_type = document.getElementById('erpErrorType').value;
+    const expQty = document.getElementById('erpExpectedQty').value;
+    const shpQty = document.getElementById('erpShippedQty').value;
+    if(expQty) payload.expected_qty = parseInt(expQty, 10);
+    if(shpQty) payload.shipped_qty = parseInt(shpQty, 10);
+    payload.return_required = payload.resolution_type === 'return_required';
+  }
+  if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
+
+  try{
+    const { data, error } = await sb.from(table).insert(payload).select().single();
+    if(error) throw error;
+    if(kind==='warranty'){ S.warranty.unshift(data); } else { S.shipErrors.unshift(data); }
+
+    const linkPatch = kind==='warranty'
+      ? { warranty_claim_id: data.id, updated_at: new Date().toISOString() }
+      : { shipment_error_id: data.id, updated_at: new Date().toISOString() };
+    const { data: updated, error: updErr } = await sb.from('tickets').update(linkPatch).eq('id', ticketId).select().single();
+    if(updErr) throw updErr;
+    const idx = S.tickets.findIndex(x=>x.id===ticketId);
+    if(idx!==-1) S.tickets[idx] = updated;
+    S.activeTicket = updated;
+
+    closeModal();
+    toast((kind==='warranty'?'Warranty claim':'Shipment error') + ' created in the ERP — warehouse will see it in their queue');
+    renderNav();
+    renderTicketPanel(updated);
+  }catch(e){
+    toast('Failed to send to ERP: ' + e.message + ' — if this mentions a missing column, tell me the exact error and I\'ll match your actual schema.', true);
+  }
+}
+window.confirmSendToERP = confirmSendToERP;
+
+
+/* ============================================================
+   CUSTOMER / ORDER HISTORY LOOKUP
+   ============================================================ */
+let customerSearchResults = null;
+
+function renderCustomerLookup(){
+  const el = document.getElementById('content');
+  el.innerHTML = `
+    <div class="filter-bar">
+      <div class="search-wrap" style="max-width:400px">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="custSearchInput" placeholder="Search by customer email or order number..." onkeydown="if(event.key==='Enter')runCustomerSearch()">
+      </div>
+      <button class="btn btn-primary" onclick="runCustomerSearch()">Search</button>
+    </div>
+    <div id="custSearchResults">
+      <div class="empty">Search by email or order number to see everything tied to a customer — tickets, orders, warranty claims, and shipment errors, all in one place.</div>
+    </div>
+  `;
+}
+
+async function runCustomerSearch(){
+  const q = document.getElementById('custSearchInput').value.trim();
+  const box = document.getElementById('custSearchResults');
+  if(!q){ box.innerHTML = `<div class="empty">Enter an email or order number.</div>`; return; }
+  box.innerHTML = `<div class="empty">Searching...</div>`;
+
+  try{
+    const isEmail = q.includes('@');
+    let salesRows = [], ticketRows = [];
+
+    if(isEmail){
+      [salesRows, ticketRows] = await Promise.all([
+        sb.from('sales').select('*').ilike('customer_email', q).then(r=>r.data||[]),
+        sb.from('tickets').select('*').ilike('customer_email', q).order('created_at',{ascending:false}).then(r=>r.data||[])
+      ]);
+    } else {
+      [salesRows, ticketRows] = await Promise.all([
+        sb.from('sales').select('*').eq('order_number', q).then(r=>r.data||[]),
+        sb.from('tickets').select('*').eq('order_number', q).order('created_at',{ascending:false}).then(r=>r.data||[])
+      ]);
+    }
+
+    const orderNumbers = [...new Set([...salesRows.map(s=>s.order_number), ...ticketRows.map(t=>t.order_number)].filter(Boolean))];
+    let warrantyRows = [], shipErrRows = [];
+    if(orderNumbers.length){
+      [warrantyRows, shipErrRows] = await Promise.all([
+        sb.from('warranty_claims').select('*').in('order_number', orderNumbers).then(r=>r.data||[]),
+        sb.from('shipment_errors').select('*').in('order_number', orderNumbers).then(r=>r.data||[])
+      ]);
+    }
+
+    if(!salesRows.length && !ticketRows.length && !warrantyRows.length && !shipErrRows.length){
+      box.innerHTML = `<div class="empty">No records found for "${escapeHtml(q)}".</div>`;
+      return;
+    }
+
+    box.innerHTML = `
+      ${ticketRows.length ? `
+        <div class="panel-title" style="border:none">Support Tickets (${ticketRows.length})</div>
+        ${ticketTable(ticketRows)}
+      ` : ''}
+      ${salesRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Orders (${salesRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Qty</th><th>Fulfillment</th><th>Tracking</th><th>Date</th></tr></thead>
+        <tbody>${salesRows.map(s=>`<tr>
+          <td>#${escapeHtml(s.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(s.pn||'—')}</td>
+          <td>${s.quantity??s.qty??'—'}</td>
+          <td><span class="pill pill-muted">${escapeHtml(s.fulfillment_status||'—')}</span></td>
+          <td class="pn">${escapeHtml(s.tracking_number||'—')}</td>
+          <td class="pn">${s.sale_date||timeAgo(s.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+      ${warrantyRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Warranty Claims (${warrantyRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Issue</th><th>Date</th></tr></thead>
+        <tbody>${warrantyRows.map(w=>`<tr>
+          <td>#${escapeHtml(w.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(w.pn||'—')}</td>
+          <td><span class="pill ${isActiveClaim(w.status)?'pill-orange':'pill-green'}">${escapeHtml(w.status||'—')}</span></td>
+          <td>${escapeHtml((w.issue||'').slice(0,80))}${(w.issue||'').length>80?'…':''}</td>
+          <td class="pn">${timeAgo(w.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+      ${shipErrRows.length ? `
+        <div class="panel-title" style="border:none;margin-top:20px">Shipment Errors (${shipErrRows.length})</div>
+        <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>PN</th><th>Status</th><th>Issue</th><th>Date</th></tr></thead>
+        <tbody>${shipErrRows.map(e=>`<tr>
+          <td>#${escapeHtml(e.order_number||'—')}</td>
+          <td class="pn">${escapeHtml(e.pn||'—')}</td>
+          <td><span class="pill ${isActiveClaim(e.status)?'pill-orange':'pill-green'}">${escapeHtml(e.status||'—')}</span></td>
+          <td>${escapeHtml((e.issue||'').slice(0,80))}${(e.issue||'').length>80?'…':''}</td>
+          <td class="pn">${timeAgo(e.created_at)}</td>
+        </tr>`).join('')}</tbody></table></div>
+      ` : ''}
+    `;
+  }catch(e){
+    box.innerHTML = `<div class="empty">Search failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+window.runCustomerSearch = runCustomerSearch;
+
+/* ============================================================
+   REPORTS
+   ============================================================ */
+function barRow(label, count, max, color){
+  const pct = max > 0 ? Math.round((count/max)*100) : 0;
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+    <div style="width:140px;font-size:12px;color:var(--text2);flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(label)}</div>
+    <div style="flex:1;background:var(--bg4);border-radius:4px;height:16px;overflow:hidden">
+      <div style="width:${pct}%;background:${color||'var(--teal)'};height:100%;border-radius:4px"></div>
+    </div>
+    <div style="width:36px;text-align:right;font-family:var(--mono);font-size:12px;color:var(--text2)">${count}</div>
+  </div>`;
+}
+
+function renderReports(){
+  const el = document.getElementById('content');
+  const t = S.tickets;
+
+  const weeks = [];
+  for(let i=7;i>=0;i--){
+    const start = new Date(); start.setDate(start.getDate() - i*7); start.setHours(0,0,0,0);
+    const end = new Date(start); end.setDate(end.getDate()+7);
+    const count = t.filter(x=>{ const d=new Date(x.created_at); return d>=start && d<end; }).length;
+    weeks.push({ label: start.toLocaleDateString('en-US',{month:'short',day:'numeric'}), count });
+  }
+  const maxWeek = Math.max(1, ...weeks.map(w=>w.count));
+
+  const bySource = {};
+  t.forEach(x=> bySource[x.source] = (bySource[x.source]||0)+1);
+  const maxSource = Math.max(1, ...Object.values(bySource), 1);
+
+  const byTag = {};
+  t.forEach(x=> (x.tags||[]).forEach(tag=> byTag[tag] = (byTag[tag]||0)+1));
+  const maxTag = Math.max(1, ...Object.values(byTag), 1);
+
+  const byAssignee = {};
+  t.forEach(x=> { const key = x.assigned_to || 'Unassigned'; byAssignee[key] = (byAssignee[key]||0)+1; });
+  const maxAssignee = Math.max(1, ...Object.values(byAssignee), 1);
+
+  const resolved = t.filter(x=>x.resolved_at);
+  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
+  const medianDays = (()=>{
+    if(!resolved.length) return '—';
+    const days = resolved.map(x=>(new Date(x.resolved_at)-new Date(x.created_at))/86400000).sort((a,b)=>a-b);
+    const mid = Math.floor(days.length/2);
+    return (days.length%2 ? days[mid] : (days[mid-1]+days[mid])/2).toFixed(1);
+  })();
+
+  const byOrder = {};
+  t.forEach(x=>{ if(x.order_number) byOrder[x.order_number] = (byOrder[x.order_number]||0)+1; });
+  const repeatOrders = Object.entries(byOrder).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]).slice(0,8);
+
+  el.innerHTML = `
+    <div class="kpi-grid kpi-grid-4">
+      <div class="kpi"><div class="kpi-label">Total Tickets</div><div class="kpi-value">${t.length}</div></div>
+      <div class="kpi kpi-teal"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Median Resolution (days)</div><div class="kpi-value">${medianDays}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Repeat-Issue Orders</div><div class="kpi-value">${repeatOrders.length}</div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Ticket Volume — Last 8 Weeks</div>
+      ${weeks.map(w=>barRow(w.label, w.count, maxWeek)).join('')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel">
+        <div class="panel-title">By Source</div>
+        ${Object.entries(bySource).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(label(k), v, maxSource, 'var(--orange)')).join('') || '<div class="empty">No data</div>'}
+      </div>
+      <div class="panel">
+        <div class="panel-title">By Assignee</div>
+        ${Object.entries(byAssignee).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxAssignee, 'var(--blue)')).join('') || '<div class="empty">No data</div>'}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">By Tag</div>
+      ${Object.keys(byTag).length ? Object.entries(byTag).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxTag, 'var(--purple)')).join('') : '<div class="empty">No tags applied yet — add tags to tickets to see this breakdown.</div>'}
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Orders With Multiple Tickets (possible repeat/unresolved issues)</div>
+      ${repeatOrders.length ? `<div class="tbl-wrap"><table><thead><tr><th>Order Number</th><th>Ticket Count</th></tr></thead>
+        <tbody>${repeatOrders.map(([ord,c])=>`<tr class="rowlink" onclick="goPage('tickets'); setTimeout(()=>{S.filters.q='${ord}'; renderTicketsList();},50)"><td>#${escapeHtml(ord)}</td><td class="pn">${c}</td></tr>`).join('')}</tbody></table></div>`
+        : '<div class="empty">No repeat-issue orders detected.</div>'}
+    </div>
+  `;
+}
+
+let showingNotes = false;
+
+async function openTicket(id){
+  const t = S.tickets.find(x=>x.id===id);
+  if(!t){ toast('Ticket not found', true); return; }
+  S.activeTicket = t;
+  showingNotes = false;
+  await loadMessages(id);
+  renderTicketPanel(t);
+  document.getElementById('tk-overlay').classList.add('open');
+  document.getElementById('tk-panel').classList.add('open');
+}
+window.openTicket = openTicket;
+
+function closePanel(){
+  document.getElementById('tk-overlay').classList.remove('open');
+  document.getElementById('tk-panel').classList.remove('open');
+  S.activeTicket = null;
+}
+window.closePanel = closePanel;
+
+function renderTicketPanel(t){
+  const msgs = S.messages[t.id] || [];
+  const dealer = S.dealers.find(d=>d.id===t.dealer_id);
+  const warranty = t.warranty_claim_id ? S.warranty.find(w=>w.id===t.warranty_claim_id) : null;
+  const shipErr = t.shipment_error_id ? S.shipErrors.find(e=>e.id===t.shipment_error_id) : null;
+
+  document.getElementById('tk-panel').innerHTML = `
+    <div class="tk-head">
+      <div class="tk-head-title">#${t.ticket_number}</div>
+      <button class="tk-close" title="Delete ticket" style="color:var(--red)" onclick="deleteTicket('${t.id}')">🗑</button>
+      <button class="tk-close" onclick="closePanel()">✕</button>
+    </div>
+    <div class="tk-body">
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Subject</label>
+        <input class="form-input" value="${escapeHtml(t.subject)}" onchange="updateTicketField('${t.id}','subject',this.value)">
+      </div>
+      ${t.description ? `<div class="linked-box" style="background:var(--blue-dim)">
+        <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
+        ${escapeHtml(t.description).replace(/\n/g,'<br>')}
+        ${renderAttachments(t.attachments)}
+      </div>` : ''}
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-input" onchange="updateTicketField('${t.id}','status',this.value)">
+            ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}" ${t.status===s?'selected':''}>${label(s)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Priority</label>
+          <select class="form-input" onchange="updateTicketField('${t.id}','priority',this.value)">
+            ${['low','medium','high','urgent'].map(s=>`<option value="${s}" ${t.priority===s?'selected':''}>${label(s)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Assigned To</label>
+          <select class="form-input" onchange="updateTicketField('${t.id}','assigned_to',this.value)">
+            <option value="">Unassigned</option>
+            ${S.team.map(m=>`<option value="${m.email}" ${t.assigned_to===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Source</label>
+          <input class="form-input" value="${label(t.source)}" disabled>
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Customer Name</label><input class="form-input" value="${escapeHtml(t.customer_name||'')}" onchange="updateTicketField('${t.id}','customer_name',this.value)"></div>
+        <div class="form-group"><label class="form-label">Customer Email</label><input class="form-input" value="${escapeHtml(t.customer_email||'')}" onchange="updateTicketField('${t.id}','customer_email',this.value)"></div>
+      </div>
+      ${(t.customer_email || t.order_number) ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="goPage('customers'); setTimeout(()=>{document.getElementById('custSearchInput').value='${escapeHtml(t.customer_email||t.order_number||'').replace(/'/g,"\\'")}'; runCustomerSearch(); closePanel();},50)">View Full Customer History</button>` : ''}
+
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Category / Tags</label>
+        <select class="form-input" style="margin-bottom:6px" onchange="if(this.value) addTicketTag('${t.id}', this.value); this.value='';">
+          <option value="">+ Add category...</option>
+          ${TICKET_CATEGORIES.map(c=>`<option value="${c}">${c}</option>`).join('')}
+        </select>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">
+          ${(t.tags||[]).map(tag=>`<span class="pill pill-teal" style="cursor:pointer" title="Click to remove" onclick="removeTicketTag('${t.id}','${tag.replace(/'/g,"\\'")}')">${escapeHtml(tag)} ✕</span>`).join('') || '<span style="font-size:11.5px;color:var(--text3)">No tags yet</span>'}
+        </div>
+        <div style="display:flex;gap:6px">
+          <input class="form-input" id="customTagInput_${t.id}" placeholder="Custom tag..." onkeydown="if(event.key==='Enter'){addTicketTag('${t.id}', this.value); this.value='';}">
+          <button class="btn btn-sm" onclick="const inp=document.getElementById('customTagInput_${t.id}'); addTicketTag('${t.id}', inp.value); inp.value='';">Add</button>
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" value="${escapeHtml(t.order_number||'')}" onchange="updateTicketField('${t.id}','order_number',this.value); lookupOrderForTicket('${t.id}', this.value)"></div>
+        <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="tkPnInput" value="${escapeHtml(t.pn||'')}" onchange="updateTicketField('${t.id}','pn',this.value)"></div>
+      </div>
+      <div id="tkPartOptions" style="margin-bottom:10px"></div>
+
+      ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealer.email||'')}</div>` : ''}
+      ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim</div>
+        Status: ${escapeHtml(warranty.status||'—')} · Cost: ${warranty.claim_cost?'$'+Number(warranty.claim_cost).toFixed(2):'—'}
+        ${warranty.tracking_number?' · Tracking: '+escapeHtml(warranty.tracking_number):''}
+      </div>` : ''}
+      ${shipErr ? `<div class="linked-box"><div class="lk-title">Linked Shipment Error</div>
+        Status: ${escapeHtml(shipErr.status||'—')} · Cost: ${shipErr.claim_cost?'$'+Number(shipErr.claim_cost).toFixed(2):'—'}
+        ${shipErr.return_status?' · Return: '+escapeHtml(shipErr.return_status):''}
+      </div>` : ''}
+      ${(!warranty && !shipErr) ? `
+      <div class="linked-box">
+        <div class="lk-title">Send to ERP for Shipping</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Creates a record in the ERP's warranty/shipment-error queue so the warehouse can ship a replacement. Requires an order number and a part number${!t.pn ? ' — use the order lookup above to pick one' : ''}.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','warranty')" ${!t.pn?'disabled':''}>Create Warranty Claim</button>
+          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
+        </div>
+      </div>` : ''}
+      <div id="orderLookupBox"></div>
+      ${t.order_number ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="lookupOrder('${t.id}')">Look Up Order in ERP Data</button>` : ''}
+
+      <div class="tabs-row">
+        <div class="tab active" id="tabConv" onclick="switchThreadTab(true)">Conversation</div>
+        <div class="tab" id="tabNotes" onclick="switchThreadTab(false)">Internal Notes</div>
+      </div>
+      <div id="threadBox">${renderThread(msgs, false)}</div>
+      <div style="margin-top:12px">
+        <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
+        <div class="checkbox-row" style="justify-content:space-between">
+          <span><input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label></span>
+          <label class="btn btn-sm" style="cursor:pointer;margin:0">📎 Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
+        </div>
+        <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
+        <div class="checkbox-row" id="emailChkRow" style="display:${t.customer_email?'flex':'none'}">
+          <input type="checkbox" id="emailChk" ${t.customer_email?'checked':''}>
+          <label for="emailChk">Also email this reply to ${t.customer_email ? escapeHtml(t.customer_email) : 'the customer (no email on file)'}</label>
+        </div>
+      </div>
+    </div>
+    <div class="tk-foot">
+      <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="sendMessage('${t.id}')">Send</button>
+      ${t.status!=='closed' ? `<button class="btn btn-teal" onclick="updateTicketField('${t.id}','status','resolved')">Mark Resolved</button>` : ''}
+      <button class="btn" onclick="openMergeModal('${t.id}')">Merge Into...</button>
+    </div>
+  `;
+}
+
+function switchThreadTab(conv){
+  showingNotes = !conv;
+  document.getElementById('tabConv').classList.toggle('active', conv);
+  document.getElementById('tabNotes').classList.toggle('active', !conv);
+  document.getElementById('threadBox').innerHTML = renderThread(S.messages[S.activeTicket.id]||[], showingNotes);
+}
+window.switchThreadTab = switchThreadTab;
+
+function renderAttachments(attachments){
+  if(!attachments || !attachments.length) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+    ${attachments.map(a=>{
+      const isImg = /\.(png|jpe?g|gif|webp)$/i.test(a.url||a.name||'');
+      return isImg
+        ? `<a href="${a.url}" target="_blank"><img src="${a.url}" alt="${escapeHtml(a.name||'attachment')}" style="width:72px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>`
+        : `<a href="${a.url}" target="_blank" class="src-tag">📎 ${escapeHtml(a.name||'file')}</a>`;
+    }).join('')}
+  </div>`;
+}
+
+function renderThread(msgs, notesOnly){
+  const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
+  if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
+  return list.map(m=>`
+    <div class="msg ${m.is_internal_note?'note':m.sender_type}">
+      <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)">✉ Emailed</span>':''}</div>
+      <div>${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
+      ${renderAttachments(m.attachments)}
+    </div>
+  `).join('');
+}
+
+async function updateTicketField(id, field, value){
+  try{
+    const patch = { [field]: value, updated_at: new Date().toISOString() };
+    if(field==='status' && (value==='resolved'||value==='closed')) patch.resolved_at = new Date().toISOString();
+    const { data, error } = await sb.from('tickets').update(patch).eq('id', id).select().single();
+    if(error) throw error;
+    const idx = S.tickets.findIndex(x=>x.id===id);
+    if(idx!==-1) S.tickets[idx] = data;
+    S.activeTicket = data;
+    toast('Ticket updated');
+    renderNav();
+    if(S.page!=='dashboard') renderPage();
+  }catch(e){
+    toast('Update failed: ' + e.message, true);
+  }
+}
+window.updateTicketField = updateTicketField;
+
+async function addTicketTag(ticketId, tag){
+  tag = (tag||'').trim();
+  if(!tag) return;
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t) return;
+  const tags = Array.from(new Set([...(t.tags||[]), tag]));
+  await updateTicketField(ticketId, 'tags', tags);
+  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+}
+window.addTicketTag = addTicketTag;
+
+async function removeTicketTag(ticketId, tag){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t) return;
+  const tags = (t.tags||[]).filter(x=>x!==tag);
+  await updateTicketField(ticketId, 'tags', tags);
+  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+}
+window.removeTicketTag = removeTicketTag;
+
+async function deleteTicket(id){
+  const t = S.tickets.find(x=>x.id===id);
+  if(!t) return;
+  if(!confirm(`Delete ticket #${t.ticket_number} — "${t.subject}"? This also deletes its message history. This can't be undone.`)) return;
+  try{
+    const { error } = await sb.from('tickets').delete().eq('id', id);
+    if(error) throw error;
+    S.tickets = S.tickets.filter(x=>x.id!==id);
+    closePanel();
+    toast('Ticket #' + t.ticket_number + ' deleted');
+    renderNav();
+    renderPage();
+  }catch(e){
+    toast('Failed to delete: ' + e.message, true);
+  }
+}
+window.deleteTicket = deleteTicket;
+
+function openMergeModal(sourceId){
+  const source = S.tickets.find(x=>x.id===sourceId);
+  if(!source) return;
+  const candidates = S.tickets.filter(x=>x.id!==sourceId && !x.merged_into_id);
+
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Merge Ticket #${source.ticket_number} Into...</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">All messages from this ticket move to the target ticket. This ticket gets closed and marked as merged — it stays in the system for reference but won't show in active queues.</div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Search Target Ticket</label>
+        <input class="form-input" id="mergeSearchInput" placeholder="Search by ticket number or subject..." oninput="renderMergeCandidates('${sourceId}', this.value)">
+      </div>
+      <div id="mergeCandidateList" style="max-height:280px;overflow-y:auto">
+        ${renderMergeCandidateRows(candidates.slice(0,20), sourceId)}
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+      </div>
+    </div>
+  `;
+}
+window.openMergeModal = openMergeModal;
+
+function renderMergeCandidateRows(candidates, sourceId){
+  if(!candidates.length) return `<div class="empty">No matching tickets.</div>`;
+  return candidates.map(c=>`
+    <div class="rowlink" style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center" onclick="confirmMerge('${sourceId}','${c.id}')">
+      <div>
+        <div style="font-size:12.5px;font-weight:500">#${c.ticket_number} — ${escapeHtml(c.subject)}</div>
+        <div style="font-size:11px;color:var(--text3)">${escapeHtml(c.customer_name||c.customer_email||'—')} · ${label(c.status)}</div>
+      </div>
+      <button class="btn btn-sm btn-teal">Merge Here</button>
+    </div>
+  `).join('');
+}
+
+function renderMergeCandidates(sourceId, query){
+  const q = query.trim().toLowerCase();
+  let candidates = S.tickets.filter(x=>x.id!==sourceId && !x.merged_into_id);
+  if(q){
+    candidates = candidates.filter(c=>
+      String(c.ticket_number).includes(q) ||
+      (c.subject||'').toLowerCase().includes(q) ||
+      (c.customer_name||'').toLowerCase().includes(q) ||
+      (c.customer_email||'').toLowerCase().includes(q)
+    );
+  }
+  document.getElementById('mergeCandidateList').innerHTML = renderMergeCandidateRows(candidates.slice(0,20), sourceId);
+}
+window.renderMergeCandidates = renderMergeCandidates;
+
+async function confirmMerge(sourceId, targetId){
+  const source = S.tickets.find(x=>x.id===sourceId);
+  const target = S.tickets.find(x=>x.id===targetId);
+  if(!source || !target) return;
+  if(!confirm(`Merge ticket #${source.ticket_number} into #${target.ticket_number}? This moves all its messages and closes #${source.ticket_number}.`)) return;
+
+  try{
+    // Move all messages from source to target
+    const { error: moveErr } = await sb.from('ticket_messages').update({ ticket_id: targetId }).eq('ticket_id', sourceId);
+    if(moveErr) throw moveErr;
+
+    // Drop a system note in the target thread noting the merge
+    await sb.from('ticket_messages').insert({
+      ticket_id: targetId,
+      sender_type: 'system',
+      sender_name: 'System',
+      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}.`,
+      is_internal_note: true
+    });
+
+    // Close and flag the source ticket
+    const { data: updatedSource, error: srcErr } = await sb.from('tickets')
+      .update({ status:'closed', merged_into_id: targetId, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', sourceId).select().single();
+    if(srcErr) throw srcErr;
+
+    const { data: updatedTarget, error: tgtErr } = await sb.from('tickets')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', targetId).select().single();
+    if(tgtErr) throw tgtErr;
+
+    const si = S.tickets.findIndex(x=>x.id===sourceId);
+    if(si!==-1) S.tickets[si] = updatedSource;
+    const ti = S.tickets.findIndex(x=>x.id===targetId);
+    if(ti!==-1) S.tickets[ti] = updatedTarget;
+    delete S.messages[sourceId];
+    await loadMessages(targetId);
+
+    closeModal();
+    closePanel();
+    toast(`Merged into ticket #${updatedTarget.ticket_number}`);
+    renderNav();
+    renderPage();
+  }catch(e){
+    toast('Merge failed: ' + e.message, true);
+  }
+}
+window.confirmMerge = confirmMerge;
+
+let pendingMsgAttachments = [];
+
+async function handleMsgFileSelect(input){
+  const files = Array.from(input.files||[]);
+  if(!files.length) return;
+  const preview = document.getElementById('msgAttachPreview');
+  for(const file of files){
+    const chipId = 'up_' + Math.random().toString(36).slice(2);
+    preview.insertAdjacentHTML('beforeend', `<span class="src-tag" id="${chipId}">Uploading ${escapeHtml(file.name)}...</span>`);
+    try{
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}_${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+      const { error: upErr } = await sb.storage.from('ticket-attachments').upload(path, file);
+      if(upErr) throw upErr;
+      const { data: pub } = sb.storage.from('ticket-attachments').getPublicUrl(path);
+      pendingMsgAttachments.push({ name: file.name, url: pub.publicUrl });
+      const chip = document.getElementById(chipId);
+      if(chip) chip.outerHTML = `<span class="src-tag">📎 ${escapeHtml(file.name)} <span style="cursor:pointer;color:var(--red)" onclick="removePendingAttachment('${pub.publicUrl}', this.parentElement)">✕</span></span>`;
+    }catch(e){
+      const chip = document.getElementById(chipId);
+      if(chip) chip.outerHTML = `<span class="src-tag" style="color:var(--red)">Failed: ${escapeHtml(file.name)}</span>`;
+      toast('Upload failed: ' + e.message, true);
+    }
+  }
+  input.value = '';
+}
+window.handleMsgFileSelect = handleMsgFileSelect;
+
+function removePendingAttachment(url, chipEl){
+  pendingMsgAttachments = pendingMsgAttachments.filter(a=>a.url!==url);
+  if(chipEl) chipEl.remove();
+}
+window.removePendingAttachment = removePendingAttachment;
+
+async function sendMessage(ticketId){
+  const box = document.getElementById('msgBox');
+  const isNote = document.getElementById('isNoteChk').checked;
+  const emailChkEl = document.getElementById('emailChk');
+  const shouldEmail = !isNote && emailChkEl && emailChkEl.checked;
+  const body = box.value.trim();
+  if(!body) return;
+  const t = S.tickets.find(x=>x.id===ticketId);
+
+  try{
+    const { data, error } = await sb.from('ticket_messages').insert({
+      ticket_id: ticketId,
+      sender_type: 'staff',
+      sender_name: S.user.email,
+      body,
+      is_internal_note: isNote,
+      attachments: pendingMsgAttachments
+    }).select().single();
+    if(error) throw error;
+    if(!S.messages[ticketId]) S.messages[ticketId] = [];
+    S.messages[ticketId].push(data);
+    box.value = '';
+    document.getElementById('isNoteChk').checked = false;
+    pendingMsgAttachments = [];
+    const preview = document.getElementById('msgAttachPreview');
+    if(preview) preview.innerHTML = '';
+    document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
+    await sb.from('tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticketId);
+
+    if(shouldEmail && t && t.customer_email){
+      toast('Sending email...');
+      try{
+        const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+          body: JSON.stringify({
+            ticket_id: ticketId,
+            message_id: data.id,
+            to: t.customer_email,
+            subject: `Re: [Ticket #${t.ticket_number}] ${t.subject}`,
+            body
+          })
+        });
+        const result = await resp.json();
+        if(!resp.ok) throw new Error(result.error || 'Email send failed');
+        data.emailed_at = new Date().toISOString();
+        document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
+        toast('Reply sent and emailed to ' + t.customer_email);
+      }catch(emailErr){
+        toast('Message saved, but email failed to send: ' + emailErr.message, true);
+      }
+    }
+  }catch(e){
+    toast('Failed to send: ' + e.message, true);
+  }
+}
+window.sendMessage = sendMessage;
+
+async function lookupOrder(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t || !t.order_number) return;
+  const box = document.getElementById('orderLookupBox');
+  box.innerHTML = `<div class="linked-box">Looking up order...</div>`;
+  try{
+    const { data, error } = await sb.from('sales').select('*').eq('order_number', t.order_number).limit(5);
+    if(error) throw error;
+    if(!data.length){ box.innerHTML = `<div class="linked-box">No matching order found for #${escapeHtml(t.order_number)}.</div>`; return; }
+    box.innerHTML = data.map(s=>`
+      <div class="linked-box">
+        <div class="lk-title">Order #${escapeHtml(s.order_number)}</div>
+        PN: <span class="pn">${escapeHtml(s.pn||'—')}</span> · Qty: ${s.quantity??'—'} · Fulfillment: ${escapeHtml(s.fulfillment_status||'—')}
+        ${s.tracking_number?' · Tracking: '+escapeHtml(s.tracking_number):''}
+      </div>
+    `).join('');
+  }catch(e){
+    box.innerHTML = `<div class="linked-box">Lookup failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+window.lookupOrder = lookupOrder;
+
+/* ============================================================
+   ORDER → PARTS CONTEXT (expands assemblies into BOM children,
+   since a customer issue is often with a component, not the
+   top-level assembly they actually purchased)
+   ============================================================ */
+async function fetchOrderContext(orderNumber){
+  if(!orderNumber) return null;
+  const { data: rows, error } = await sb.from('sales').select('*').eq('order_number', orderNumber);
+  if(error || !rows || !rows.length) return null;
+  const pns = [...new Set(rows.map(r=>r.pn).filter(Boolean))];
+  let children = [];
+  if(pns.length){
+    const { data: bomRows } = await sb.from('bom_items').select('parent_pn,child_pn,qty').in('parent_pn', pns);
+    children = bomRows || [];
+  }
+  return { rows, pns, children };
+}
+
+function buildPartOptions(ctx){
+  const opts = [];
+  ctx.pns.forEach(pn=>{
+    const row = ctx.rows.find(r=>r.pn===pn);
+    opts.push({ pn, label: `${pn}${row && row.qty ? ' (qty '+row.qty+')' : ''}`, indent:false });
+    ctx.children.filter(c=>c.parent_pn===pn).forEach(k=>{
+      opts.push({ pn: k.child_pn, label: `↳ ${k.child_pn} — component of ${pn}`, indent:true });
+    });
+  });
+  return opts;
+}
+
+function renderPartOptionsHtml(opts, onClickFn){
+  if(!opts.length) return `<div style="font-size:11px;color:var(--text3)">No parts found on this order.</div>`;
+  return `<div class="form-label" style="margin:8px 0 4px">Parts On This Order — Click To Select</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      ${opts.map(o=>`<button type="button" class="btn btn-sm ${o.indent?'btn-teal':''}" onclick="${onClickFn}('${o.pn.replace(/'/g,"\\'")}')">${escapeHtml(o.label)}</button>`).join('')}
+    </div>`;
+}
+
+/* Used by the "New Ticket" modal */
+async function lookupOrderForModal(){
+  const orderNumber = document.getElementById('ntOrder').value.trim();
+  const box = document.getElementById('ntPartOptions');
+  if(!orderNumber){ box.innerHTML=''; return; }
+  box.innerHTML = `<div style="font-size:11px;color:var(--text3)">Looking up order...</div>`;
+  const ctx = await fetchOrderContext(orderNumber);
+  if(!ctx){ box.innerHTML = `<div style="font-size:11px;color:var(--text3)">No matching order found.</div>`; return; }
+  const nameInput = document.getElementById('ntName');
+  const emailInput = document.getElementById('ntEmail');
+  const first = ctx.rows[0];
+  if(nameInput && !nameInput.value && first.customer_name) nameInput.value = first.customer_name;
+  if(emailInput && !emailInput.value && first.customer_email) emailInput.value = first.customer_email;
+  box.innerHTML = renderPartOptionsHtml(buildPartOptions(ctx), 'selectNtPn');
+}
+window.lookupOrderForModal = lookupOrderForModal;
+
+function selectNtPn(pn){
+  const pnInput = document.getElementById('ntPn');
+  if(pnInput) pnInput.value = pn;
+}
+window.selectNtPn = selectNtPn;
+
+/* Used by the ticket detail panel */
+async function lookupOrderForTicket(ticketId, orderNumber){
+  let box = document.getElementById('tkPartOptions');
+  if(!box) return;
+  if(!orderNumber){ box.innerHTML=''; return; }
+  box.innerHTML = `<div style="font-size:11px;color:var(--text3)">Looking up order...</div>`;
+  const ctx = await fetchOrderContext(orderNumber);
+  if(!ctx){
+    box = document.getElementById('tkPartOptions');
+    if(box) box.innerHTML = `<div style="font-size:11px;color:var(--text3)">No matching order found.</div>`;
+    return;
+  }
+  const t = S.tickets.find(x=>x.id===ticketId);
+  const first = ctx.rows[0];
+  const patch = {};
+  if(t && !t.customer_name && first.customer_name) patch.customer_name = first.customer_name;
+  if(t && !t.customer_email && first.customer_email) patch.customer_email = first.customer_email;
+  if(Object.keys(patch).length){
+    for(const [field,value] of Object.entries(patch)) await updateTicketField(ticketId, field, value);
+    renderTicketPanel(S.activeTicket); // rebuilds the panel; tkPartOptions div is fresh, so re-grab it
+  }
+  box = document.getElementById('tkPartOptions');
+  if(!box) return;
+  box.innerHTML = renderPartOptionsHtml(buildPartOptions(ctx), `selectTkPn_${ticketId.replace(/-/g,'_')}`);
+  window[`selectTkPn_${ticketId.replace(/-/g,'_')}`] = (pn)=>{
+    const pnInput = document.getElementById('tkPnInput');
+    if(pnInput) pnInput.value = pn;
+    updateTicketField(ticketId, 'pn', pn);
+  };
+}
+window.lookupOrderForTicket = lookupOrderForTicket;
+
+/* ============================================================
+   NEW TICKET (modal, matches ERP modal style)
+   ============================================================ */
+function openNewTicket(){
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">New Ticket</div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Subject</label><input class="form-input" id="ntSubject" placeholder="Brief summary"></div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Customer Name</label><input class="form-input" id="ntName"></div>
+        <div class="form-group"><label class="form-label">Customer Email</label><input class="form-input" id="ntEmail"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="ntOrder" onchange="lookupOrderForModal()"></div>
+        <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="ntPn"></div>
+      </div>
+      <div id="ntPartOptions" style="margin-bottom:10px"></div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Priority</label>
+          <select class="form-input" id="ntPriority">${['low','medium','high','urgent'].map(s=>`<option value="${s}" ${s==='medium'?'selected':''}>${label(s)}</option>`).join('')}</select>
+        </div>
+        <div class="form-group"><label class="form-label">Source</label>
+          <select class="form-input" id="ntSource">${['manual','website','email'].map(s=>`<option value="${s}">${label(s)}</option>`).join('')}</select>
+        </div>
+      </div>
+      <div class="form-group" style="margin-top:4px"><label class="form-label">Initial Message</label><textarea class="form-input" id="ntBody" rows="4" placeholder="What's going on?" style="resize:vertical"></textarea></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createTicket()">Create Ticket</button>
+      </div>
+    </div>
+  `;
+}
+window.openNewTicket = openNewTicket;
+
+function closeModal(){
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.add('hidden');
+  ov.innerHTML = '';
+}
+window.closeModal = closeModal;
+
+async function createTicket(){
+  const subject = document.getElementById('ntSubject').value.trim();
+  if(!subject){ toast('Subject is required', true); return; }
+  const payload = {
+    subject,
+    customer_name: document.getElementById('ntName').value.trim() || null,
+    customer_email: document.getElementById('ntEmail').value.trim() || null,
+    order_number: document.getElementById('ntOrder').value.trim() || null,
+    pn: document.getElementById('ntPn').value.trim() || null,
+    priority: document.getElementById('ntPriority').value,
+    source: document.getElementById('ntSource').value,
+    status: 'open'
+  };
+  try{
+    const { data, error } = await sb.from('tickets').insert(payload).select().single();
+    if(error) throw error;
+    S.tickets.unshift(data);
+    const body = document.getElementById('ntBody').value.trim();
+    if(body){
+      await sb.from('ticket_messages').insert({
+        ticket_id: data.id, sender_type: 'staff', sender_name: S.user.email, body, is_internal_note: false
+      });
+    }
+    closeModal();
+    toast('Ticket #' + data.ticket_number + ' created');
+    goPage('tickets');
+    openTicket(data.id);
+  }catch(e){
+    toast('Failed to create ticket: ' + e.message, true);
+  }
+}
+window.createTicket = createTicket;
+
 </script>
 </body>
 </html>
