@@ -683,6 +683,7 @@ async function sendToERP(ticketId, kind){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t){ toast('Ticket not found', true); return; }
   if(!t.order_number){ toast('Add an order number to this ticket first', true); return; }
+  if(!t.pn){ toast('Add a part number to this ticket first — the ERP requires one for warranty claims and shipment errors', true); return; }
 
   const msgs = (S.messages[ticketId]||[]).filter(m=>!m.is_internal_note);
   const latest = msgs.length ? msgs[msgs.length-1].body : '';
@@ -805,10 +806,10 @@ function renderTicketPanel(t){
       ${(!warranty && !shipErr) ? `
       <div class="linked-box">
         <div class="lk-title">Send to ERP for Shipping</div>
-        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Creates a record in the ERP's warranty/shipment-error queue so the warehouse can ship a replacement. Requires an order number.</div>
+        <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Creates a record in the ERP's warranty/shipment-error queue so the warehouse can ship a replacement. Requires an order number and a part number${!t.pn ? ' — use the order lookup above to pick one' : ''}.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','warranty')">Create Warranty Claim</button>
-          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','shipment_error')">Log Shipment Error</button>
+          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','warranty')" ${!t.pn?'disabled':''}>Create Warranty Claim</button>
+          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
         </div>
       </div>` : ''}
       <div id="orderLookupBox"></div>
