@@ -415,6 +415,9 @@ function subscribeRealtime(){
         S.messages[m.ticket_id].push(m);
         if(S.activeTicket && S.activeTicket.id === m.ticket_id){
           document.getElementById('threadBox').innerHTML = renderThread(S.messages[m.ticket_id], showingNotes);
+        } else if(m.sender_type === 'customer' && !m.is_internal_note){
+          const t = S.tickets.find(x=>x.id===m.ticket_id);
+          toast('New reply on ticket' + (t ? ' #' + t.ticket_number : '') + ' from ' + (m.sender_name||'customer'));
         }
       }
     })
@@ -453,8 +456,14 @@ function renderNav(){
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='tickets'){
-      const c = S.tickets.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
-      if(c) badge = `<span class="nav-badge">${c}</span>`;
+      const unread = S.tickets.filter(t=>t.has_unread).length;
+      if(unread){
+        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`;
+        alertClass = 'alert-nav';
+      } else {
+        const openCount = S.tickets.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
+        if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
+      }
     }
     if(n.badgeKey==='warranty'){
       const c = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id)).length;
@@ -588,8 +597,8 @@ function ticketTable(list){
     <tbody>
       ${list.map(t=>`
         <tr class="rowlink" onclick="openTicket('${t.id}')">
-          <td class="pn">#${t.ticket_number}</td>
-          <td class="main-col">${escapeHtml(t.subject)}</td>
+          <td class="pn">#${t.ticket_number}${t.has_unread?' <span style="color:var(--red)" title="New message">●</span>':''}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
@@ -1022,6 +1031,18 @@ async function openTicket(id){
   renderTicketPanel(t);
   document.getElementById('tk-overlay').classList.add('open');
   document.getElementById('tk-panel').classList.add('open');
+
+  if(t.has_unread){
+    try{
+      const { data: updated, error } = await sb.from('tickets').update({ has_unread: false }).eq('id', id).select().single();
+      if(!error){
+        const idx = S.tickets.findIndex(x=>x.id===id);
+        if(idx!==-1) S.tickets[idx] = updated;
+        S.activeTicket = updated;
+        renderNav();
+      }
+    }catch(e){ /* non-critical */ }
+  }
 }
 window.openTicket = openTicket;
 
