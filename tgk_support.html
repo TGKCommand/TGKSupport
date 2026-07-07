@@ -677,26 +677,53 @@ async function convertToTicket(kind, recordId){
     toast('Failed to create ticket: ' + e.message, true);
   }
 }
-window.convertToTicket = convertToTicket;
-
-async function sendToERP(ticketId, kind){
+function openSendToERPModal(ticketId, kind){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t){ toast('Ticket not found', true); return; }
   if(!t.order_number){ toast('Add an order number to this ticket first', true); return; }
-  if(!t.pn){ toast('Add a part number to this ticket first — the ERP requires one for warranty claims and shipment errors', true); return; }
+  if(!t.pn){ toast('Add a part number to this ticket first — use the order lookup to pick one', true); return; }
 
   const msgs = (S.messages[ticketId]||[]).filter(m=>!m.is_internal_note);
   const latest = msgs.length ? msgs[msgs.length-1].body : '';
-  const issue = [t.subject, latest].filter(Boolean).join('\n\n');
+  const defaultIssue = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
+  const kindLabel = kind==='warranty' ? 'Warranty Claim' : 'Shipment Error';
 
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Review Before Sending — ${kindLabel}</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table. Review everything below — your warehouse team acts on exactly what's here.</div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="erpOrder" value="${escapeHtml(t.order_number)}"></div>
+        <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue Description</label><textarea class="form-input" id="erpIssue" rows="5" style="resize:vertical">${escapeHtml(defaultIssue)}</textarea></div>
+      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Status</label>
+        <select class="form-input" id="erpStatus">
+          <option value="Open" selected>Open</option>
+        </select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmSendToERP('${ticketId}','${kind}')">Create ${kindLabel}</button>
+      </div>
+    </div>
+  `;
+}
+window.openSendToERPModal = openSendToERPModal;
+
+async function confirmSendToERP(ticketId, kind){
   const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
   const payload = {
-    order_number: t.order_number,
-    pn: t.pn || null,
-    customer_name: t.customer_name || null,
-    issue: issue || t.subject,
-    status: 'Open'
+    order_number: document.getElementById('erpOrder').value.trim(),
+    pn: document.getElementById('erpPn').value.trim(),
+    customer_name: document.getElementById('erpCustomer').value.trim() || null,
+    issue: document.getElementById('erpIssue').value.trim() || null,
+    status: document.getElementById('erpStatus').value
   };
+  if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
 
   try{
     const { data, error } = await sb.from(table).insert(payload).select().single();
@@ -712,6 +739,7 @@ async function sendToERP(ticketId, kind){
     if(idx!==-1) S.tickets[idx] = updated;
     S.activeTicket = updated;
 
+    closeModal();
     toast((kind==='warranty'?'Warranty claim':'Shipment error') + ' created in the ERP — warehouse will see it in their queue');
     renderNav();
     renderTicketPanel(updated);
@@ -719,7 +747,7 @@ async function sendToERP(ticketId, kind){
     toast('Failed to send to ERP: ' + e.message, true);
   }
 }
-window.sendToERP = sendToERP;
+window.confirmSendToERP = confirmSendToERP;
 
 /* ============================================================
    TICKET DETAIL PANEL
@@ -753,10 +781,15 @@ function renderTicketPanel(t){
 
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
-      <div class="tk-head-title">#${t.ticket_number} — ${escapeHtml(t.subject)}</div>
+      <div class="tk-head-title">#${t.ticket_number}</div>
+      <button class="tk-close" title="Delete ticket" style="color:var(--red)" onclick="deleteTicket('${t.id}')">🗑</button>
       <button class="tk-close" onclick="closePanel()">✕</button>
     </div>
     <div class="tk-body">
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Subject</label>
+        <input class="form-input" value="${escapeHtml(t.subject)}" onchange="updateTicketField('${t.id}','subject',this.value)">
+      </div>
       ${t.description ? `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
         ${escapeHtml(t.description).replace(/\n/g,'<br>')}
@@ -808,8 +841,8 @@ function renderTicketPanel(t){
         <div class="lk-title">Send to ERP for Shipping</div>
         <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">Creates a record in the ERP's warranty/shipment-error queue so the warehouse can ship a replacement. Requires an order number and a part number${!t.pn ? ' — use the order lookup above to pick one' : ''}.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','warranty')" ${!t.pn?'disabled':''}>Create Warranty Claim</button>
-          <button class="btn btn-sm btn-teal" onclick="sendToERP('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
+          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','warranty')" ${!t.pn?'disabled':''}>Create Warranty Claim</button>
+          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
         </div>
       </div>` : ''}
       <div id="orderLookupBox"></div>
@@ -823,7 +856,11 @@ function renderTicketPanel(t){
       <div style="margin-top:12px">
         <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
         <div class="checkbox-row">
-          <input type="checkbox" id="isNoteChk"><label for="isNoteChk">Internal note (not visible to customer)</label>
+          <input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label>
+        </div>
+        <div class="checkbox-row" id="emailChkRow" style="display:${t.customer_email?'flex':'none'}">
+          <input type="checkbox" id="emailChk" ${t.customer_email?'checked':''}>
+          <label for="emailChk">Also email this reply to ${t.customer_email ? escapeHtml(t.customer_email) : 'the customer (no email on file)'}</label>
         </div>
       </div>
     </div>
@@ -847,7 +884,7 @@ function renderThread(msgs, notesOnly){
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
   return list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
-      <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span></div>
+      <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)">✉ Emailed</span>':''}</div>
       <div>${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
     </div>
   `).join('');
@@ -871,11 +908,33 @@ async function updateTicketField(id, field, value){
 }
 window.updateTicketField = updateTicketField;
 
+async function deleteTicket(id){
+  const t = S.tickets.find(x=>x.id===id);
+  if(!t) return;
+  if(!confirm(`Delete ticket #${t.ticket_number} — "${t.subject}"? This also deletes its message history. This can't be undone.`)) return;
+  try{
+    const { error } = await sb.from('tickets').delete().eq('id', id);
+    if(error) throw error;
+    S.tickets = S.tickets.filter(x=>x.id!==id);
+    closePanel();
+    toast('Ticket #' + t.ticket_number + ' deleted');
+    renderNav();
+    renderPage();
+  }catch(e){
+    toast('Failed to delete: ' + e.message, true);
+  }
+}
+window.deleteTicket = deleteTicket;
+
 async function sendMessage(ticketId){
   const box = document.getElementById('msgBox');
   const isNote = document.getElementById('isNoteChk').checked;
+  const emailChkEl = document.getElementById('emailChk');
+  const shouldEmail = !isNote && emailChkEl && emailChkEl.checked;
   const body = box.value.trim();
   if(!body) return;
+  const t = S.tickets.find(x=>x.id===ticketId);
+
   try{
     const { data, error } = await sb.from('ticket_messages').insert({
       ticket_id: ticketId,
@@ -891,6 +950,30 @@ async function sendMessage(ticketId){
     document.getElementById('isNoteChk').checked = false;
     document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
     await sb.from('tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticketId);
+
+    if(shouldEmail && t && t.customer_email){
+      toast('Sending email...');
+      try{
+        const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+          body: JSON.stringify({
+            ticket_id: ticketId,
+            message_id: data.id,
+            to: t.customer_email,
+            subject: `Re: [Ticket #${t.ticket_number}] ${t.subject}`,
+            body
+          })
+        });
+        const result = await resp.json();
+        if(!resp.ok) throw new Error(result.error || 'Email send failed');
+        data.emailed_at = new Date().toISOString();
+        document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
+        toast('Reply sent and emailed to ' + t.customer_email);
+      }catch(emailErr){
+        toast('Message saved, but email failed to send: ' + emailErr.message, true);
+      }
+    }
   }catch(e){
     toast('Failed to send: ' + e.message, true);
   }
