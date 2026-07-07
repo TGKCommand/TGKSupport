@@ -864,9 +864,10 @@ async function runCustomerSearch(){
         sb.from('tickets').select('*').ilike('customer_email', q).order('created_at',{ascending:false}).then(r=>r.data||[])
       ]);
     } else {
+      const orderVariants = q.startsWith('#') ? [q, q.slice(1)] : [q, '#'+q];
       [salesRows, ticketRows] = await Promise.all([
-        sb.from('sales').select('*').eq('order_number', q).then(r=>r.data||[]),
-        sb.from('tickets').select('*').eq('order_number', q).order('created_at',{ascending:false}).then(r=>r.data||[])
+        findSalesByOrderNumber(q),
+        sb.from('tickets').select('*').in('order_number', orderVariants).order('created_at',{ascending:false}).then(r=>r.data||[])
       ]);
     }
 
@@ -1453,14 +1454,31 @@ async function sendMessage(ticketId){
 }
 window.sendMessage = sendMessage;
 
+/* ============================================================
+   ORDER NUMBER LOOKUP HELPER
+   Shopify order numbers are usually stored with a leading '#'
+   (e.g. "#1041"), but staff/customers often type just "1041".
+   Try both forms so this isn't a silent gotcha.
+   ============================================================ */
+async function findSalesByOrderNumber(orderNumberInput){
+  const raw = (orderNumberInput||'').trim();
+  if(!raw) return [];
+  const variants = raw.startsWith('#') ? [raw, raw.slice(1)] : [raw, '#'+raw];
+  for(const variant of variants){
+    const { data, error } = await sb.from('sales').select('*').eq('order_number', variant);
+    if(!error && data && data.length) return data;
+  }
+  return [];
+}
+window.findSalesByOrderNumber = findSalesByOrderNumber;
+
 async function lookupOrder(ticketId){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t || !t.order_number) return;
   const box = document.getElementById('orderLookupBox');
   box.innerHTML = `<div class="linked-box">Looking up order...</div>`;
   try{
-    const { data, error } = await sb.from('sales').select('*').eq('order_number', t.order_number).limit(5);
-    if(error) throw error;
+    const data = (await findSalesByOrderNumber(t.order_number)).slice(0,5);
     if(!data.length){ box.innerHTML = `<div class="linked-box">No matching order found for #${escapeHtml(t.order_number)}.</div>`; return; }
     box.innerHTML = data.map(s=>`
       <div class="linked-box">
@@ -1482,8 +1500,8 @@ window.lookupOrder = lookupOrder;
    ============================================================ */
 async function fetchOrderContext(orderNumber){
   if(!orderNumber) return null;
-  const { data: rows, error } = await sb.from('sales').select('*').eq('order_number', orderNumber);
-  if(error || !rows || !rows.length) return null;
+  const rows = await findSalesByOrderNumber(orderNumber);
+  if(!rows.length) return null;
   const pns = [...new Set(rows.map(r=>r.pn).filter(Boolean))];
   let children = [];
   if(pns.length){
