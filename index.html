@@ -1504,8 +1504,12 @@ function renderTicketPanel(t){
         ${t.return_tracking_number ? `
           <div style="font-size:12.5px;margin-bottom:8px">Tracking: <span class="pn">${escapeHtml(t.return_tracking_number)}</span>${t.return_carrier?' · '+escapeHtml(t.return_carrier):''}</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${t.return_label_url ? `<a href="${t.return_label_url}" target="_blank" class="btn btn-sm">View/Download Label</a>` : ''}
-            <button class="btn btn-sm btn-teal" onclick="openReturnLabelModal('${t.id}')">Generate New Label</button>
+            ${t.return_label_url ? `
+              <button class="btn btn-sm" onclick="printReturnLabel('${t.id}')">🖨 Print Label</button>
+              <a href="${t.return_label_url}" target="_blank" class="btn btn-sm">View/Download</a>
+              <button class="btn btn-sm btn-teal" onclick="emailReturnLabel('${t.id}')" ${!t.customer_email?'disabled title="No customer email on file"':''}>✉ Email to Customer</button>
+            ` : ''}
+            <button class="btn btn-sm" onclick="openReturnLabelModal('${t.id}')">Generate New Label</button>
           </div>
         ` : `
           <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">No return label generated yet.</div>
@@ -1801,6 +1805,69 @@ async function unarchiveTicket(id){
   }
 }
 window.unarchiveTicket = unarchiveTicket;
+
+function printReturnLabel(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t || !t.return_label_url){ toast('No label to print', true); return; }
+  const win = window.open(t.return_label_url, '_blank');
+  if(!win){ toast('Pop-up blocked — allow pop-ups to auto-print, or use View/Download instead', true); return; }
+  // Best-effort auto-print once the PDF loads; if the browser's built-in
+  // PDF viewer blocks scripted print (common), the tab is still open and
+  // the user can print manually (Ctrl+P) or use its own print icon.
+  win.addEventListener('load', () => {
+    try{ win.print(); }catch(e){ /* fall back to manual print in the opened tab */ }
+  });
+}
+window.printReturnLabel = printReturnLabel;
+
+async function emailReturnLabel(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t){ toast('Ticket not found', true); return; }
+  if(!t.customer_email){ toast('No customer email on file', true); return; }
+  if(!t.return_label_url){ toast('No label to email', true); return; }
+
+  if(!confirm(`Email the return label to ${t.customer_email}?`)) return;
+
+  const body = `Please find your return shipping label attached below. Print it out and attach it to your return package before dropping it off.\n\nTracking number: ${t.return_tracking_number || 'N/A'}${t.return_carrier ? ' ('+t.return_carrier+')' : ''}`;
+
+  try{
+    // Log it as a real message on the ticket, same as any other reply
+    const { data, error } = await sb.from('ticket_messages').insert({
+      ticket_id: ticketId,
+      sender_type: 'staff',
+      sender_name: S.user.email,
+      body,
+      is_internal_note: false,
+      attachments: [{ name: 'return-label.pdf', url: t.return_label_url }]
+    }).select().single();
+    if(error) throw error;
+    if(!S.messages[ticketId]) S.messages[ticketId] = [];
+    S.messages[ticketId].push(data);
+
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        ticket_id: ticketId,
+        ticket_number: t.ticket_number,
+        message_id: data.id,
+        to: t.customer_email,
+        subject: `TGK Motorsport Support #${String(t.ticket_number).padStart(4,'0')}`,
+        body,
+        attachments: data.attachments || []
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error || 'Email send failed');
+
+    document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
+    scrollThreadToBottom();
+    toast('Return label emailed to ' + t.customer_email);
+  }catch(e){
+    toast('Failed to email label: ' + e.message, true);
+  }
+}
+window.emailReturnLabel = emailReturnLabel;
 
 function openReturnLabelModal(ticketId){
   const t = S.tickets.find(x=>x.id===ticketId);
