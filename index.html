@@ -1901,7 +1901,8 @@ async function sendMessage(ticketId){
             message_id: data.id,
             to: t.customer_email,
             subject: `TGK Motorsport Support #${String(t.ticket_number).padStart(4,'0')}`,
-            body
+            body,
+            attachments: data.attachments || []
           })
         });
         const result = await resp.json();
