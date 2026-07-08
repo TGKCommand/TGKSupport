@@ -1880,7 +1880,12 @@ async function submitReturnLabel(ticketId){
       renderTicketPanel(updated);
     }
     closeModal();
-    toast('Return label generated — tracking: ' + (result.tracking_number || 'see ticket'));
+    if(result.warning){
+      alert(result.warning);
+      toast('Label created, but not saved to the ticket — see the popup for the tracking number', true);
+    } else {
+      toast('Return label generated — tracking: ' + (result.tracking_number || 'see ticket'));
+    }
   }catch(e){
     toast('Failed to generate label: ' + e.message, true);
     btn.disabled = false;
