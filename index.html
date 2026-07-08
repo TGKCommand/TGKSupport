@@ -360,6 +360,33 @@ async function afterLogin(user){
 })();
 
 /* ============================================================
+   SSO — when opened inline inside the Command Center (as an iframe),
+   accept the auth token it posts so staff don't have to log in twice.
+   Same pattern as the ERP's own Command Center integration.
+
+   Security note: this checks the message shape (source/type) but does
+   NOT restrict which origin can send it. If you know the Command
+   Center's exact hosted URL, tighten this by also checking
+   event.origin === 'https://your-command-center-domain' below.
+   ============================================================ */
+window.addEventListener('message', async (event) => {
+  if (!event.data || event.data.source !== 'TGK_CC' || event.data.type !== 'AUTH_TOKEN') return;
+  try{
+    const { error } = await sb.auth.setSession({
+      access_token: event.data.access_token,
+      refresh_token: event.data.refresh_token || ''
+    });
+    if(error){ console.error('SSO setSession failed:', error.message); return; }
+    const { data: sessionData } = await sb.auth.getSession();
+    if(sessionData?.session && !S.user){
+      await afterLogin(sessionData.session.user);
+    }
+  }catch(e){
+    console.error('SSO token accept failed:', e);
+  }
+});
+
+/* ============================================================
    DATA LOADING
    ============================================================ */
 async function fetchAll(queryFn, pageSize=1000){
@@ -1654,9 +1681,10 @@ async function sendMessage(ticketId){
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
           body: JSON.stringify({
             ticket_id: ticketId,
+            ticket_number: t.ticket_number,
             message_id: data.id,
             to: t.customer_email,
-            subject: `Re: [Ticket #${t.ticket_number}] ${t.subject}`,
+            subject: `TGK Motorsport Support #${String(t.ticket_number).padStart(4,'0')}`,
             body
           })
         });
