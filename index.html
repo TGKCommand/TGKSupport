@@ -708,20 +708,46 @@ function openSendToERPModal(ticketId, kind){
 
   const msgs = (S.messages[ticketId]||[]).filter(m=>!m.is_internal_note);
   const latest = msgs.length ? msgs[msgs.length-1].body : '';
-  const defaultIssue = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
+  const defaultNotes = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
   const kindLabel = kind==='warranty' ? 'Warranty Claim' : 'Shipment Error';
 
+  // warranty_claims: id, created_at, pn, order_number, customer_name, customer_email,
+  //   issue, status, resolution, resolved_at, notes, resolution_type, shipping_details,
+  //   ss_order_id, claim_items, tracking_number, carrier, shipped_at, claim_cost
   const warrantyFields = `
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Type</label>
-      <select class="form-input" id="erpResolutionType">
-        <option value="">— Not decided yet —</option>
-        <option value="replacement">Replacement</option>
-        <option value="refund">Refund</option>
-        <option value="repair">Repair</option>
-        <option value="denied">Denied</option>
-      </select>
-    </div>`;
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Status</label>
+        <select class="form-input" id="erpStatus">
+          <option value="Open" selected>Open</option>
+          <option value="Resolved">Resolved</option>
+          <option value="Closed">Closed</option>
+          <option value="Denied">Denied</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Resolution Type</label>
+        <select class="form-input" id="erpResolutionType">
+          <option value="">— Not decided yet —</option>
+          <option value="replacement">Replacement</option>
+          <option value="refund">Refund</option>
+          <option value="repair">Repair</option>
+          <option value="denied">Denied</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Notes (optional)</label><input class="form-input" id="erpResolution" placeholder="What was decided, if known yet"></div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="form-group"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:4px"><label class="form-label">Carrier (optional)</label><input class="form-input" id="erpCarrier" placeholder="e.g. UPS, FedEx"></div>
+  `;
 
+  // shipment_errors: id, created_at, updated_at, order_number, customer_name, customer_email,
+  //   error_type, expected_pn, expected_qty, actual_pn, actual_qty, resolution, notes, status,
+  //   ss_order_id, resolved_at, tracking_number, carrier, shipped_at, claim_cost,
+  //   return_tracking, return_received_at
   const shipErrorFields = `
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">Error Type</label>
@@ -733,44 +759,44 @@ function openSendToERPModal(ticketId, kind){
           <option value="Other">Other</option>
         </select>
       </div>
-      <div class="form-group"><label class="form-label">Resolution Type</label>
-        <select class="form-input" id="erpResolutionType">
-          <option value="">— Not decided yet —</option>
-          <option value="reship">Reship</option>
-          <option value="send_more">Send More</option>
-          <option value="customer_keeps">Customer Keeps</option>
-          <option value="return_required">Return Required</option>
+      <div class="form-group"><label class="form-label">Status</label>
+        <select class="form-input" id="erpStatus">
+          <option value="Open" selected>Open</option>
+          <option value="Reshipping">Reshipping</option>
+          <option value="Resolved">Resolved</option>
+          <option value="Denied">Denied</option>
         </select>
       </div>
     </div>
     <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Expected Part Number</label><input class="form-input" id="erpExpectedPn" value="${escapeHtml(t.pn)}"></div>
       <div class="form-group"><label class="form-label">Expected Qty</label><input class="form-input" id="erpExpectedQty" type="number" min="0"></div>
-      <div class="form-group"><label class="form-label">Shipped Qty</label><input class="form-input" id="erpShippedQty" type="number" min="0"></div>
-    </div>`;
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Actual Part Number (if wrong item)</label><input class="form-input" id="erpActualPn" placeholder="What actually shipped"></div>
+      <div class="form-group"><label class="form-label">Actual Qty</label><input class="form-input" id="erpActualQty" type="number" min="0"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Notes</label><textarea class="form-input" id="erpNotes" rows="3" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
+    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution (optional)</label><input class="form-input" id="erpResolution" placeholder="What was decided, if known yet"></div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
+      <div class="form-group"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
+    </div>
+    <div class="form-group" style="margin-bottom:4px"><label class="form-label">Carrier (optional)</label><input class="form-input" id="erpCarrier" placeholder="e.g. UPS, FedEx"></div>
+  `;
 
   const ov = document.getElementById('modalOverlay');
   ov.classList.remove('hidden');
   ov.innerHTML = `
     <div class="modal">
       <div class="modal-title">Review Before Sending — ${kindLabel}</div>
-      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table, mirroring the same form your team uses in the ERP itself. Review everything below.</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table. Review everything below.</div>
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="erpOrder" value="${escapeHtml(t.order_number)}"></div>
-        <div class="form-group"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
+        <div class="form-group"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
       </div>
-      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
-      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue Description</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultIssue)}</textarea></div>
+      ${kind==='shipment_error' ? `<div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Email</label><input class="form-input" id="erpCustomerEmail" value="${escapeHtml(t.customer_email||'')}"></div>` : ''}
       ${kind==='warranty' ? warrantyFields : shipErrorFields}
-      <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">Status</label>
-          <select class="form-input" id="erpStatus">
-            <option value="Open" selected>Open</option>
-            ${kind==='shipment_error' ? '<option value="Reshipping">Reshipping</option>' : ''}
-          </select>
-        </div>
-        <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
-      </div>
-      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" onclick="confirmSendToERP('${ticketId}','${kind}')">Create ${kindLabel}</button>
@@ -782,25 +808,43 @@ window.openSendToERPModal = openSendToERPModal;
 
 async function confirmSendToERP(ticketId, kind){
   const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
-  const payload = {
-    order_number: document.getElementById('erpOrder').value.trim(),
-    pn: document.getElementById('erpPn').value.trim(),
-    customer_name: document.getElementById('erpCustomer').value.trim() || null,
-    issue: document.getElementById('erpIssue').value.trim() || null,
-    status: document.getElementById('erpStatus').value,
-    resolution_type: document.getElementById('erpResolutionType').value || null,
-    claim_cost: document.getElementById('erpClaimCost').value ? parseFloat(document.getElementById('erpClaimCost').value) : null,
-    tracking_number: document.getElementById('erpTracking').value.trim() || null
-  };
-  if(kind==='shipment_error'){
-    payload.error_type = document.getElementById('erpErrorType').value;
-    const expQty = document.getElementById('erpExpectedQty').value;
-    const shpQty = document.getElementById('erpShippedQty').value;
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+
+  let payload;
+  if(kind==='warranty'){
+    payload = {
+      order_number: val('erpOrder'),
+      pn: val('erpPn'),
+      customer_name: val('erpCustomer') || null,
+      issue: val('erpIssue') || null,
+      status: val('erpStatus'),
+      resolution_type: val('erpResolutionType') || null,
+      resolution: val('erpResolution') || null,
+      claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null,
+      tracking_number: val('erpTracking') || null,
+      carrier: val('erpCarrier') || null
+    };
+    if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
+  } else {
+    payload = {
+      order_number: val('erpOrder'),
+      customer_name: val('erpCustomer') || null,
+      customer_email: val('erpCustomerEmail') || null,
+      error_type: val('erpErrorType'),
+      expected_pn: val('erpExpectedPn') || null,
+      actual_pn: val('erpActualPn') || null,
+      resolution: val('erpResolution') || null,
+      notes: val('erpNotes') || null,
+      status: val('erpStatus'),
+      tracking_number: val('erpTracking') || null,
+      carrier: val('erpCarrier') || null,
+      claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null
+    };
+    const expQty = val('erpExpectedQty'), actQty = val('erpActualQty');
     if(expQty) payload.expected_qty = parseInt(expQty, 10);
-    if(shpQty) payload.shipped_qty = parseInt(shpQty, 10);
-    payload.return_required = payload.resolution_type === 'return_required';
+    if(actQty) payload.actual_qty = parseInt(actQty, 10);
+    if(!payload.order_number || !payload.expected_pn){ toast('Order number and expected part number are required', true); return; }
   }
-  if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
 
   try{
     const { data, error } = await sb.from(table).insert(payload).select().single();
@@ -821,10 +865,11 @@ async function confirmSendToERP(ticketId, kind){
     renderNav();
     renderTicketPanel(updated);
   }catch(e){
-    toast('Failed to send to ERP: ' + e.message + ' — if this mentions a missing column, tell me the exact error and I\'ll match your actual schema.', true);
+    toast('Failed to send to ERP: ' + e.message, true);
   }
 }
 window.confirmSendToERP = confirmSendToERP;
+
 
 
 /* ============================================================
