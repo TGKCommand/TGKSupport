@@ -260,7 +260,7 @@ const S = {
   dealers: [],
   team: [],
   activeTicket: null,
-  filters: { status: 'open', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, q: '' },
+  filters: { status: 'open', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -554,12 +554,13 @@ function renderNav(){
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='tickets'){
-      const unreadMsgs = S.tickets.reduce((sum,t)=> sum + (t.has_unread ? (t.unread_count||1) : 0), 0);
+      const activeTix = S.tickets.filter(t=>!t.archived);
+      const unreadMsgs = activeTix.reduce((sum,t)=> sum + (t.has_unread ? (t.unread_count||1) : 0), 0);
       if(unreadMsgs){
         badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${unreadMsgs} unread message${unreadMsgs===1?'':'s'}">${unreadMsgs}</span>`;
         alertClass = 'alert-nav';
       } else {
-        const openCount = S.tickets.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
+        const openCount = activeTix.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
         if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
       }
     }
@@ -600,13 +601,13 @@ function renderPage(){
 function runDashboardSearch(){
   const q = document.getElementById('dashSearchInput').value.trim();
   if(!q) return;
-  S.filters = { status: '', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, q };
+  S.filters = { status: '', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q };
   goPage('tickets');
 }
 window.runDashboardSearch = runDashboardSearch;
 
 function renderDashboard(){
-  const t = S.tickets;
+  const t = S.tickets.filter(x=>!x.archived);
   const open = t.filter(x=>x.status==='open').length;
   const urgent = t.filter(x=>x.priority==='urgent' && !['resolved','closed'].includes(x.status)).length;
   const today = t.filter(x=> new Date(x.created_at).toDateString() === new Date().toDateString()).length;
@@ -628,7 +629,7 @@ function renderDashboard(){
     <div class="kpi-grid kpi-grid-5">
       <div class="kpi"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
       <div class="kpi kpi-red"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
-      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',q:'',staleOnly:true}; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h untouched)</div><div class="kpi-value">${stale}</div></div>
+      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',q:'',staleOnly:true,showArchived:false}; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h untouched)</div><div class="kpi-value">${stale}</div></div>
       <div class="kpi kpi-teal"><div class="kpi-label">New Today</div><div class="kpi-value">${today}</div></div>
       <div class="kpi kpi-orange"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
     </div>
@@ -677,8 +678,12 @@ function renderTicketsList(){
         <input type="checkbox" ${S.filters.staleOnly?'checked':''} onchange="S.filters.staleOnly=this.checked; renderTicketsList()">
         <span>Stale only</span>
       </label>
-      ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
-      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,q:''}; renderTicketsList()">Clear</button>
+      <label class="checkbox-row" style="margin:0;cursor:pointer">
+        <input type="checkbox" ${S.filters.showArchived?'checked':''} onchange="S.filters.showArchived=this.checked; renderTicketsList()">
+        <span>Show archived</span>
+      </label>
+      ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,showArchived:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
+      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
     </div>
     ${renderBulkActionBar()}
     ${ticketTable(filteredTickets(), true)}
@@ -760,6 +765,7 @@ window.bulkAssign = bulkAssign;
 function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
+  if(!f.showArchived) list = list.filter(t=>!t.archived);
   if(f.status) list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
@@ -808,7 +814,7 @@ function ticketTable(list, enableBulk){
         <tr class="rowlink" onclick="${enableBulk?'':`openTicket('${t.id}')`}">
           ${enableBulk ? `<td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedTickets.has(t.id)?'checked':''} onchange="toggleTicketSelect('${t.id}', this.checked)"></td>` : ''}
           <td class="pn" ${enableBulk?`style="cursor:pointer" onclick="openTicket('${t.id}')"`:''}>#${t.ticket_number}</td>
-          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.archived?' <span class="pill pill-muted">🗄 Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
@@ -1346,10 +1352,14 @@ function renderTicketPanel(t){
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
       <div class="tk-head-title">#${t.ticket_number}</div>
-      <button class="tk-close" title="Delete ticket" style="color:var(--red)" onclick="deleteTicket('${t.id}')">🗑</button>
+      <button class="tk-close" title="Archive ticket" style="color:var(--red)" onclick="archiveTicket('${t.id}')">🗑</button>
       <button class="tk-close" onclick="closePanel()">✕</button>
     </div>
     <div class="tk-body">
+      ${t.archived ? `<div class="linked-box" style="background:var(--bg4);border-color:var(--border2);display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span>🗄 This ticket is archived (${t.archived_at ? timeAgo(t.archived_at)+' ago' : ''}).</span>
+        <button class="btn btn-sm btn-teal" onclick="unarchiveTicket('${t.id}')">Restore to Active</button>
+      </div>` : ''}
       ${duplicates.length ? `<div class="linked-box" style="background:var(--orange-dim);border-color:rgba(224,123,40,.3)">
         <div class="lk-title" style="color:var(--orange)">⚠ ${duplicates.length} Other Open Ticket${duplicates.length===1?'':'s'} — Same ${t.customer_email && duplicates.some(d=>d.customer_email===t.customer_email) ? 'Customer' : 'Order'}</div>
         ${duplicates.map(d=>`<div style="margin-top:4px"><span class="pill pill-orange" style="cursor:pointer" onclick="openTicket('${d.id}')">#${d.ticket_number} — ${escapeHtml(d.subject)}</span></div>`).join('')}
@@ -1626,7 +1636,7 @@ async function removeTicketTag(ticketId, tag){
 }
 window.removeTicketTag = removeTicketTag;
 
-function deleteTicket(id){
+function archiveTicket(id){
   const t = S.tickets.find(x=>x.id===id);
   if(!t) return;
 
@@ -1635,8 +1645,8 @@ function deleteTicket(id){
   const linked = linkedWarranty || linkedShipErr;
 
   if(!linked){
-    if(!confirm(`Delete ticket #${t.ticket_number} — "${t.subject}"? This also deletes its message history. This can't be undone.`)) return;
-    performDeleteTicket(id, false);
+    if(!confirm(`Archive ticket #${t.ticket_number} — "${t.subject}"? It'll disappear from your active lists but stays in the system — if the customer replies later, it reopens automatically instead of creating a confusing new ticket.`)) return;
+    performArchiveTicket(id, false);
     return;
   }
 
@@ -1645,29 +1655,29 @@ function deleteTicket(id){
   ov.classList.remove('hidden');
   ov.innerHTML = `
     <div class="modal">
-      <div class="modal-title">Delete Ticket #${t.ticket_number}?</div>
-      <p style="font-size:12.5px;color:var(--text2);margin-bottom:14px">This ticket is linked to a <strong>${kindLabel}</strong> in the ERP. Deleting the ticket won't automatically remove that record — the warehouse may already be working on it.</p>
+      <div class="modal-title">Archive Ticket #${t.ticket_number}?</div>
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:14px">It'll disappear from active lists but stays in the system — if the customer replies later, it reopens automatically. This ticket is also linked to a <strong>${kindLabel}</strong> in the ERP. Archiving the ticket won't remove that record — the warehouse may already be working on it.</p>
       <div class="checkbox-row" style="margin-bottom:16px">
         <input type="checkbox" id="alsoDeleteLinked">
-        <label for="alsoDeleteLinked">Also delete the linked ${kindLabel} from the ERP (removes it from the warehouse queue too)</label>
+        <label for="alsoDeleteLinked">Also delete the linked ${kindLabel} from the ERP (removes it from the warehouse queue too — this part can't be undone)</label>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
-        <button class="btn danger" style="background:var(--red);color:#fff" onclick="confirmDeleteTicketWithLink('${id}')">Delete Ticket</button>
+        <button class="btn btn-primary" onclick="confirmArchiveTicketWithLink('${id}')">Archive Ticket</button>
       </div>
     </div>
   `;
 }
-window.deleteTicket = deleteTicket;
+window.archiveTicket = archiveTicket;
 
-async function confirmDeleteTicketWithLink(id){
+async function confirmArchiveTicketWithLink(id){
   const alsoDelete = document.getElementById('alsoDeleteLinked').checked;
   closeModal();
-  await performDeleteTicket(id, alsoDelete);
+  await performArchiveTicket(id, alsoDelete);
 }
-window.confirmDeleteTicketWithLink = confirmDeleteTicketWithLink;
+window.confirmArchiveTicketWithLink = confirmArchiveTicketWithLink;
 
-async function performDeleteTicket(id, alsoDeleteLinked){
+async function performArchiveTicket(id, alsoDeleteLinked){
   const t = S.tickets.find(x=>x.id===id);
   if(!t) return;
   try{
@@ -1683,17 +1693,36 @@ async function performDeleteTicket(id, alsoDeleteLinked){
         S.shipErrors = S.shipErrors.filter(e=>e.id!==t.shipment_error_id);
       }
     }
-    const { error } = await sb.from('tickets').delete().eq('id', id);
+    const { data, error } = await sb.from('tickets').update({ archived: true, archived_at: new Date().toISOString() }).eq('id', id).select().single();
     if(error) throw error;
-    S.tickets = S.tickets.filter(x=>x.id!==id);
+    const idx = S.tickets.findIndex(x=>x.id===id);
+    if(idx!==-1) S.tickets[idx] = data;
+    await logActivity(id, 'archived', 'false', 'true');
     closePanel();
-    toast('Ticket #' + t.ticket_number + ' deleted' + (alsoDeleteLinked ? ' along with its linked ERP record' : ''));
+    toast('Ticket #' + t.ticket_number + ' archived' + (alsoDeleteLinked ? ' along with its linked ERP record' : ''));
     renderNav();
     renderPage();
   }catch(e){
-    toast('Failed to delete: ' + e.message, true);
+    toast('Failed to archive: ' + e.message, true);
   }
 }
+
+async function unarchiveTicket(id){
+  try{
+    const { data, error } = await sb.from('tickets').update({ archived: false, archived_at: null }).eq('id', id).select().single();
+    if(error) throw error;
+    const idx = S.tickets.findIndex(x=>x.id===id);
+    if(idx!==-1) S.tickets[idx] = data;
+    S.activeTicket = data;
+    await logActivity(id, 'archived', 'true', 'false');
+    toast('Ticket #' + data.ticket_number + ' restored to active');
+    renderNav();
+    renderTicketPanel(data);
+  }catch(e){
+    toast('Failed to restore: ' + e.message, true);
+  }
+}
+window.unarchiveTicket = unarchiveTicket;
 
 function openMergeModal(sourceId){
   const source = S.tickets.find(x=>x.id===sourceId);
