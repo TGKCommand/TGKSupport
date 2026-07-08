@@ -593,6 +593,14 @@ function renderPage(){
 /* ============================================================
    DASHBOARD
    ============================================================ */
+function runDashboardSearch(){
+  const q = document.getElementById('dashSearchInput').value.trim();
+  if(!q) return;
+  S.filters = { status: '', priority: '', source: '', tag: '', q };
+  goPage('tickets');
+}
+window.runDashboardSearch = runDashboardSearch;
+
 function renderDashboard(){
   const t = S.tickets;
   const open = t.filter(x=>x.status==='open').length;
@@ -605,6 +613,13 @@ function renderDashboard(){
 
   const el = document.getElementById('content');
   el.innerHTML = `
+    <div class="filter-bar" style="margin-bottom:20px">
+      <div class="search-wrap" style="max-width:480px">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="dashSearchInput" placeholder="Search tickets by subject, customer, or order #..." onkeydown="if(event.key==='Enter')runDashboardSearch()">
+      </div>
+      <button class="btn btn-primary" onclick="runDashboardSearch()">Search</button>
+    </div>
     <div class="kpi-grid kpi-grid-4">
       <div class="kpi"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
       <div class="kpi kpi-red"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
