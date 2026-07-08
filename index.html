@@ -1473,10 +1473,10 @@ function renderTicketPanel(t){
         <div class="tab" id="tabActivity" onclick="switchThreadTab('activity')">Activity Log</div>
       </div>
       <div id="threadBox">${renderThread(msgs, false)}</div>
-      <div id="replyComposer" style="margin-top:12px">
+      <div id="replyComposer" style="margin-top:12px" data-mode="conv">
+        <div id="composerModeLabel" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Replying in Conversation — visible to customer</div>
         <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
-        <div class="checkbox-row" style="justify-content:space-between">
-          <span><input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label></span>
+        <div class="checkbox-row" style="justify-content:flex-end">
           <label class="btn btn-sm" style="cursor:pointer;margin:0">📎 Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
         </div>
         <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
@@ -1487,7 +1487,7 @@ function renderTicketPanel(t){
       </div>
     </div>
     <div class="tk-foot" id="tkFoot">
-      <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="sendMessage('${t.id}')">Send</button>
+      <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="sendMessage('${t.id}')" id="sendBtn">Send</button>
       ${t.status!=='closed' ? `<button class="btn btn-teal" onclick="updateTicketField('${t.id}','status','resolved')">Mark Resolved</button>` : ''}
       <button class="btn" onclick="openMergeModal('${t.id}')">Merge Into...</button>
     </div>
@@ -1511,6 +1511,24 @@ function switchThreadTab(mode){
     if(foot) foot.style.display = 'flex';
     document.getElementById('threadBox').innerHTML = renderThread(S.messages[S.activeTicket.id]||[], showingNotes);
     scrollThreadToBottom();
+
+    if(composer) composer.setAttribute('data-mode', mode);
+    const label = document.getElementById('composerModeLabel');
+    const msgBox = document.getElementById('msgBox');
+    const emailRow = document.getElementById('emailChkRow');
+    const sendBtn = document.getElementById('sendBtn');
+    const t = S.activeTicket;
+    if(mode === 'notes'){
+      if(label){ label.textContent = 'Writing an Internal Note — staff only, never sent to the customer'; label.style.color = 'var(--orange)'; }
+      if(msgBox) msgBox.placeholder = 'Type an internal note...';
+      if(emailRow) emailRow.style.display = 'none';
+      if(sendBtn){ sendBtn.textContent = 'Add Note'; sendBtn.classList.remove('btn-primary'); sendBtn.classList.add('btn-teal'); }
+    } else {
+      if(label){ label.textContent = 'Replying in Conversation — visible to customer'; label.style.color = 'var(--text3)'; }
+      if(msgBox) msgBox.placeholder = 'Type a reply...';
+      if(emailRow) emailRow.style.display = (t && t.customer_email) ? 'flex' : 'none';
+      if(sendBtn){ sendBtn.textContent = 'Send'; sendBtn.classList.remove('btn-teal'); sendBtn.classList.add('btn-primary'); }
+    }
   }
 }
 window.switchThreadTab = switchThreadTab;
@@ -1871,7 +1889,8 @@ window.removePendingAttachment = removePendingAttachment;
 
 async function sendMessage(ticketId){
   const box = document.getElementById('msgBox');
-  const isNote = document.getElementById('isNoteChk').checked;
+  const composer = document.getElementById('replyComposer');
+  const isNote = composer && composer.getAttribute('data-mode') === 'notes';
   const emailChkEl = document.getElementById('emailChk');
   const shouldEmail = !isNote && emailChkEl && emailChkEl.checked;
   const body = box.value.trim();
@@ -1891,7 +1910,6 @@ async function sendMessage(ticketId){
     if(!S.messages[ticketId]) S.messages[ticketId] = [];
     S.messages[ticketId].push(data);
     box.value = '';
-    document.getElementById('isNoteChk').checked = false;
     pendingMsgAttachments = [];
     const preview = document.getElementById('msgAttachPreview');
     if(preview) preview.innerHTML = '';
