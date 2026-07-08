@@ -1464,6 +1464,19 @@ function renderTicketPanel(t){
           <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
         </div>
       </div>` : ''}
+      <div class="linked-box">
+        <div class="lk-title">Return Label</div>
+        ${t.return_tracking_number ? `
+          <div style="font-size:12.5px;margin-bottom:8px">Tracking: <span class="pn">${escapeHtml(t.return_tracking_number)}</span>${t.return_carrier?' · '+escapeHtml(t.return_carrier):''}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${t.return_label_url ? `<a href="${t.return_label_url}" target="_blank" class="btn btn-sm">View/Download Label</a>` : ''}
+            <button class="btn btn-sm btn-teal" onclick="openReturnLabelModal('${t.id}')">Generate New Label</button>
+          </div>
+        ` : `
+          <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">No return label generated yet.</div>
+          <button class="btn btn-sm btn-teal" onclick="openReturnLabelModal('${t.id}')">Generate Return Label</button>
+        `}
+      </div>
       <div id="orderLookupBox"></div>
       ${t.order_number ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="lookupOrder('${t.id}')">Look Up Order in ERP Data</button>` : ''}
 
@@ -1750,6 +1763,91 @@ async function unarchiveTicket(id){
   }
 }
 window.unarchiveTicket = unarchiveTicket;
+
+function openReturnLabelModal(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t){ toast('Ticket not found', true); return; }
+  const addr = t.shipping_address || {};
+  if(!addr.street1 || !addr.city){
+    toast('Fill in the customer\'s shipping address first — see the Shipping Address section above', true);
+    return;
+  }
+
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Generate Return Label</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">Creates a real ShipStation label shipping FROM the customer back TO your warehouse. Review the address below.</div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Name</label><input class="form-input" id="rlName" value="${escapeHtml(addr.name||t.customer_name||'')}"></div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Street Address</label><input class="form-input" id="rlStreet1" value="${escapeHtml(addr.street1||'')}"></div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Street Address 2</label><input class="form-input" id="rlStreet2" value="${escapeHtml(addr.street2||'')}"></div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">City</label><input class="form-input" id="rlCity" value="${escapeHtml(addr.city||'')}"></div>
+        <div class="form-group"><label class="form-label">State</label><input class="form-input" id="rlState" value="${escapeHtml(addr.state||'')}"></div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">ZIP</label><input class="form-input" id="rlZip" value="${escapeHtml(addr.postal_code||'')}"></div>
+        <div class="form-group"><label class="form-label">Country</label><input class="form-input" id="rlCountry" value="${escapeHtml(addr.country||'US')}"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Package Weight (oz)</label><input class="form-input" id="rlWeight" type="number" value="16" min="1"></div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="rlSubmitBtn" onclick="submitReturnLabel('${ticketId}')">Generate Label</button>
+      </div>
+    </div>
+  `;
+}
+window.openReturnLabelModal = openReturnLabelModal;
+
+async function submitReturnLabel(ticketId){
+  const val = id => document.getElementById(id).value.trim();
+  const btn = document.getElementById('rlSubmitBtn');
+  const customerAddress = {
+    name: val('rlName'),
+    street1: val('rlStreet1'),
+    street2: val('rlStreet2'),
+    city: val('rlCity'),
+    state: val('rlState'),
+    postal_code: val('rlZip'),
+    country: val('rlCountry') || 'US'
+  };
+  if(!customerAddress.street1 || !customerAddress.city || !customerAddress.state || !customerAddress.postal_code){
+    toast('Street, city, state, and ZIP are required', true);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Generating...';
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/generate-return-label`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        ticket_id: ticketId,
+        customer_address: customerAddress,
+        weight_oz: parseInt(val('rlWeight'), 10) || 16
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error || 'Label generation failed');
+
+    const { data: updated } = await sb.from('tickets').select('*').eq('id', ticketId).single();
+    if(updated){
+      const idx = S.tickets.findIndex(x=>x.id===ticketId);
+      if(idx!==-1) S.tickets[idx] = updated;
+      S.activeTicket = updated;
+      await loadMessages(ticketId);
+      renderTicketPanel(updated);
+    }
+    closeModal();
+    toast('Return label generated — tracking: ' + (result.tracking_number || 'see ticket'));
+  }catch(e){
+    toast('Failed to generate label: ' + e.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Generate Label';
+  }
+}
+window.submitReturnLabel = submitReturnLabel;
 
 function openMergeModal(sourceId){
   const source = S.tickets.find(x=>x.id===sourceId);
