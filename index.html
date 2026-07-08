@@ -73,6 +73,7 @@ input,button,select,textarea{font-family:var(--font)}
 .panel-title{font-size:10.5px;font-weight:700;letter-spacing:.11em;text-transform:uppercase;color:var(--text2);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
 .kpi-grid{display:grid;gap:10px;margin-bottom:18px}
 .kpi-grid-4{grid-template-columns:repeat(4,1fr)}
+.kpi-grid-5{grid-template-columns:repeat(5,1fr)}
 .kpi{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px 18px}
 .kpi-label{font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--text3)}
 .kpi-value{font-size:24px;font-weight:600;line-height:1.1;font-family:var(--mono);margin-top:4px}
@@ -252,12 +253,14 @@ const S = {
   page: 'dashboard',
   tickets: [],
   messages: {},
+  activityLog: {},
+  selectedTickets: new Set(),
   warranty: [],
   shipErrors: [],
   dealers: [],
   team: [],
   activeTicket: null,
-  filters: { status: 'open', priority: '', source: '', tag: '', q: '' },
+  filters: { status: 'open', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, q: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -597,7 +600,7 @@ function renderPage(){
 function runDashboardSearch(){
   const q = document.getElementById('dashSearchInput').value.trim();
   if(!q) return;
-  S.filters = { status: '', priority: '', source: '', tag: '', q };
+  S.filters = { status: '', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, q };
   goPage('tickets');
 }
 window.runDashboardSearch = runDashboardSearch;
@@ -607,6 +610,7 @@ function renderDashboard(){
   const open = t.filter(x=>x.status==='open').length;
   const urgent = t.filter(x=>x.priority==='urgent' && !['resolved','closed'].includes(x.status)).length;
   const today = t.filter(x=> new Date(x.created_at).toDateString() === new Date().toDateString()).length;
+  const stale = t.filter(isStale).length;
   const resolved = t.filter(x=>x.resolved_at);
   const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
   const bySource = {};
@@ -621,9 +625,10 @@ function renderDashboard(){
       </div>
       <button class="btn btn-primary" onclick="runDashboardSearch()">Search</button>
     </div>
-    <div class="kpi-grid kpi-grid-4">
+    <div class="kpi-grid kpi-grid-5">
       <div class="kpi"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
       <div class="kpi kpi-red"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
+      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',q:'',staleOnly:true}; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h untouched)</div><div class="kpi-value">${stale}</div></div>
       <div class="kpi kpi-teal"><div class="kpi-label">New Today</div><div class="kpi-value">${today}</div></div>
       <div class="kpi kpi-orange"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
     </div>
@@ -663,11 +668,94 @@ function renderTicketsList(){
         <option value="">All Tags</option>
         ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${S.filters.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
       </select>
-      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',q:''}; renderTicketsList()">Clear</button>
+      <select class="form-input" style="width:auto" onchange="S.filters.assignedTo=this.value; renderTicketsList()">
+        <option value="">Everyone</option>
+        <option value="__unassigned__" ${S.filters.assignedTo==='__unassigned__'?'selected':''}>Unassigned</option>
+        ${S.team.map(m=>`<option value="${m.email}" ${S.filters.assignedTo===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
+      </select>
+      <label class="checkbox-row" style="margin:0;cursor:pointer">
+        <input type="checkbox" ${S.filters.staleOnly?'checked':''} onchange="S.filters.staleOnly=this.checked; renderTicketsList()">
+        <span>Stale only</span>
+      </label>
+      ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
+      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,q:''}; renderTicketsList()">Clear</button>
     </div>
-    ${ticketTable(filteredTickets())}
+    ${renderBulkActionBar()}
+    ${ticketTable(filteredTickets(), true)}
   `;
 }
+
+function renderBulkActionBar(){
+  const n = S.selectedTickets.size;
+  if(!n) return '';
+  return `<div class="panel" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;margin-bottom:12px;background:var(--teal-dim);border-color:rgba(13,148,136,.25)">
+    <span style="font-size:12.5px;font-weight:600;color:var(--teal)">${n} selected</span>
+    <select class="form-input" style="width:auto" onchange="if(this.value){bulkSetStatus(this.value); this.value='';}">
+      <option value="">Set Status...</option>
+      ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}">${label(s)}</option>`).join('')}
+    </select>
+    <select class="form-input" style="width:auto" onchange="if(this.value){bulkAssign(this.value); this.value='';}">
+      <option value="">Assign To...</option>
+      <option value="__unassigned__">Unassigned</option>
+      ${S.team.map(m=>`<option value="${m.email}">${escapeHtml(m.display_name||m.email)}</option>`).join('')}
+    </select>
+    <select class="form-input" style="width:auto" onchange="if(this.value){bulkSetPriority(this.value); this.value='';}">
+      <option value="">Set Priority...</option>
+      ${['low','medium','high','urgent'].map(s=>`<option value="${s}">${label(s)}</option>`).join('')}
+    </select>
+    <button class="btn btn-sm" onclick="clearTicketSelection()">Clear Selection</button>
+  </div>`;
+}
+
+function toggleTicketSelect(id, checked){
+  if(checked) S.selectedTickets.add(id); else S.selectedTickets.delete(id);
+  renderTicketsList();
+}
+window.toggleTicketSelect = toggleTicketSelect;
+
+function toggleSelectAllTickets(checked, ids){
+  if(checked) ids.forEach(id=>S.selectedTickets.add(id));
+  else ids.forEach(id=>S.selectedTickets.delete(id));
+  renderTicketsList();
+}
+window.toggleSelectAllTickets = toggleSelectAllTickets;
+
+function clearTicketSelection(){
+  S.selectedTickets.clear();
+  renderTicketsList();
+}
+window.clearTicketSelection = clearTicketSelection;
+
+async function bulkUpdateField(field, value){
+  const ids = Array.from(S.selectedTickets);
+  if(!ids.length) return;
+  try{
+    const patch = { [field]: value, updated_at: new Date().toISOString() };
+    if(field==='status' && (value==='resolved'||value==='closed')) patch.resolved_at = new Date().toISOString();
+    const { data, error } = await sb.from('tickets').update(patch).in('id', ids).select();
+    if(error) throw error;
+    (data||[]).forEach(updated=>{
+      const idx = S.tickets.findIndex(x=>x.id===updated.id);
+      if(idx!==-1) S.tickets[idx] = updated;
+    });
+    // Log activity per ticket (best-effort, doesn't block on failure)
+    ids.forEach(id=> logActivity(id, field, null, value));
+    toast(`Updated ${ids.length} ticket${ids.length===1?'':'s'}`);
+    renderNav();
+    renderTicketsList();
+  }catch(e){
+    toast('Bulk update failed: ' + e.message, true);
+  }
+}
+
+function bulkSetStatus(status){ bulkUpdateField('status', status); }
+window.bulkSetStatus = bulkSetStatus;
+
+function bulkSetPriority(priority){ bulkUpdateField('priority', priority); }
+window.bulkSetPriority = bulkSetPriority;
+
+function bulkAssign(value){ bulkUpdateField('assigned_to', value==='__unassigned__' ? null : value); }
+window.bulkAssign = bulkAssign;
 
 function filteredTickets(){
   let list = S.tickets.slice();
@@ -676,6 +764,9 @@ function filteredTickets(){
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
+  if(f.assignedTo === '__unassigned__') list = list.filter(t=>!t.assigned_to);
+  else if(f.assignedTo) list = list.filter(t=>t.assigned_to===f.assignedTo);
+  if(f.staleOnly) list = list.filter(isStale);
   if(f.q){
     const q = f.q.toLowerCase();
     list = list.filter(t=>
@@ -694,21 +785,30 @@ function label(s){ return (s||'').replace(/_/g,' ').replace(/\b\w/g, c=>c.toUppe
 const CLAIM_DONE_STATUSES = ['Resolved','Closed','Denied'];
 function isActiveClaim(status){ return !CLAIM_DONE_STATUSES.includes(status); }
 
+const STALE_THRESHOLD_HOURS = 24;
+function isStale(t){
+  if(!['open','pending'].includes(t.status)) return false;
+  return (Date.now() - new Date(t.updated_at).getTime()) > STALE_THRESHOLD_HOURS * 3600000;
+}
+
 const STATUS_PILL = { open:'pill-teal', pending:'pill-yellow', waiting_customer:'pill-orange', resolved:'pill-green', closed:'pill-muted' };
 const PRIORITY_PILL = { low:'pill-muted', medium:'pill-yellow', high:'pill-orange', urgent:'pill-red' };
 const TICKET_CATEGORIES = ['Shipping','Warranty/Defect','Billing','Return/Refund','Part Compatibility','General Question','Other'];
 
-function ticketTable(list){
+function ticketTable(list, enableBulk){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
+  const allSelected = enableBulk && list.length>0 && list.every(t=>S.selectedTickets.has(t.id));
   return `<div class="tbl-wrap"><table>
     <thead><tr>
+      ${enableBulk ? `<th style="width:28px"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAllTickets(this.checked, ${JSON.stringify(list.map(t=>t.id))})"></th>` : ''}
       <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
     </tr></thead>
     <tbody>
       ${list.map(t=>`
-        <tr class="rowlink" onclick="openTicket('${t.id}')">
-          <td class="pn">#${t.ticket_number}</td>
-          <td class="main-col" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
+        <tr class="rowlink" onclick="${enableBulk?'':`openTicket('${t.id}')`}">
+          ${enableBulk ? `<td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedTickets.has(t.id)?'checked':''} onchange="toggleTicketSelect('${t.id}', this.checked)"></td>` : ''}
+          <td class="pn" ${enableBulk?`style="cursor:pointer" onclick="openTicket('${t.id}')"`:''}>#${t.ticket_number}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
@@ -1236,6 +1336,12 @@ function renderTicketPanel(t){
   const dealer = S.dealers.find(d=>d.id===t.dealer_id);
   const warranty = t.warranty_claim_id ? S.warranty.find(w=>w.id===t.warranty_claim_id) : null;
   const shipErr = t.shipment_error_id ? S.shipErrors.find(e=>e.id===t.shipment_error_id) : null;
+  const duplicates = S.tickets.filter(other =>
+    other.id !== t.id &&
+    !['resolved','closed'].includes(other.status) &&
+    ((t.customer_email && other.customer_email === t.customer_email) ||
+     (t.order_number && other.order_number === t.order_number))
+  );
 
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
@@ -1244,6 +1350,10 @@ function renderTicketPanel(t){
       <button class="tk-close" onclick="closePanel()">✕</button>
     </div>
     <div class="tk-body">
+      ${duplicates.length ? `<div class="linked-box" style="background:var(--orange-dim);border-color:rgba(224,123,40,.3)">
+        <div class="lk-title" style="color:var(--orange)">⚠ ${duplicates.length} Other Open Ticket${duplicates.length===1?'':'s'} — Same ${t.customer_email && duplicates.some(d=>d.customer_email===t.customer_email) ? 'Customer' : 'Order'}</div>
+        ${duplicates.map(d=>`<div style="margin-top:4px"><span class="pill pill-orange" style="cursor:pointer" onclick="openTicket('${d.id}')">#${d.ticket_number} — ${escapeHtml(d.subject)}</span></div>`).join('')}
+      </div>` : ''}
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">Subject</label>
         <input class="form-input" value="${escapeHtml(t.subject)}" onchange="updateTicketField('${t.id}','subject',this.value)">
@@ -1345,11 +1455,12 @@ function renderTicketPanel(t){
       ${t.order_number ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="lookupOrder('${t.id}')">Look Up Order in ERP Data</button>` : ''}
 
       <div class="tabs-row">
-        <div class="tab active" id="tabConv" onclick="switchThreadTab(true)">Conversation</div>
-        <div class="tab" id="tabNotes" onclick="switchThreadTab(false)">Internal Notes</div>
+        <div class="tab active" id="tabConv" onclick="switchThreadTab('conv')">Conversation</div>
+        <div class="tab" id="tabNotes" onclick="switchThreadTab('notes')">Internal Notes</div>
+        <div class="tab" id="tabActivity" onclick="switchThreadTab('activity')">Activity Log</div>
       </div>
       <div id="threadBox">${renderThread(msgs, false)}</div>
-      <div style="margin-top:12px">
+      <div id="replyComposer" style="margin-top:12px">
         <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
         <div class="checkbox-row" style="justify-content:space-between">
           <span><input type="checkbox" id="isNoteChk" onchange="document.getElementById('emailChkRow').style.display=this.checked?'none':'flex'"><label for="isNoteChk">Internal note (not visible to customer)</label></span>
@@ -1362,21 +1473,60 @@ function renderTicketPanel(t){
         </div>
       </div>
     </div>
-    <div class="tk-foot">
+    <div class="tk-foot" id="tkFoot">
       <button class="btn btn-primary" style="flex:1;justify-content:center" onclick="sendMessage('${t.id}')">Send</button>
       ${t.status!=='closed' ? `<button class="btn btn-teal" onclick="updateTicketField('${t.id}','status','resolved')">Mark Resolved</button>` : ''}
       <button class="btn" onclick="openMergeModal('${t.id}')">Merge Into...</button>
     </div>
   `;
+  loadActivityLog(t.id);
 }
 
-function switchThreadTab(conv){
-  showingNotes = !conv;
-  document.getElementById('tabConv').classList.toggle('active', conv);
-  document.getElementById('tabNotes').classList.toggle('active', !conv);
-  document.getElementById('threadBox').innerHTML = renderThread(S.messages[S.activeTicket.id]||[], showingNotes);
+function switchThreadTab(mode){
+  showingNotes = (mode === 'notes');
+  document.getElementById('tabConv').classList.toggle('active', mode==='conv');
+  document.getElementById('tabNotes').classList.toggle('active', mode==='notes');
+  document.getElementById('tabActivity').classList.toggle('active', mode==='activity');
+  const composer = document.getElementById('replyComposer');
+  const foot = document.getElementById('tkFoot');
+  if(mode === 'activity'){
+    if(composer) composer.style.display = 'none';
+    if(foot) foot.style.display = 'none';
+    document.getElementById('threadBox').innerHTML = renderActivityLog(S.activityLog[S.activeTicket.id]||[]);
+  } else {
+    if(composer) composer.style.display = '';
+    if(foot) foot.style.display = 'flex';
+    document.getElementById('threadBox').innerHTML = renderThread(S.messages[S.activeTicket.id]||[], showingNotes);
+  }
 }
 window.switchThreadTab = switchThreadTab;
+
+async function loadActivityLog(ticketId){
+  const { data, error } = await sb.from('ticket_activity_log').select('*').eq('ticket_id', ticketId).order('changed_at',{ascending:false});
+  if(!error){
+    S.activityLog[ticketId] = data || [];
+    const activityTab = document.getElementById('tabActivity');
+    if(activityTab && activityTab.classList.contains('active')){
+      document.getElementById('threadBox').innerHTML = renderActivityLog(S.activityLog[ticketId]);
+    }
+  }
+}
+
+function renderActivityLog(entries){
+  if(!entries.length) return `<div class="empty">No changes logged yet.</div>`;
+  const FIELD_LABELS = { status:'Status', priority:'Priority', assigned_to:'Assigned To', tag_added:'Tag Added', tag_removed:'Tag Removed' };
+  return entries.map(e=>{
+    const fieldLabel = FIELD_LABELS[e.field_changed] || e.field_changed;
+    let desc;
+    if(e.field_changed==='tag_added') desc = `Added tag "${escapeHtml(e.new_value)}"`;
+    else if(e.field_changed==='tag_removed') desc = `Removed tag "${escapeHtml(e.old_value)}"`;
+    else desc = `${fieldLabel} changed from "${escapeHtml(e.old_value||'—')}" to "${escapeHtml(e.new_value||'—')}"`;
+    return `<div class="msg system">
+      <div class="meta"><span>${escapeHtml(e.changed_by||'System')}</span><span>·</span><span>${timeAgo(e.changed_at)}</span></div>
+      <div>${desc}</div>
+    </div>`;
+  }).join('');
+}
 
 function renderAttachments(attachments){
   if(!attachments || !attachments.length) return '';
@@ -1402,8 +1552,24 @@ function renderThread(msgs, notesOnly){
   `).join('');
 }
 
+const TRACKED_ACTIVITY_FIELDS = ['status','priority','assigned_to'];
+
+async function logActivity(ticketId, fieldChanged, oldValue, newValue){
+  try{
+    await sb.from('ticket_activity_log').insert({
+      ticket_id: ticketId,
+      field_changed: fieldChanged,
+      old_value: oldValue!=null ? String(oldValue) : null,
+      new_value: newValue!=null ? String(newValue) : null,
+      changed_by: S.user ? S.user.email : null
+    });
+  }catch(e){ /* non-critical, don't block the actual update on log failure */ }
+}
+
 async function updateTicketField(id, field, value){
   try{
+    const before = S.tickets.find(x=>x.id===id);
+    const oldValue = before ? before[field] : undefined;
     const patch = { [field]: value, updated_at: new Date().toISOString() };
     if(field==='status' && (value==='resolved'||value==='closed')) patch.resolved_at = new Date().toISOString();
     const { data, error } = await sb.from('tickets').update(patch).eq('id', id).select().single();
@@ -1411,6 +1577,9 @@ async function updateTicketField(id, field, value){
     const idx = S.tickets.findIndex(x=>x.id===id);
     if(idx!==-1) S.tickets[idx] = data;
     S.activeTicket = data;
+    if(TRACKED_ACTIVITY_FIELDS.includes(field) && oldValue !== value){
+      await logActivity(id, field, oldValue, value);
+    }
     toast('Ticket updated');
     renderNav();
     if(S.page!=='dashboard') renderPage();
@@ -1427,6 +1596,7 @@ async function addTicketTag(ticketId, tag){
   if(!t) return;
   const tags = Array.from(new Set([...(t.tags||[]), tag]));
   await updateTicketField(ticketId, 'tags', tags);
+  await logActivity(ticketId, 'tag_added', null, tag);
   if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
 }
 window.addTicketTag = addTicketTag;
@@ -1451,6 +1621,7 @@ async function removeTicketTag(ticketId, tag){
   if(!t) return;
   const tags = (t.tags||[]).filter(x=>x!==tag);
   await updateTicketField(ticketId, 'tags', tags);
+  await logActivity(ticketId, 'tag_removed', tag, null);
   if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
 }
 window.removeTicketTag = removeTicketTag;
