@@ -423,7 +423,72 @@ function subscribeRealtime(){
         }
       }
     })
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'warranty_claims' }, payload=>{
+      handleErpClaimUpdate('warranty', payload.old, payload.new);
+    })
+    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'shipment_errors' }, payload=>{
+      handleErpClaimUpdate('shipment_error', payload.old, payload.new);
+    })
     .subscribe();
+}
+
+/* ============================================================
+   ERP → TICKET PING-BACK
+   When the ERP ships a warranty claim (status → 'Shipped') or a
+   shipment error (tracking_number newly set / status → 'Reshipping'),
+   reflect that on the linked ticket automatically: bump its status,
+   flag it unread, and drop an internal note so staff see it happened
+   without having to go check the ERP themselves.
+   ============================================================ */
+async function handleErpClaimUpdate(kind, oldRow, newRow){
+  const idx = kind==='warranty' ? S.warranty.findIndex(w=>w.id===newRow.id) : S.shipErrors.findIndex(e=>e.id===newRow.id);
+  if(idx!==-1){ if(kind==='warranty'){ S.warranty[idx]=newRow; } else { S.shipErrors[idx]=newRow; } }
+  if(S.page==='warranty' || S.page==='shiperrors') renderPage();
+
+  const justShipped = (!oldRow.tracking_number && newRow.tracking_number) ||
+    (oldRow.status !== newRow.status && ['Shipped','Reshipping'].includes(newRow.status));
+  if(!justShipped) return;
+
+  const ticket = kind==='warranty'
+    ? S.tickets.find(t=>t.warranty_claim_id===newRow.id)
+    : S.tickets.find(t=>t.shipment_error_id===newRow.id);
+  if(!ticket) return;
+
+  try{
+    const noteBody = `📦 ERP update: ${kind==='warranty'?'Warranty claim':'Shipment error'} marked as shipped`
+      + (newRow.carrier ? ` via ${newRow.carrier}` : '')
+      + (newRow.tracking_number ? ` — tracking: ${newRow.tracking_number}` : '')
+      + `. (Synced automatically from the ERP.)`;
+
+    await sb.from('ticket_messages').insert({
+      ticket_id: ticket.id,
+      sender_type: 'system',
+      sender_name: 'System',
+      body: noteBody,
+      is_internal_note: true
+    });
+
+    const needsUpdate = !['closed','resolved'].includes(ticket.status);
+    const { data: updated, error } = await sb.from('tickets').update({
+      status: needsUpdate ? 'waiting_customer' : ticket.status,
+      has_unread: true,
+      updated_at: new Date().toISOString()
+    }).eq('id', ticket.id).select().single();
+    if(error) throw error;
+
+    const tIdx = S.tickets.findIndex(t=>t.id===ticket.id);
+    if(tIdx!==-1) S.tickets[tIdx] = updated;
+    if(S.activeTicket && S.activeTicket.id===ticket.id){
+      S.activeTicket = updated;
+      await loadMessages(ticket.id);
+      renderTicketPanel(updated);
+    }
+    toast(`Ticket #${updated.ticket_number} updated — shipped from the ERP`);
+    renderNav();
+    if(S.page==='tickets' || S.page==='dashboard') renderPage();
+  }catch(e){
+    console.error('Failed to sync ERP shipment back to ticket:', e);
+  }
 }
 
 function handleTicketRealtime(payload){
@@ -1178,15 +1243,16 @@ function renderTicketPanel(t){
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">Shipping Address</label>
         <div style="display:flex;flex-direction:column;gap:6px">
-          <input class="form-input" id="addr_line1_${t.id}" placeholder="Address line 1" value="${escapeHtml((t.shipping_address||{}).line1||'')}" onchange="updateShippingAddress('${t.id}')">
-          <input class="form-input" id="addr_line2_${t.id}" placeholder="Address line 2 (optional)" value="${escapeHtml((t.shipping_address||{}).line2||'')}" onchange="updateShippingAddress('${t.id}')">
+          <input class="form-input" id="addr_name_${t.id}" placeholder="Recipient name" value="${escapeHtml((t.shipping_address||{}).name||t.customer_name||'')}" onchange="updateShippingAddress('${t.id}')">
+          <input class="form-input" id="addr_street1_${t.id}" placeholder="Street address" value="${escapeHtml((t.shipping_address||{}).street1||'')}" onchange="updateShippingAddress('${t.id}')">
+          <input class="form-input" id="addr_street2_${t.id}" placeholder="Apt, Suite... (optional)" value="${escapeHtml((t.shipping_address||{}).street2||'')}" onchange="updateShippingAddress('${t.id}')">
           <div class="form-row cols-2" style="margin-bottom:0">
             <input class="form-input" id="addr_city_${t.id}" placeholder="City" value="${escapeHtml((t.shipping_address||{}).city||'')}" onchange="updateShippingAddress('${t.id}')">
-            <input class="form-input" id="addr_state_${t.id}" placeholder="State" value="${escapeHtml((t.shipping_address||{}).state||'')}" onchange="updateShippingAddress('${t.id}')">
+            <input class="form-input" id="addr_state_${t.id}" placeholder="State / Province" value="${escapeHtml((t.shipping_address||{}).state||'')}" onchange="updateShippingAddress('${t.id}')">
           </div>
           <div class="form-row cols-2" style="margin-bottom:0">
-            <input class="form-input" id="addr_zip_${t.id}" placeholder="ZIP / Postal Code" value="${escapeHtml((t.shipping_address||{}).zip||'')}" onchange="updateShippingAddress('${t.id}')">
-            <input class="form-input" id="addr_country_${t.id}" placeholder="Country" value="${escapeHtml((t.shipping_address||{}).country||'')}" onchange="updateShippingAddress('${t.id}')">
+            <input class="form-input" id="addr_postal_${t.id}" placeholder="ZIP / Postal Code" value="${escapeHtml((t.shipping_address||{}).postal_code||'')}" onchange="updateShippingAddress('${t.id}')">
+            <input class="form-input" id="addr_country_${t.id}" placeholder="Country" value="${escapeHtml((t.shipping_address||{}).country||'US')}" onchange="updateShippingAddress('${t.id}')">
           </div>
         </div>
       </div>
@@ -1325,12 +1391,13 @@ window.addTicketTag = addTicketTag;
 async function updateShippingAddress(ticketId){
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   const address = {
-    line1: val(`addr_line1_${ticketId}`),
-    line2: val(`addr_line2_${ticketId}`),
+    name: val(`addr_name_${ticketId}`),
+    street1: val(`addr_street1_${ticketId}`),
+    street2: val(`addr_street2_${ticketId}`),
     city: val(`addr_city_${ticketId}`),
     state: val(`addr_state_${ticketId}`),
-    zip: val(`addr_zip_${ticketId}`),
-    country: val(`addr_country_${ticketId}`)
+    postal_code: val(`addr_postal_${ticketId}`),
+    country: val(`addr_country_${ticketId}`) || 'US'
   };
   await updateTicketField(ticketId, 'shipping_address', address);
 }
@@ -1345,23 +1412,74 @@ async function removeTicketTag(ticketId, tag){
 }
 window.removeTicketTag = removeTicketTag;
 
-async function deleteTicket(id){
+function deleteTicket(id){
   const t = S.tickets.find(x=>x.id===id);
   if(!t) return;
-  if(!confirm(`Delete ticket #${t.ticket_number} — "${t.subject}"? This also deletes its message history. This can't be undone.`)) return;
+
+  const linkedWarranty = t.warranty_claim_id ? S.warranty.find(w=>w.id===t.warranty_claim_id) : null;
+  const linkedShipErr = t.shipment_error_id ? S.shipErrors.find(e=>e.id===t.shipment_error_id) : null;
+  const linked = linkedWarranty || linkedShipErr;
+
+  if(!linked){
+    if(!confirm(`Delete ticket #${t.ticket_number} — "${t.subject}"? This also deletes its message history. This can't be undone.`)) return;
+    performDeleteTicket(id, false);
+    return;
+  }
+
+  const kindLabel = linkedWarranty ? 'Warranty Claim' : 'Shipment Error';
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Delete Ticket #${t.ticket_number}?</div>
+      <p style="font-size:12.5px;color:var(--text2);margin-bottom:14px">This ticket is linked to a <strong>${kindLabel}</strong> in the ERP. Deleting the ticket won't automatically remove that record — the warehouse may already be working on it.</p>
+      <div class="checkbox-row" style="margin-bottom:16px">
+        <input type="checkbox" id="alsoDeleteLinked">
+        <label for="alsoDeleteLinked">Also delete the linked ${kindLabel} from the ERP (removes it from the warehouse queue too)</label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn danger" style="background:var(--red);color:#fff" onclick="confirmDeleteTicketWithLink('${id}')">Delete Ticket</button>
+      </div>
+    </div>
+  `;
+}
+window.deleteTicket = deleteTicket;
+
+async function confirmDeleteTicketWithLink(id){
+  const alsoDelete = document.getElementById('alsoDeleteLinked').checked;
+  closeModal();
+  await performDeleteTicket(id, alsoDelete);
+}
+window.confirmDeleteTicketWithLink = confirmDeleteTicketWithLink;
+
+async function performDeleteTicket(id, alsoDeleteLinked){
+  const t = S.tickets.find(x=>x.id===id);
+  if(!t) return;
   try{
+    if(alsoDeleteLinked){
+      if(t.warranty_claim_id){
+        const { error } = await sb.from('warranty_claims').delete().eq('id', t.warranty_claim_id);
+        if(error) throw error;
+        S.warranty = S.warranty.filter(w=>w.id!==t.warranty_claim_id);
+      }
+      if(t.shipment_error_id){
+        const { error } = await sb.from('shipment_errors').delete().eq('id', t.shipment_error_id);
+        if(error) throw error;
+        S.shipErrors = S.shipErrors.filter(e=>e.id!==t.shipment_error_id);
+      }
+    }
     const { error } = await sb.from('tickets').delete().eq('id', id);
     if(error) throw error;
     S.tickets = S.tickets.filter(x=>x.id!==id);
     closePanel();
-    toast('Ticket #' + t.ticket_number + ' deleted');
+    toast('Ticket #' + t.ticket_number + ' deleted' + (alsoDeleteLinked ? ' along with its linked ERP record' : ''));
     renderNav();
     renderPage();
   }catch(e){
     toast('Failed to delete: ' + e.message, true);
   }
 }
-window.deleteTicket = deleteTicket;
 
 function openMergeModal(sourceId){
   const source = S.tickets.find(x=>x.id===sourceId);
@@ -1677,19 +1795,21 @@ async function lookupOrderForTicket(ticketId, orderNumber){
   if(t && !t.customer_phone && first.customer_phone) patch.customer_phone = first.customer_phone;
 
   // Confirmed against the real `sales` schema: shipping_address1/2, shipping_city,
-  // shipping_province, shipping_zip, shipping_country.
+  // shipping_province, shipping_zip, shipping_country. Keys here match the ERP's
+  // own shipping_details shape exactly: name/street1/street2/city/state/postal_code/country.
   const pick = (...keys) => { for(const k of keys){ if(first[k]) return first[k]; } return ''; };
-  const hasExistingAddress = t && t.shipping_address && (t.shipping_address.line1 || t.shipping_address.city);
+  const hasExistingAddress = t && t.shipping_address && (t.shipping_address.street1 || t.shipping_address.city);
   if(t && !hasExistingAddress){
     const autoAddress = {
-      line1: pick('shipping_address1'),
-      line2: pick('shipping_address2'),
+      name: t.customer_name || first.customer_name || '',
+      street1: pick('shipping_address1'),
+      street2: pick('shipping_address2'),
       city: pick('shipping_city'),
       state: pick('shipping_province'),
-      zip: pick('shipping_zip'),
-      country: pick('shipping_country')
+      postal_code: pick('shipping_zip'),
+      country: pick('shipping_country') || 'US'
     };
-    if(Object.values(autoAddress).some(v=>v)) patch.shipping_address = autoAddress;
+    if(autoAddress.street1 || autoAddress.city) patch.shipping_address = autoAddress;
   }
 
   if(Object.keys(patch).length){
