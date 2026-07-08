@@ -1869,6 +1869,55 @@ async function emailReturnLabel(ticketId){
 }
 window.emailReturnLabel = emailReturnLabel;
 
+async function checkReturnRate(ticketId){
+  const val = id => document.getElementById(id).value.trim();
+  const btn = document.getElementById('rlRateBtn');
+  const resultBox = document.getElementById('rlRateResult');
+  const customerAddress = {
+    city: val('rlCity'),
+    state: val('rlState'),
+    postal_code: val('rlZip'),
+    country: val('rlCountry') || 'US'
+  };
+  if(!customerAddress.city || !customerAddress.state || !customerAddress.postal_code){
+    toast('City, state, and ZIP are required to check a rate', true);
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  resultBox.innerHTML = '';
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/get-return-rate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        customer_address: customerAddress,
+        weight_oz: parseInt(val('rlWeight'), 10) || 16
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error || 'Rate check failed');
+
+    const rates = result.rates || [];
+    if(!rates.length){
+      resultBox.innerHTML = `<div style="font-size:12px;color:var(--text3)">No rates returned.</div>`;
+    } else {
+      resultBox.innerHTML = rates.map(r => `
+        <div class="linked-box" style="padding:8px 12px;margin:0 0 6px">
+          <strong>${escapeHtml(r.service_name||r.service_code||'Service')}</strong>
+          ${r.amount!=null ? ` — $${Number(r.amount).toFixed(2)} ${(r.currency||'usd').toUpperCase()}` : ' — cost unavailable'}
+          ${r.estimated_days!=null ? ` · ~${r.estimated_days} day${r.estimated_days===1?'':'s'}` : ''}
+        </div>
+      `).join('');
+    }
+  }catch(e){
+    resultBox.innerHTML = `<div style="font-size:12px;color:var(--red)">Rate check failed: ${escapeHtml(e.message)}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Check Rate';
+}
+window.checkReturnRate = checkReturnRate;
+
 function openReturnLabelModal(ticketId){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t){ toast('Ticket not found', true); return; }
@@ -1895,7 +1944,11 @@ function openReturnLabelModal(ticketId){
         <div class="form-group"><label class="form-label">ZIP</label><input class="form-input" id="rlZip" value="${escapeHtml(addr.postal_code||'')}"></div>
         <div class="form-group"><label class="form-label">Country</label><input class="form-input" id="rlCountry" value="${escapeHtml(addr.country||'US')}"></div>
       </div>
-      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Package Weight (oz)</label><input class="form-input" id="rlWeight" type="number" value="16" min="1"></div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Package Weight (oz)</label><input class="form-input" id="rlWeight" type="number" value="16" min="1"></div>
+      <div style="margin-bottom:12px">
+        <button type="button" class="btn btn-sm" onclick="checkReturnRate('${ticketId}')" id="rlRateBtn">Check Rate</button>
+        <div id="rlRateResult" style="margin-top:8px"></div>
+      </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
         <button class="btn btn-primary" id="rlSubmitBtn" onclick="submitReturnLabel('${ticketId}')">Generate Label</button>
