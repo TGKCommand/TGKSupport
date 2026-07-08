@@ -926,6 +926,31 @@ async function convertToTicket(kind, recordId){
     toast('Failed to create ticket: ' + e.message, true);
   }
 }
+let warrantyClaimItems = [];
+
+function renderWarrantyItemsRows(){
+  return warrantyClaimItems.map((item, i) => `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" data-item-row="${i}">
+      <input class="form-input" style="flex:2" placeholder="Part number" value="${escapeHtml(item.pn||'')}" oninput="warrantyClaimItems[${i}].pn=this.value">
+      <input class="form-input" style="flex:0 0 60px" type="number" min="1" placeholder="Qty" value="${item.qty||1}" oninput="warrantyClaimItems[${i}].qty=parseInt(this.value,10)||1">
+      <input class="form-input" style="flex:3" placeholder="Description (optional)" value="${escapeHtml(item.description||'')}" oninput="warrantyClaimItems[${i}].description=this.value">
+      ${warrantyClaimItems.length > 1 ? `<button type="button" class="btn btn-sm" style="color:var(--red);flex:0 0 auto" onclick="removeWarrantyItem(${i})">✕</button>` : ''}
+    </div>
+  `).join('');
+}
+
+function addWarrantyItem(){
+  warrantyClaimItems.push({ pn: '', qty: 1, description: '' });
+  document.getElementById('warrantyItemsContainer').innerHTML = renderWarrantyItemsRows();
+}
+window.addWarrantyItem = addWarrantyItem;
+
+function removeWarrantyItem(i){
+  warrantyClaimItems.splice(i, 1);
+  document.getElementById('warrantyItemsContainer').innerHTML = renderWarrantyItemsRows();
+}
+window.removeWarrantyItem = removeWarrantyItem;
+
 function openSendToERPModal(ticketId, kind){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t){ toast('Ticket not found', true); return; }
@@ -940,8 +965,15 @@ function openSendToERPModal(ticketId, kind){
   // warranty_claims: id, created_at, pn, order_number, customer_name, customer_email,
   //   issue, status, resolution, resolved_at, notes, resolution_type, shipping_details,
   //   ss_order_id, claim_items, tracking_number, carrier, shipped_at, claim_cost
+  if(kind === 'warranty'){
+    warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '' }];
+  }
   const warrantyFields = `
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Part Number</label><input class="form-input" id="erpPn" value="${escapeHtml(t.pn)}"></div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">Parts On This Claim</label>
+      <div id="warrantyItemsContainer">${renderWarrantyItemsRows()}</div>
+      <button type="button" class="btn btn-sm" style="margin-top:6px" onclick="addWarrantyItem()">+ Add Another Part</button>
+    </div>
     <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">Status</label>
@@ -1039,9 +1071,12 @@ async function confirmSendToERP(ticketId, kind){
   let payload;
   if(kind==='warranty'){
     const t = S.tickets.find(x=>x.id===ticketId);
+    const validItems = warrantyClaimItems.filter(i=>i.pn && i.pn.trim());
+    const primaryPn = validItems.length ? validItems[0].pn.trim() : '';
     payload = {
       order_number: val('erpOrder'),
-      pn: val('erpPn'),
+      pn: primaryPn,
+      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), qty: i.qty||1, description: i.description||'' })) : null,
       customer_name: val('erpCustomer') || null,
       issue: val('erpIssue') || null,
       status: val('erpStatus'),
@@ -1052,7 +1087,7 @@ async function confirmSendToERP(ticketId, kind){
       carrier: val('erpCarrier') || null,
       shipping_details: (t && t.shipping_address && Object.values(t.shipping_address).some(v=>v)) ? t.shipping_address : null
     };
-    if(!payload.order_number || !payload.pn){ toast('Order number and part number are required', true); return; }
+    if(!payload.order_number || !payload.pn){ toast('Order number and at least one part number are required', true); return; }
   } else {
     const t = S.tickets.find(x=>x.id===ticketId);
     payload = {
@@ -1633,6 +1668,9 @@ async function updateTicketField(id, field, value){
     toast('Ticket updated');
     renderNav();
     if(S.page!=='dashboard') renderPage();
+    if(S.activeTicket && S.activeTicket.id === id){
+      renderTicketPanel(data);
+    }
   }catch(e){
     toast('Update failed: ' + e.message, true);
   }
@@ -1803,6 +1841,7 @@ window.openReturnLabelModal = openReturnLabelModal;
 async function submitReturnLabel(ticketId){
   const val = id => document.getElementById(id).value.trim();
   const btn = document.getElementById('rlSubmitBtn');
+  const t = S.tickets.find(x=>x.id===ticketId);
   const customerAddress = {
     name: val('rlName'),
     street1: val('rlStreet1'),
@@ -1810,7 +1849,8 @@ async function submitReturnLabel(ticketId){
     city: val('rlCity'),
     state: val('rlState'),
     postal_code: val('rlZip'),
-    country: val('rlCountry') || 'US'
+    country: val('rlCountry') || 'US',
+    phone: (t && t.customer_phone) || ''
   };
   if(!customerAddress.street1 || !customerAddress.city || !customerAddress.state || !customerAddress.postal_code){
     toast('Street, city, state, and ZIP are required', true);
