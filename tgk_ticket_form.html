@@ -173,7 +173,9 @@ document.getElementById('ticketForm').addEventListener('submit', async (e)=>{
       customer_email: email,
       order_number: order || null,
       pn: pn || null,
-      attachments
+      attachments,
+      has_unread: true,
+      unread_count: 1
     });
     if(error) throw error;
 

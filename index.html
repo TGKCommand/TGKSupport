@@ -446,7 +446,8 @@ function subscribeRealtime(){
           document.getElementById('threadBox').innerHTML = renderThread(S.messages[m.ticket_id], showingNotes);
         } else if(m.sender_type === 'customer' && !m.is_internal_note){
           const t = S.tickets.find(x=>x.id===m.ticket_id);
-          toast('New reply on ticket' + (t ? ' #' + t.ticket_number : '') + ' from ' + (m.sender_name||'customer'));
+          const nowStr = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+          toast('New reply on ticket' + (t ? ' #' + t.ticket_number : '') + ' from ' + (m.sender_name||'customer') + ' · ' + nowStr);
         }
       }
     })
@@ -550,9 +551,9 @@ function renderNav(){
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='tickets'){
-      const unread = S.tickets.filter(t=>t.has_unread).length;
-      if(unread){
-        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`;
+      const unreadMsgs = S.tickets.reduce((sum,t)=> sum + (t.has_unread ? (t.unread_count||1) : 0), 0);
+      if(unreadMsgs){
+        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${unreadMsgs} unread message${unreadMsgs===1?'':'s'}">${unreadMsgs}</span>`;
         alertClass = 'alert-nav';
       } else {
         const openCount = S.tickets.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
@@ -706,8 +707,8 @@ function ticketTable(list){
     <tbody>
       ${list.map(t=>`
         <tr class="rowlink" onclick="openTicket('${t.id}')">
-          <td class="pn">#${t.ticket_number}${t.has_unread?' <span style="color:var(--red)" title="New message">●</span>':''}</td>
-          <td class="main-col" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
+          <td class="pn">#${t.ticket_number}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
@@ -1209,9 +1210,9 @@ async function openTicket(id){
   document.getElementById('tk-overlay').classList.add('open');
   document.getElementById('tk-panel').classList.add('open');
 
-  if(t.has_unread){
+  if(t.has_unread || t.unread_count > 0){
     try{
-      const { data: updated, error } = await sb.from('tickets').update({ has_unread: false }).eq('id', id).select().single();
+      const { data: updated, error } = await sb.from('tickets').update({ has_unread: false, unread_count: 0 }).eq('id', id).select().single();
       if(!error){
         const idx = S.tickets.findIndex(x=>x.id===id);
         if(idx!==-1) S.tickets[idx] = updated;
