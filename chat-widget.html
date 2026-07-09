@@ -14,15 +14,16 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:transparent}
   --border:#e2e6eb;--text:#111827;--text2:#374151;--text3:#6b7280;
   --r:10px;
 }
+body{position:relative;width:100%;height:100%}
 #bubble{
-  position:fixed;bottom:20px;right:20px;width:58px;height:58px;border-radius:50%;
+  position:absolute;bottom:12px;right:12px;width:58px;height:58px;border-radius:50%;
   background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;
   font-size:26px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2);border:none;z-index:9999;
   transition:transform .15s;
 }
 #bubble:hover{transform:scale(1.06)}
 #panel{
-  position:fixed;bottom:90px;right:20px;width:340px;max-width:92vw;max-height:480px;
+  position:absolute;top:0;left:0;right:0;bottom:0;
   background:var(--bg);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.2);
   display:none;flex-direction:column;overflow:hidden;z-index:9999;border:1px solid var(--border);
 }
@@ -71,8 +72,22 @@ let pollTimer = null;
 function togglePanel(){
   panelOpen = !panelOpen;
   document.getElementById('panel').classList.toggle('open', panelOpen);
+  notifyParentSize();
   if(panelOpen && !chatState) checkAvailabilityAndRender();
 }
+
+function notifyParentSize(){
+  try{
+    window.parent.postMessage({
+      source: 'TGK_CHAT_WIDGET',
+      type: 'RESIZE',
+      collapsed: !panelOpen
+    }, '*');
+  }catch(e){ /* non-critical */ }
+}
+
+// Tell the parent our size immediately on load too, in case it starts collapsed
+window.addEventListener('load', notifyParentSize);
 
 async function checkAvailabilityAndRender(){
   const content = document.getElementById('panelContent');
