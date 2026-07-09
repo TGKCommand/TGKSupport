@@ -16,14 +16,14 @@ html,body{height:100%;font-family:'DM Sans',sans-serif;background:transparent!im
 }
 body{position:relative;width:100%;height:100%}
 #bubble{
-  position:absolute;bottom:12px;right:12px;width:58px;height:58px;border-radius:50%;
+  position:absolute;bottom:8px;right:8px;width:48px;height:48px;border-radius:50%;
   background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;
-  cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2);border:none;outline:none;z-index:9999;
+  cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.2);border:none;outline:none;z-index:9999;
   padding:0;line-height:0;transition:transform .15s;
   appearance:none;-webkit-appearance:none;-moz-appearance:none;
 }
-#bubble:focus{outline:none;box-shadow:0 6px 20px rgba(0,0,0,.2)}
-#bubble svg{display:block;flex-shrink:0}
+#bubble:focus{outline:none;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+#bubble svg{display:block;flex-shrink:0;width:20px;height:20px}
 #bubble:hover{transform:scale(1.06)}
 #panel{
   position:absolute;top:0;left:0;right:0;bottom:0;
