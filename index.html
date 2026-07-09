@@ -554,7 +554,7 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
     const noteBody = `📦 ERP update: ${kind==='warranty'?'Warranty claim':'Shipment error'} marked as shipped`
       + (newRow.carrier ? ` via ${newRow.carrier}` : '')
       + (newRow.tracking_number ? ` — tracking: ${newRow.tracking_number}` : '')
-      + `. (Synced automatically from the ERP.)`;
+      + `. Ticket marked resolved automatically — if the customer replies, it'll reopen. (Synced automatically from the ERP.)`;
 
     await sb.from('ticket_messages').insert({
       ticket_id: ticket.id,
@@ -564,9 +564,10 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
       is_internal_note: true
     });
 
-    const needsUpdate = !['closed','resolved'].includes(ticket.status);
+    const needsUpdate = ticket.status !== 'closed';
     const { data: updated, error } = await sb.from('tickets').update({
-      status: needsUpdate ? 'waiting_customer' : ticket.status,
+      status: needsUpdate ? 'resolved' : ticket.status,
+      resolved_at: needsUpdate ? new Date().toISOString() : ticket.resolved_at,
       has_unread: true,
       updated_at: new Date().toISOString()
     }).eq('id', ticket.id).select().single();
@@ -579,7 +580,7 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
       await loadMessages(ticket.id);
       renderTicketPanel(updated);
     }
-    toast(`Ticket #${updated.ticket_number} updated — shipped from the ERP`);
+    toast(`Ticket #${updated.ticket_number} marked resolved — shipped from the ERP`);
     renderNav();
     if(S.page==='tickets' || S.page==='dashboard') renderPage();
   }catch(e){
