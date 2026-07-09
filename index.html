@@ -270,6 +270,23 @@ window.S = S;
    TOAST
    ============================================================ */
 let toastTimer = null;
+function desktopNotify(title, body, ticketId){
+  if(!('Notification' in window) || Notification.permission !== 'granted') return;
+  // Skip if the tab is already focused and visible — the in-app toast covers that case
+  if(document.hasFocus() && !document.hidden) return;
+  try{
+    const n = new Notification(title, { body, icon: undefined, tag: ticketId || undefined });
+    n.onclick = () => {
+      window.focus();
+      if(ticketId){
+        goPage('tickets');
+        setTimeout(()=>openTicket(ticketId), 100);
+      }
+      n.close();
+    };
+  }catch(e){ /* non-critical */ }
+}
+
 function toast(msg, isErr){
   const el = document.getElementById('toast');
   el.textContent = msg;
@@ -356,6 +373,10 @@ async function afterLogin(user){
   renderNav();
   goPage('dashboard');
   subscribeRealtime();
+
+  if('Notification' in window && Notification.permission === 'default'){
+    Notification.requestPermission();
+  }
 }
 
 (async function checkSession(){
@@ -453,6 +474,11 @@ function subscribeRealtime(){
           const t = S.tickets.find(x=>x.id===m.ticket_id);
           const nowStr = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
           toast('New reply on ticket' + (t ? ' #' + t.ticket_number : '') + ' from ' + (m.sender_name||'customer') + ' · ' + nowStr);
+          desktopNotify(
+            '💬 New reply' + (t ? ' — Ticket #' + t.ticket_number : ''),
+            (m.sender_name||'Customer') + ': ' + (m.body||'').slice(0,120),
+            m.ticket_id
+          );
         }
       }
     })
@@ -529,6 +555,7 @@ function handleTicketRealtime(payload){
   if(payload.eventType === 'INSERT'){
     if(idx === -1) S.tickets.unshift(payload.new);
     toast('New ticket: ' + payload.new.subject);
+    desktopNotify('🎫 New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
   } else if(payload.eventType === 'UPDATE'){
     if(idx !== -1) S.tickets[idx] = payload.new;
   } else if(payload.eventType === 'DELETE'){
@@ -686,6 +713,7 @@ function renderTicketsList(){
       </label>
       ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,showArchived:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
       <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
+      <button class="btn btn-sm" onclick="exportTicketsToCSV()">⬇ Export CSV</button>
     </div>
     ${renderBulkActionBar()}
     ${ticketTable(filteredTickets(), true)}
@@ -763,6 +791,65 @@ window.bulkSetPriority = bulkSetPriority;
 
 function bulkAssign(value){ bulkUpdateField('assigned_to', value==='__unassigned__' ? null : value); }
 window.bulkAssign = bulkAssign;
+
+function csvEscape(val){
+  if(val==null) return '';
+  const s = String(val);
+  if(/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+
+function exportTicketsToCSV(){
+  const list = filteredTickets();
+  if(!list.length){ toast('Nothing to export with the current filters', true); return; }
+
+  const headers = [
+    'Ticket #','Subject','Status','Priority','Source','Tags',
+    'Customer Name','Customer Email','Customer Phone',
+    'Order Number','Part Number','Assigned To',
+    'Created At','Updated At','Resolved At','Archived',
+    'Refund Amount','Restocking Fee','Refund Status','Shopify Refund ID',
+    'Return Tracking Number','Return Carrier'
+  ];
+
+  const rows = list.map(t => [
+    t.ticket_number,
+    t.subject,
+    label(t.status),
+    label(t.priority),
+    label(t.source),
+    (t.tags||[]).join('; '),
+    t.customer_name,
+    t.customer_email,
+    t.customer_phone,
+    t.order_number,
+    t.pn,
+    t.assigned_to,
+    t.created_at,
+    t.updated_at,
+    t.resolved_at,
+    t.archived ? 'Yes' : 'No',
+    t.refund_amount,
+    t.restocking_fee,
+    t.refund_status,
+    t.shopify_refund_id,
+    t.return_tracking_number,
+    t.return_carrier
+  ]);
+
+  const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `tgk-tickets-${new Date().toISOString().slice(0,10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast(`Exported ${list.length} ticket${list.length===1?'':'s'} to CSV`);
+}
+window.exportTicketsToCSV = exportTicketsToCSV;
 
 function filteredTickets(){
   let list = S.tickets.slice();
