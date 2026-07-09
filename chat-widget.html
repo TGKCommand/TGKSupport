@@ -7,7 +7,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%;font-family:'DM Sans',sans-serif;background:transparent}
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:transparent!important}
 :root{
   --teal:#0d9488;--orange:#ea580c;
   --bg:#ffffff;--bg2:#f7f8fa;--bg3:#f0f2f5;
@@ -18,9 +18,11 @@ body{position:relative;width:100%;height:100%}
 #bubble{
   position:absolute;bottom:12px;right:12px;width:58px;height:58px;border-radius:50%;
   background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;
-  cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2);border:none;z-index:9999;
+  cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2);border:none;outline:none;z-index:9999;
   padding:0;line-height:0;transition:transform .15s;
+  appearance:none;-webkit-appearance:none;-moz-appearance:none;
 }
+#bubble:focus{outline:none;box-shadow:0 6px 20px rgba(0,0,0,.2)}
 #bubble svg{display:block;flex-shrink:0}
 #bubble:hover{transform:scale(1.06)}
 #panel{
@@ -74,11 +76,43 @@ let panelOpen = false;
 let chatState = null; // null = not started, {ticket_id, session_token, ended}
 let pollTimer = null;
 
+const CHAT_STORAGE_KEY = 'tgk_chat_session';
+
+function saveChatSession(state){
+  try{ localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(state)); }catch(e){ /* storage may be blocked — chat still works, just won't persist */ }
+}
+function loadChatSession(){
+  try{
+    const raw = localStorage.getItem(CHAT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function clearChatSession(){
+  try{ localStorage.removeItem(CHAT_STORAGE_KEY); }catch(e){ /* non-critical */ }
+}
+
+// On load, silently check for an existing session so reopening the widget
+// (or navigating to a new page) resumes the same chat instead of starting
+// a fresh one. Doesn't force the panel open — just gets it ready.
+(function restoreSessionOnLoad(){
+  const saved = loadChatSession();
+  if(saved && saved.ticket_id && saved.session_token){
+    chatState = saved;
+  }
+})();
+
 function togglePanel(){
   panelOpen = !panelOpen;
   document.getElementById('panel').classList.toggle('open', panelOpen);
   notifyParentSize();
-  if(panelOpen && !chatState) checkAvailabilityAndRender();
+  if(panelOpen){
+    if(chatState){
+      renderChatWindow();
+      startPolling();
+    } else {
+      checkAvailabilityAndRender();
+    }
+  }
 }
 
 function notifyParentSize(){
@@ -153,6 +187,7 @@ async function startChat(){
     if(!resp.ok || result.error) throw new Error(result.error || 'Could not start chat');
 
     chatState = { ticket_id: result.ticket_id, session_token: result.session_token, ended: false };
+    saveChatSession(chatState);
     renderChatWindow();
     startPolling();
   }catch(e){
@@ -185,6 +220,7 @@ function renderEnded(){
     <div class="ended-box">This chat has ended. Thanks for reaching out! If you need anything else, feel free to start a new chat.</div>
   `;
   chatState = null;
+  clearChatSession();
 }
 
 async function sendChatMsg(){
