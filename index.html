@@ -830,6 +830,11 @@ function ticketTable(list, enableBulk){
   </table></div>`;
 }
 
+function friendlyStaffName(){
+  if(!S.user || !S.user.email) return '';
+  return S.user.email.split('@')[0].replace(/[._]/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
+}
+
 function escapeHtml(s){
   if(s==null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1354,6 +1359,11 @@ async function openTicket(id){
   document.getElementById('tk-panel').classList.add('open');
   scrollThreadToBottom();
 
+  if(t.order_number){
+    await lookupOrderForTicket(id, t.order_number);
+    scrollThreadToBottom();
+  }
+
   if(t.has_unread || t.unread_count > 0){
     try{
       const { data: updated, error } = await sb.from('tickets').update({ has_unread: false, unread_count: 0 }).eq('id', id).select().single();
@@ -1390,6 +1400,7 @@ function renderTicketPanel(t){
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
       <div class="tk-head-title">#${t.ticket_number}</div>
+      <button class="tk-close" title="Mark as unread" onclick="markTicketUnread('${t.id}')">📩</button>
       <button class="tk-close" title="Archive ticket" style="color:var(--red)" onclick="archiveTicket('${t.id}')">🗑</button>
       <button class="tk-close" onclick="closePanel()">✕</button>
     </div>
@@ -1514,6 +1525,18 @@ function renderTicketPanel(t){
         ` : `
           <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">No return label generated yet.</div>
           <button class="btn btn-sm btn-teal" onclick="openReturnLabelModal('${t.id}')">Generate Return Label</button>
+        `}
+      </div>
+      <div class="linked-box" style="${t.refund_status==='Refunded'?'background:var(--green-dim)':''}">
+        <div class="lk-title">Refund</div>
+        ${t.refund_status==='Refunded' ? `
+          <div style="font-size:12.5px">
+            <strong>$${Number(t.refund_amount||0).toFixed(2)} refunded</strong>${t.restocking_fee?` (after $${Number(t.restocking_fee).toFixed(2)} restocking fee)`:''}
+            <br>Shopify Refund ID: <span class="pn">${escapeHtml(t.shopify_refund_id||'—')}</span>
+          </div>
+        ` : `
+          <div style="font-size:11.5px;color:var(--text3);margin-bottom:8px">No refund processed yet.</div>
+          <button class="btn btn-sm btn-teal" onclick="openRefundModal('${t.id}')" ${!t.order_number?'disabled title="Add an order number first"':''}>Process Refund</button>
         `}
       </div>
       <div id="orderLookupBox"></div>
@@ -1687,9 +1710,8 @@ async function addTicketTag(ticketId, tag){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t) return;
   const tags = Array.from(new Set([...(t.tags||[]), tag]));
-  await updateTicketField(ticketId, 'tags', tags);
   await logActivity(ticketId, 'tag_added', null, tag);
-  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+  await updateTicketField(ticketId, 'tags', tags);
 }
 window.addTicketTag = addTicketTag;
 
@@ -1712,11 +1734,31 @@ async function removeTicketTag(ticketId, tag){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t) return;
   const tags = (t.tags||[]).filter(x=>x!==tag);
-  await updateTicketField(ticketId, 'tags', tags);
   await logActivity(ticketId, 'tag_removed', tag, null);
-  if(S.activeTicket && S.activeTicket.id===ticketId) renderTicketPanel(S.activeTicket);
+  await updateTicketField(ticketId, 'tags', tags);
 }
 window.removeTicketTag = removeTicketTag;
+
+async function markTicketUnread(id){
+  const t = S.tickets.find(x=>x.id===id);
+  if(!t) return;
+  try{
+    const { data, error } = await sb.from('tickets').update({
+      has_unread: true,
+      unread_count: Math.max(t.unread_count||0, 1)
+    }).eq('id', id).select().single();
+    if(error) throw error;
+    const idx = S.tickets.findIndex(x=>x.id===id);
+    if(idx!==-1) S.tickets[idx] = data;
+    toast('Ticket #' + data.ticket_number + ' marked unread');
+    renderNav();
+    closePanel();
+    if(S.page!=='dashboard') renderPage();
+  }catch(e){
+    toast('Failed to mark unread: ' + e.message, true);
+  }
+}
+window.markTicketUnread = markTicketUnread;
 
 function archiveTicket(id){
   const t = S.tickets.find(x=>x.id===id);
@@ -1854,7 +1896,8 @@ async function emailReturnLabel(ticketId){
         to: t.customer_email,
         subject: `TGK Motorsport Support #${String(t.ticket_number).padStart(4,'0')}`,
         body,
-        attachments: data.attachments || []
+        attachments: data.attachments || [],
+        staff_name: friendlyStaffName()
       })
     });
     const result = await resp.json();
@@ -1917,6 +1960,124 @@ async function checkReturnRate(ticketId){
   btn.textContent = 'Check Rate';
 }
 window.checkReturnRate = checkReturnRate;
+
+let refundLineItems = [];
+
+async function openRefundModal(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t){ toast('Ticket not found', true); return; }
+  if(!t.order_number){ toast('Add an order number first', true); return; }
+
+  const rows = await findSalesByOrderNumber(t.order_number);
+  if(!rows.length){
+    toast('No matching order found in ERP data for #' + t.order_number, true);
+    return;
+  }
+  if(!rows[0].shopify_order_id){
+    toast('This order has no shopify_order_id on file — cannot process a refund without it', true);
+    return;
+  }
+
+  refundLineItems = rows.map(r => ({
+    pn: r.pn,
+    qty: r.qty || 1,
+    shopify_line_item_id: r.shopify_line_item_id || null,
+    selected: true
+  }));
+
+  const ov = document.getElementById('modalOverlay');
+  ov.classList.remove('hidden');
+  ov.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Process Refund — Order #${escapeHtml(t.order_number)}</div>
+      <div style="font-size:11.5px;color:var(--text3);margin-bottom:14px">This submits a <strong>real refund through Shopify</strong> — money moves immediately and this cannot be undone from here. Double check the amount before confirming.</div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label class="form-label">Line Items Covered By This Refund</label>
+        <div id="refundItemsContainer">${renderRefundItemsRows()}</div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Restocking Fee ($, optional)</label><input class="form-input" id="refundRestockingFee" type="number" step="0.01" min="0" value="0"></div>
+        <div class="form-group"><label class="form-label">Final Refund Amount ($)</label><input class="form-input" id="refundAmount" type="number" step="0.01" min="0" placeholder="0.00"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px"><label class="form-label">Reason (included in Shopify's refund note)</label><textarea class="form-input" id="refundReason" rows="2" style="resize:vertical"></textarea></div>
+      <div class="checkbox-row" style="margin-bottom:16px">
+        <input type="checkbox" id="refundConfirmChk" onchange="document.getElementById('refundSubmitBtn').disabled=!this.checked">
+        <label for="refundConfirmChk">I've verified this amount is correct — refund the customer immediately via Shopify</label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary" id="refundSubmitBtn" onclick="submitRefund('${ticketId}')" disabled style="background:var(--red);border-color:var(--red)">Process Refund</button>
+      </div>
+    </div>
+  `;
+}
+window.openRefundModal = openRefundModal;
+
+function renderRefundItemsRows(){
+  return refundLineItems.map((item, i) => `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;font-size:12.5px">
+      <input type="checkbox" ${item.selected?'checked':''} onchange="refundLineItems[${i}].selected=this.checked">
+      <span class="pn" style="flex:1">${escapeHtml(item.pn||'—')}</span>
+      <span style="color:var(--text3)">qty ${item.qty}</span>
+      ${!item.shopify_line_item_id ? '<span style="color:var(--orange);font-size:11px">no Shopify line item ID</span>' : ''}
+    </div>
+  `).join('');
+}
+
+async function submitRefund(ticketId){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  const btn = document.getElementById('refundSubmitBtn');
+  const refundAmount = parseFloat(document.getElementById('refundAmount').value);
+  const restockingFee = parseFloat(document.getElementById('refundRestockingFee').value) || 0;
+  const reason = document.getElementById('refundReason').value.trim();
+
+  if(!refundAmount || refundAmount <= 0){
+    toast('Enter a valid refund amount', true);
+    return;
+  }
+
+  const selectedItems = refundLineItems.filter(i => i.selected && i.shopify_line_item_id);
+
+  btn.disabled = true;
+  btn.textContent = 'Processing...';
+
+  try{
+    const rows = await findSalesByOrderNumber(t.order_number);
+    const shopifyOrderId = rows[0]?.shopify_order_id;
+
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/process-shopify-refund`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        ticket_id: ticketId,
+        ticket_number: t.ticket_number,
+        shopify_order_id: shopifyOrderId,
+        line_items: selectedItems.map(i => ({ shopify_line_item_id: i.shopify_line_item_id, quantity: i.qty })),
+        refund_amount: refundAmount,
+        restocking_fee: restockingFee,
+        reason
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error || 'Refund failed');
+
+    const { data: updated } = await sb.from('tickets').select('*').eq('id', ticketId).single();
+    if(updated){
+      const idx = S.tickets.findIndex(x=>x.id===ticketId);
+      if(idx!==-1) S.tickets[idx] = updated;
+      S.activeTicket = updated;
+      await loadMessages(ticketId);
+      renderTicketPanel(updated);
+    }
+    closeModal();
+    toast(`Refund of $${refundAmount.toFixed(2)} processed successfully`);
+  }catch(e){
+    toast('Refund failed: ' + e.message, true);
+    btn.disabled = false;
+    btn.textContent = 'Process Refund';
+  }
+}
+window.submitRefund = submitRefund;
 
 function openReturnLabelModal(ticketId){
   const t = S.tickets.find(x=>x.id===ticketId);
@@ -2193,7 +2354,8 @@ async function sendMessage(ticketId){
             to: t.customer_email,
             subject: `TGK Motorsport Support #${String(t.ticket_number).padStart(4,'0')}`,
             body,
-            attachments: data.attachments || []
+            attachments: data.attachments || [],
+            staff_name: friendlyStaffName()
           })
         });
         const result = await resp.json();
