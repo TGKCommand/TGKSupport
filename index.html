@@ -265,7 +265,7 @@ const S = {
   dealers: [],
   team: [],
   activeTicket: null,
-  filters: { status: 'open', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
+  filters: { status: '__active__', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -592,8 +592,13 @@ function handleTicketRealtime(payload){
   const idx = S.tickets.findIndex(t=>t.id === (payload.new?.id || payload.old?.id));
   if(payload.eventType === 'INSERT'){
     if(idx === -1) S.tickets.unshift(payload.new);
-    toast('New ticket: ' + payload.new.subject);
-    desktopNotify('🎫 New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
+    if(payload.new.is_live_chat){
+      toast('💬 New live chat from ' + (payload.new.customer_name||'a visitor'));
+      desktopNotify('💬 New Live Chat', (payload.new.customer_name||'A visitor') + ' started a chat', payload.new.id);
+    } else {
+      toast('New ticket: ' + payload.new.subject);
+      desktopNotify('🎫 New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
+    }
   } else if(payload.eventType === 'UPDATE'){
     if(idx !== -1) S.tickets[idx] = payload.new;
   } else if(payload.eventType === 'DELETE'){
@@ -622,7 +627,7 @@ function renderNav(){
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='livechat'){
-      const activeChats = S.tickets.filter(t=>t.is_live_chat && !['resolved','closed'].includes(t.status)).length;
+      const activeChats = S.tickets.filter(t=>t.is_live_chat && !t.archived && !['resolved','closed'].includes(t.status)).length;
       if(activeChats){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${activeChats}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='tickets'){
@@ -720,8 +725,8 @@ function renderDashboard(){
    ============================================================ */
 function renderLiveChatList(){
   const el = document.getElementById('content');
-  const active = S.tickets.filter(t=>t.is_live_chat && !['resolved','closed'].includes(t.status));
-  const ended = S.tickets.filter(t=>t.is_live_chat && ['resolved','closed'].includes(t.status)).slice(0,10);
+  const active = S.tickets.filter(t=>t.is_live_chat && !t.archived && !['resolved','closed'].includes(t.status));
+  const ended = S.tickets.filter(t=>t.is_live_chat && !t.archived && ['resolved','closed'].includes(t.status)).slice(0,10);
 
   el.innerHTML = `
     <div class="panel-title" style="border:none">Active Chats${active.length ? ` (${active.length})` : ''}</div>
@@ -752,7 +757,8 @@ function renderTicketsList(){
         <input type="text" placeholder="Search subject, customer, order #..." value="${S.filters.q}" oninput="S.filters.q=this.value; renderTicketsList()">
       </div>
       <select class="form-input" style="width:auto" onchange="S.filters.status=this.value; renderTicketsList()">
-        <option value="">All Statuses</option>
+        <option value="__active__" ${S.filters.status==='__active__'?'selected':''}>Active (not resolved/closed)</option>
+        <option value="" ${S.filters.status===''?'selected':''}>All Statuses</option>
         ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}" ${S.filters.status===s?'selected':''}>${label(s)}</option>`).join('')}
       </select>
       <select class="form-input" style="width:auto" onchange="S.filters.priority=this.value; renderTicketsList()">
@@ -780,8 +786,8 @@ function renderTicketsList(){
         <input type="checkbox" ${S.filters.showArchived?'checked':''} onchange="S.filters.showArchived=this.checked; renderTicketsList()">
         <span>Show archived</span>
       </label>
-      ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,showArchived:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
-      <button class="btn btn-sm" onclick="S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
+      ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,showArchived:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
+      <button class="btn btn-sm" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
       <button class="btn btn-sm" onclick="exportTicketsToCSV()">⬇ Export CSV</button>
     </div>
     ${renderBulkActionBar()}
@@ -924,7 +930,8 @@ function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
   if(!f.showArchived) list = list.filter(t=>!t.archived);
-  if(f.status) list = list.filter(t=>t.status===f.status);
+  if(f.status === '__active__') list = list.filter(t=>!['resolved','closed'].includes(t.status));
+  else if(f.status) list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
