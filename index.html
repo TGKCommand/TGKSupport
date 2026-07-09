@@ -481,6 +481,7 @@ async function afterLogin(user){
    event.origin === 'https://your-command-center-domain' below.
    ============================================================ */
 window.addEventListener('message', async (event) => {
+  if (event.origin !== 'https://command.tgkmotorsport.com') return; // [SSO] only accept the token from the Command Center's own origin
   if (!event.data || event.data.source !== 'TGK_CC' || event.data.type !== 'AUTH_TOKEN') return;
   try{
     const { error } = await sb.auth.setSession({
@@ -1305,10 +1306,24 @@ async function confirmSendToERP(ticketId, kind){
     const t = S.tickets.find(x=>x.id===ticketId);
     const validItems = warrantyClaimItems.filter(i=>i.pn && i.pn.trim());
     const primaryPn = validItems.length ? validItems[0].pn.trim() : '';
+    // [TYPE] The ERP labels each claim item part-vs-assembly from claim_items[].type. We don't load the
+    // assemblies table here, so resolve it on the fly (matching .pn OR .new_sku) purely so the ERP shows
+    // the right label -- deduction itself is table-resolved server-side and does not depend on this.
+    const _asmSet = new Set();
+    if(validItems.length){
+      try{
+        const _pns = validItems.map(i=>i.pn.trim());
+        const [_byPn,_byNew] = await Promise.all([
+          sb.from('assemblies').select('pn,new_sku').in('pn', _pns),
+          sb.from('assemblies').select('pn,new_sku').in('new_sku', _pns)
+        ]);
+        [...(_byPn.data||[]), ...(_byNew.data||[])].forEach(a=>{ if(a.pn)_asmSet.add(a.pn); if(a.new_sku)_asmSet.add(a.new_sku); });
+      }catch(_e){ /* label-only; ignore lookup failure */ }
+    }
     payload = {
       order_number: val('erpOrder'),
       pn: primaryPn,
-      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), qty: i.qty||1, description: i.description||'' })) : null,
+      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), type: _asmSet.has(i.pn.trim())?'assembly':'part', qty: i.qty||1, description: i.description||'' })) : null,
       customer_name: val('erpCustomer') || null,
       issue: val('erpIssue') || null,
       status: val('erpStatus'),
