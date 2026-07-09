@@ -210,6 +210,10 @@ select.form-input{cursor:pointer}
         <span class="sync-dot ok"></span>
         <span class="sync-label" id="userLabel">—</span>
       </div>
+      <label class="checkbox-row" style="margin-top:8px;cursor:pointer">
+        <input type="checkbox" id="chatAvailableToggle" onchange="toggleChatAvailability(this.checked)">
+        <span>Available for live chat</span>
+      </label>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
     </div>
   </div>
@@ -313,6 +317,16 @@ setInterval(()=>{
   }
 }, 60000);
 
+// Keeps chat_available_updated_at fresh every 3 minutes while the toggle
+// is on, so availability doesn't silently expire (see check-chat-availability's
+// 10-minute staleness window) just because nothing else changed.
+setInterval(async ()=>{
+  const toggle = document.getElementById('chatAvailableToggle');
+  if(toggle && toggle.checked && S.user){
+    try{ await sb.from('team_members').update({ chat_available_updated_at: new Date().toISOString() }).ilike('email', S.user.email); }catch(e){}
+  }
+}, 180000);
+
 /* ============================================================
    AUTH
    ============================================================ */
@@ -332,7 +346,24 @@ async function doLogin(){
 }
 window.doLogin = doLogin;
 
+async function toggleChatAvailability(available){
+  if(!S.user) return;
+  try{
+    await sb.from('team_members').update({
+      chat_available: available,
+      chat_available_updated_at: new Date().toISOString()
+    }).ilike('email', S.user.email);
+    toast(available ? 'You\'re now available for live chat' : 'You\'re now offline for live chat');
+  }catch(e){
+    toast('Failed to update availability: ' + e.message, true);
+  }
+}
+window.toggleChatAvailability = toggleChatAvailability;
+
 async function doLogout(){
+  if(S.user){
+    try{ await sb.from('team_members').update({ chat_available: false }).ilike('email', S.user.email); }catch(e){}
+  }
   await sb.auth.signOut();
   location.reload();
 }
@@ -373,6 +404,12 @@ async function afterLogin(user){
   renderNav();
   goPage('dashboard');
   subscribeRealtime();
+
+  try{
+    const { data: myRow } = await sb.from('team_members').select('chat_available').ilike('email', user.email).maybeSingle();
+    const toggle = document.getElementById('chatAvailableToggle');
+    if(toggle) toggle.checked = !!(myRow && myRow.chat_available);
+  }catch(e){ /* non-critical */ }
 
   if('Notification' in window && Notification.permission === 'default'){
     Notification.requestPermission();
@@ -570,6 +607,7 @@ function handleTicketRealtime(payload){
    ============================================================ */
 const NAV = [
   { id:'dashboard', label:'Dashboard' },
+  { id:'livechat', label:'Live Chat', badgeKey:'livechat' },
   { id:'tickets', label:'Tickets', badgeKey:'tickets' },
   { id:'customers', label:'Customer Lookup' },
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
@@ -582,6 +620,10 @@ function renderNav(){
   nav.innerHTML = NAV.map(n=>{
     let badge = '';
     let alertClass = '';
+    if(n.badgeKey==='livechat'){
+      const activeChats = S.tickets.filter(t=>t.is_live_chat && !['resolved','closed'].includes(t.status)).length;
+      if(activeChats){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${activeChats}</span>`; alertClass='alert-nav'; }
+    }
     if(n.badgeKey==='tickets'){
       const activeTix = S.tickets.filter(t=>!t.archived);
       const unreadMsgs = activeTix.reduce((sum,t)=> sum + (t.has_unread ? (t.unread_count||1) : 0), 0);
@@ -617,6 +659,7 @@ window.goPage = goPage;
 
 function renderPage(){
   if(S.page === 'dashboard') return renderDashboard();
+  if(S.page === 'livechat') return renderLiveChatList();
   if(S.page === 'tickets') return renderTicketsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
@@ -674,6 +717,31 @@ function renderDashboard(){
 /* ============================================================
    TICKETS LIST
    ============================================================ */
+function renderLiveChatList(){
+  const el = document.getElementById('content');
+  const active = S.tickets.filter(t=>t.is_live_chat && !['resolved','closed'].includes(t.status));
+  const ended = S.tickets.filter(t=>t.is_live_chat && ['resolved','closed'].includes(t.status)).slice(0,10);
+
+  el.innerHTML = `
+    <div class="panel-title" style="border:none">Active Chats${active.length ? ` (${active.length})` : ''}</div>
+    ${!active.length ? '<div class="tbl-wrap"><div class="empty">No active live chats right now.</div></div>' : `
+    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Customer</th><th>Started</th><th>Last Message</th><th>Status</th></tr></thead>
+    <tbody>
+      ${active.map(t=>`
+        <tr class="rowlink" onclick="openTicket('${t.id}')">
+          <td class="pn">#${t.ticket_number}${t.has_unread?' <span class="pill pill-red">'+(t.unread_count||1)+' new</span>':''}</td>
+          <td class="main-col">${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
+          <td class="pn">${timeAgo(t.created_at)}</td>
+          <td class="pn">${timeAgo(t.updated_at)}</td>
+          <td><span class="pill ${STATUS_PILL[t.status]||'pill-muted'}">${label(t.status)}</span></td>
+        </tr>
+      `).join('')}
+    </tbody></table></div>`}
+    <div class="panel-title" style="border:none;margin-top:20px">Recently Ended Chats</div>
+    ${ended.length ? ticketTable(ended) : '<div class="tbl-wrap"><div class="empty">No ended chats yet.</div></div>'}
+  `;
+}
+
 function renderTicketsList(){
   const el = document.getElementById('content');
   el.innerHTML = `
