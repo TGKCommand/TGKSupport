@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TGK Motorsport Chat</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:'DM Sans',sans-serif;background:transparent}
+:root{
+  --teal:#0d9488;--orange:#ea580c;
+  --bg:#ffffff;--bg2:#f7f8fa;--bg3:#f0f2f5;
+  --border:#e2e6eb;--text:#111827;--text2:#374151;--text3:#6b7280;
+  --r:10px;
+}
+#bubble{
+  position:fixed;bottom:20px;right:20px;width:58px;height:58px;border-radius:50%;
+  background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;
+  font-size:26px;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.2);border:none;z-index:9999;
+  transition:transform .15s;
+}
+#bubble:hover{transform:scale(1.06)}
+#panel{
+  position:fixed;bottom:90px;right:20px;width:340px;max-width:92vw;max-height:480px;
+  background:var(--bg);border-radius:var(--r);box-shadow:0 10px 40px rgba(0,0,0,.2);
+  display:none;flex-direction:column;overflow:hidden;z-index:9999;border:1px solid var(--border);
+}
+#panel.open{display:flex}
+.chat-head{background:var(--teal);color:#fff;padding:14px 16px;font-weight:700;font-size:14px;display:flex;justify-content:space-between;align-items:center}
+.chat-head span{cursor:pointer;font-size:16px;opacity:.85}
+.chat-body{flex:1;overflow-y:auto;padding:14px;background:var(--bg2);display:flex;flex-direction:column;gap:8px;min-height:200px}
+.chat-foot{padding:10px;border-top:1px solid var(--border);display:flex;gap:6px;background:var(--bg)}
+.chat-input{flex:1;padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:none}
+.chat-send{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:0 14px;font-weight:700;cursor:pointer;font-size:13px}
+.msg-bubble{max-width:80%;padding:8px 12px;border-radius:10px;font-size:13px;line-height:1.4}
+.msg-bubble.customer{align-self:flex-end;background:var(--teal);color:#fff}
+.msg-bubble.staff{align-self:flex-start;background:#fff;color:var(--text);border:1px solid var(--border)}
+.pre-chat{padding:16px;display:flex;flex-direction:column;gap:10px;background:var(--bg)}
+.pre-chat input,.pre-chat textarea{padding:9px 11px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit}
+.pre-chat textarea{resize:vertical}
+.pre-chat button{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:10px;font-weight:700;cursor:pointer;font-size:13px}
+.offline-box{padding:20px 16px;text-align:center}
+.offline-box p{font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.5}
+.offline-box a{display:inline-block;background:var(--orange);color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700;font-size:13px}
+.loading-box{padding:30px;text-align:center;color:var(--text3);font-size:13px}
+.ended-box{padding:20px 16px;text-align:center;color:var(--text3);font-size:13px}
+</style>
+</head>
+<body>
+
+<button id="bubble" onclick="togglePanel()">💬</button>
+
+<div id="panel">
+  <div class="chat-head">
+    <span id="chatHeadTitle">TGK Motorsport Support</span>
+    <span onclick="togglePanel()">✕</span>
+  </div>
+  <div id="panelContent"></div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
+const SUPPORT_PAGE_URL = "https://contact.tgkmotorsport.com";
+
+let panelOpen = false;
+let chatState = null; // null = not started, {ticket_id, session_token, ended}
+let pollTimer = null;
+
+function togglePanel(){
+  panelOpen = !panelOpen;
+  document.getElementById('panel').classList.toggle('open', panelOpen);
+  if(panelOpen && !chatState) checkAvailabilityAndRender();
+}
+
+async function checkAvailabilityAndRender(){
+  const content = document.getElementById('panelContent');
+  content.innerHTML = '<div class="loading-box">Checking availability...</div>';
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/check-chat-availability`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY }
+    });
+    const result = await resp.json();
+    if(result.available){
+      renderPreChatForm();
+    }else{
+      renderOffline();
+    }
+  }catch(e){
+    renderOffline();
+  }
+}
+
+function renderOffline(){
+  document.getElementById('panelContent').innerHTML = `
+    <div class="offline-box">
+      <p>We're not available for live chat right now, but we'd still love to help — submit a support ticket and our team will follow up by email.</p>
+      <a href="${SUPPORT_PAGE_URL}" target="_blank">Go to Support Page</a>
+    </div>
+  `;
+}
+
+function renderPreChatForm(){
+  document.getElementById('panelContent').innerHTML = `
+    <div class="pre-chat">
+      <input id="preChatName" placeholder="Your name">
+      <input id="preChatEmail" type="email" placeholder="Your email">
+      <textarea id="preChatMessage" rows="3" placeholder="What can we help with?"></textarea>
+      <div id="preChatError" style="color:#dc2626;font-size:12px"></div>
+      <button onclick="startChat()">Start Chat</button>
+    </div>
+  `;
+}
+
+async function startChat(){
+  const name = document.getElementById('preChatName').value.trim();
+  const email = document.getElementById('preChatEmail').value.trim();
+  const message = document.getElementById('preChatMessage').value.trim();
+  const errBox = document.getElementById('preChatError');
+  if(!name || !email || !message){
+    errBox.textContent = 'Please fill in all fields.';
+    return;
+  }
+  errBox.textContent = '';
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/start-chat-session`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ name, email, message })
+    });
+    const result = await resp.json();
+    if(!resp.ok || result.error) throw new Error(result.error || 'Could not start chat');
+
+    chatState = { ticket_id: result.ticket_id, session_token: result.session_token, ended: false };
+    document.getElementById('chatHeadTitle').textContent = `Chat #${result.ticket_number}`;
+    renderChatWindow();
+    startPolling();
+  }catch(e){
+    errBox.textContent = 'Something went wrong — please try again.';
+  }
+}
+
+function renderChatWindow(){
+  document.getElementById('panelContent').innerHTML = `
+    <div class="chat-body" id="chatBody"></div>
+    <div class="chat-foot">
+      <textarea class="chat-input" id="chatInput" rows="1" placeholder="Type a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg();}"></textarea>
+      <button class="chat-send" onclick="sendChatMsg()">Send</button>
+    </div>
+  `;
+}
+
+function renderMessages(messages){
+  const body = document.getElementById('chatBody');
+  if(!body) return;
+  body.innerHTML = messages.map(m => `
+    <div class="msg-bubble ${m.sender_type==='customer'?'customer':'staff'}">${escapeHtml(m.body)}</div>
+  `).join('');
+  body.scrollTop = body.scrollHeight;
+}
+
+function renderEnded(){
+  if(pollTimer) clearInterval(pollTimer);
+  document.getElementById('panelContent').innerHTML = `
+    <div class="ended-box">This chat has ended. Thanks for reaching out! If you need anything else, feel free to start a new chat.</div>
+  `;
+  chatState = null;
+}
+
+async function sendChatMsg(){
+  const input = document.getElementById('chatInput');
+  const message = input.value.trim();
+  if(!message || !chatState) return;
+  input.value = '';
+  try{
+    await fetch(`${SUPABASE_URL}/functions/v1/send-chat-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ ticket_id: chatState.ticket_id, session_token: chatState.session_token, message })
+    });
+    pollMessages();
+  }catch(e){ /* will retry on next poll */ }
+}
+
+async function pollMessages(){
+  if(!chatState) return;
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/get-chat-messages?ticket_id=${chatState.ticket_id}&session_token=${chatState.session_token}`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY }
+    });
+    const result = await resp.json();
+    if(!result.ok) return;
+    if(result.ended){ renderEnded(); return; }
+    renderMessages(result.messages || []);
+  }catch(e){ /* silent — will retry */ }
+}
+
+function startPolling(){
+  pollMessages();
+  pollTimer = setInterval(pollMessages, 3000);
+}
+
+function escapeHtml(s){
+  return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+</body>
+</html>
