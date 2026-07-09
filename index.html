@@ -215,6 +215,10 @@ select.form-input{cursor:pointer}
         <span>Available for live chat</span>
       </label>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
+      <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.0</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
+      </div>
     </div>
   </div>
 
@@ -244,6 +248,9 @@ select.form-input{cursor:pointer}
    CONFIG — same Supabase project as the ERP
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
+
+const TGK_SUPPORT_VERSION = 'v1.0';
+const TGK_SUPPORT_BUILD_DATE = '2026-07-09';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -400,6 +407,8 @@ async function afterLogin(user){
   document.getElementById('auth-gate').classList.add('hidden');
   document.getElementById('tgk-app').style.display = 'block';
   document.getElementById('userLabel').textContent = user.email;
+  const vb = document.getElementById('support-version-badge'); if(vb) vb.textContent = TGK_SUPPORT_VERSION;
+  const bd = document.getElementById('support-build-date'); if(bd) bd.textContent = TGK_SUPPORT_BUILD_DATE;
   await loadAll();
   renderNav();
   goPage('dashboard');
