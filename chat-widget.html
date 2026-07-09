@@ -59,7 +59,7 @@ body{position:relative;width:100%;height:100%}
 
 <div id="panel">
   <div class="chat-head">
-    <span id="chatHeadTitle">TGK Motorsport Support</span>
+    <span id="chatHeadTitle">TGK Motorsport Live Chat</span>
     <span onclick="togglePanel()">✕</span>
   </div>
   <div id="panelContent"></div>
@@ -153,7 +153,6 @@ async function startChat(){
     if(!resp.ok || result.error) throw new Error(result.error || 'Could not start chat');
 
     chatState = { ticket_id: result.ticket_id, session_token: result.session_token, ended: false };
-    document.getElementById('chatHeadTitle').textContent = `Chat #${result.ticket_number}`;
     renderChatWindow();
     startPolling();
   }catch(e){
