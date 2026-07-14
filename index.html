@@ -569,11 +569,13 @@ function subscribeRealtime(){
         }
       }
     })
-    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'warranty_claims' }, payload=>{
-      handleErpClaimUpdate('warranty', payload.old, payload.new);
+    .on('postgres_changes', { event:'*', schema:'public', table:'warranty_claims' }, payload=>{
+      if(payload.eventType==='DELETE'){ handleErpClaimDelete('warranty', payload.old); }
+      else if(payload.eventType==='UPDATE'){ handleErpClaimUpdate('warranty', payload.old, payload.new); }
     })
-    .on('postgres_changes', { event:'UPDATE', schema:'public', table:'shipment_errors' }, payload=>{
-      handleErpClaimUpdate('shipment_error', payload.old, payload.new);
+    .on('postgres_changes', { event:'*', schema:'public', table:'shipment_errors' }, payload=>{
+      if(payload.eventType==='DELETE'){ handleErpClaimDelete('shipment_error', payload.old); }
+      else if(payload.eventType==='UPDATE'){ handleErpClaimUpdate('shipment_error', payload.old, payload.new); }
     })
     .subscribe();
 }
@@ -1297,6 +1299,48 @@ function openSendToERPModal(ticketId, kind){
 }
 window.openSendToERPModal = openSendToERPModal;
 
+/* When a linked warranty claim / shipment error is DELETED in the ERP, purge it from our cache so the
+   ticket stops showing "Sent to ERP" and the send buttons reappear -- letting staff resend a correction. */
+function handleErpClaimDelete(kind, oldRow){
+  if(!oldRow || oldRow.id==null) return;
+  if(kind==='warranty'){ S.warranty = S.warranty.filter(w=>w.id!==oldRow.id); }
+  else { S.shipErrors = S.shipErrors.filter(e=>e.id!==oldRow.id); }
+  if(['warranty','shiperrors','tickets','dashboard'].includes(S.page)) renderPage();
+  if(S.activeTicket && ((kind==='warranty' && S.activeTicket.warranty_claim_id===oldRow.id) || (kind==='shipment_error' && S.activeTicket.shipment_error_id===oldRow.id))){
+    openTicket(S.activeTicket.id);
+    toast('Linked ERP record was deleted \u2014 you can resend a correction');
+  }
+}
+
+/* Manual resend: unlink the ticket from its ERP record and reopen the send form so a corrected
+   warranty claim / shipment error can be created fresh. Warns if the old record still exists. */
+async function resendToERP(ticketId, kind){
+  const t = S.tickets.find(x=>x.id===ticketId);
+  if(!t){ toast('Ticket not found', true); return; }
+  const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
+  const linkedId = kind==='warranty' ? t.warranty_claim_id : t.shipment_error_id;
+  let existing=null;
+  if(linkedId){ try{ const { data } = await sb.from(table).select('*').eq('id',linkedId).maybeSingle(); existing=data; }catch(e){} }
+  if(existing){
+    const shipped = existing.tracking_number || existing.return_tracking || existing.return_tracking_number;
+    const msg = shipped
+      ? 'Heads up: the existing ERP record was already SHIPPED (tracking '+(existing.tracking_number||existing.return_tracking||existing.return_tracking_number)+').\n\nResending creates a brand-new record and a duplicate shipment request. Continue only if the warehouse truly needs to ship again.\n\nResend anyway?'
+      : 'The existing ERP record is still there.\n\nDelete it in the ERP first to avoid a duplicate in the warehouse queue, then resend.\n\nResend anyway? (this unlinks the ticket from that record)';
+    if(!confirm(msg)) return;
+  }
+  // purge stale cache + unlink the ticket so the corrected send starts clean
+  if(kind==='warranty'){ S.warranty = S.warranty.filter(w=>w.id!==linkedId); }
+  else { S.shipErrors = S.shipErrors.filter(e=>e.id!==linkedId); }
+  const patch = kind==='warranty' ? { warranty_claim_id:null } : { shipment_error_id:null };
+  try{ await sb.from('tickets').update({ ...patch, updated_at:new Date().toISOString() }).eq('id',ticketId); }catch(e){ toast('Could not unlink ticket: '+(e.message||''), true); return; }
+  const idx = S.tickets.findIndex(x=>x.id===ticketId);
+  const merged = { ...t, ...patch };
+  if(idx!==-1) S.tickets[idx]=merged;
+  S.activeTicket = merged;
+  toast('Ticket unlinked \u2014 send the corrected details');
+  openSendToERPModal(ticketId, kind);
+}
+
 async function confirmSendToERP(ticketId, kind){
   const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
@@ -1735,11 +1779,11 @@ function renderTicketPanel(t){
         📦 Sent to ERP/Warehouse — ${warranty ? 'Warranty Claim' : 'Shipment Error'} created${(warranty||shipErr).created_at ? ' ' + timeAgo((warranty||shipErr).created_at) : ''}
       </div>` : ''}
       ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealer.email||'')}</div>` : ''}
-      ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim</div>
+      ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim <button class="btn btn-sm" onclick="resendToERP('${t.id}','warranty')" style="float:right;font-size:10px;padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(warranty.status||'—')} · Cost: ${warranty.claim_cost?'$'+Number(warranty.claim_cost).toFixed(2):'—'}
         ${warranty.tracking_number?' · Tracking: '+escapeHtml(warranty.tracking_number):''}
       </div>` : ''}
-      ${shipErr ? `<div class="linked-box"><div class="lk-title">Linked Shipment Error</div>
+      ${shipErr ? `<div class="linked-box"><div class="lk-title">Linked Shipment Error <button class="btn btn-sm" onclick="resendToERP('${t.id}','shipment_error')" style="float:right;font-size:10px;padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(shipErr.status||'—')} · Cost: ${shipErr.claim_cost?'$'+Number(shipErr.claim_cost).toFixed(2):'—'}
         ${shipErr.return_tracking?' · Return Tracking: '+escapeHtml(shipErr.return_tracking):''}
       </div>` : ''}
