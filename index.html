@@ -239,7 +239,7 @@ select.form-input{cursor:pointer}
       </label>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.3</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.4</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -277,7 +277,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.3';
+const TGK_SUPPORT_VERSION = 'v1.4';
 const TGK_SUPPORT_BUILD_DATE = '2026-07-14';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -300,8 +300,9 @@ const S = {
   shipErrors: [],
   dealers: [],
   team: [],
+  templates: [],
   activeTicket: null,
-  filters: { status: '__active__', priority: '', source: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
+  filters: { status: '__active__', priority: '', source: '', category: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -515,18 +516,20 @@ async function fetchAll(queryFn, pageSize=1000){
 
 async function loadAll(){
   try{
-    const [tickets, warranty, shipErrors, dealers, team] = await Promise.all([
+    const [tickets, warranty, shipErrors, dealers, team, templates] = await Promise.all([
       fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
       sb.from('dealers').select('id,name,email').then(r=>r.data||[]),
-      sb.from('team_members').select('email,display_name').then(r=>r.data||[])
+      sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
+      sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[])
     ]);
     S.tickets = tickets;
     S.warranty = warranty;
     S.shipErrors = shipErrors;
     S.dealers = dealers;
     S.team = team;
+    S.templates = templates;
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
@@ -836,6 +839,10 @@ function renderTicketsList(){
         <option value="">All Sources</option>
         ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${S.filters.source===s?'selected':''}>${label(s)}</option>`).join('')}
       </select>
+      <select class="form-input" style="width:auto" onchange="S.filters.category=this.value; renderTicketsList()">
+        <option value="">All Categories</option>
+        ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${S.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+      </select>
       <select class="form-input" style="width:auto" onchange="S.filters.tag=this.value; renderTicketsList()">
         <option value="">All Tags</option>
         ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${S.filters.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
@@ -855,6 +862,7 @@ function renderTicketsList(){
       </label>
       ${S.user ? `<button class="btn btn-sm btn-teal" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:S.user.email,staleOnly:false,showArchived:false,q:''}; renderTicketsList()">My Tickets</button>` : ''}
       <button class="btn btn-sm" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
+      <button class="btn btn-sm" onclick="openTemplateManager()"> Templates</button>
       <button class="btn btn-sm" onclick="exportTicketsToCSV()">⬇ Export CSV</button>
     </div>
     ${renderBulkActionBar()}
@@ -993,6 +1001,161 @@ function exportTicketsToCSV(){
 }
 window.exportTicketsToCSV = exportTicketsToCSV;
 
+/* ===== Ticket categories + reply templates ===== */
+const TK_CATEGORY_OPTIONS = ['Inquiry','Return','Warranty','Shipment Error','Wholesale/Dealer','Other'];
+
+// Fallback category (for defaulting the template picker) when a ticket has no explicit category yet
+function ticketCategory(t){
+  if(!t) return 'Inquiry';
+  if(t.category) return t.category;
+  var m = { warranty:'Warranty', shipment_error:'Shipment Error' };
+  return m[t.source] || 'Inquiry';
+}
+
+// Options for the composer template picker: current-category templates first, then the rest
+function templatePickerOptions(t){
+  var cat = ticketCategory(t);
+  var all = (S.templates||[]);
+  if(!all.length) return '<option value="">No templates yet - click Edit</option>';
+  var inCat = all.filter(function(x){ return (x.category||'')===cat; });
+  var others = all.filter(function(x){ return (x.category||'')!==cat; });
+  function opt(x){ return '<option value="'+x.id+'">'+escapeHtml(x.title)+'</option>'; }
+  var html = '<option value="">Insert template...</option>';
+  if(inCat.length) html += '<optgroup label="'+escapeHtml(cat)+'">'+inCat.map(opt).join('')+'</optgroup>';
+  if(others.length) html += '<optgroup label="Other templates">'+others.map(opt).join('')+'</optgroup>';
+  return html;
+}
+
+// Replace {{tokens}} with live ticket data where available; unknown tokens are left untouched
+function fillTemplateTokens(body, t){
+  var agent = (S.user && S.user.email) ? (friendlyStaffName()||S.user.email) : '';
+  var wc = (t && t.warranty_claim_id) ? (S.warranty.find(function(w){return w.id===t.warranty_claim_id;})||{}) : {};
+  var se = (t && t.shipment_error_id) ? (S.shipErrors.find(function(e){return e.id===t.shipment_error_id;})||{}) : {};
+  var map = {
+    order_number: (t && t.order_number) ? t.order_number : '',
+    customer_name: (t && t.customer_name) ? t.customer_name : '',
+    first_name: (t && t.customer_name) ? String(t.customer_name).trim().split(/\s+/)[0] : '',
+    customer_email: (t && t.customer_email) ? t.customer_email : '',
+    pn: (t && t.pn) || wc.pn || se.pn || '',
+    tracking: (t && t.tracking_number) || wc.tracking_number || se.tracking_number || '',
+    ticket_number: (t && t.ticket_number!=null) ? ('#'+t.ticket_number) : '',
+    agent: agent
+  };
+  return String(body||'').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function(m0, key){
+    var k = key.toLowerCase();
+    return (k in map) ? map[k] : m0;
+  });
+}
+
+// Insert a template into the reply box (append if there is already a draft), tokens filled
+function applyTemplate(ticketId, templateId){
+  if(!templateId) return;
+  var t = S.tickets.find(function(x){return x.id===ticketId;});
+  var tmpl = (S.templates||[]).find(function(x){return x.id===templateId;});
+  if(!tmpl) return;
+  var box = document.getElementById('msgBox');
+  if(!box) return;
+  var text = fillTemplateTokens(tmpl.body, t);
+  box.value = box.value.trim() ? (box.value.replace(/\s+$/,'') + '\n\n' + text) : text;
+  box.focus();
+  try{ box.selectionStart = box.selectionEnd = box.value.length; }catch(e){}
+}
+
+// ----- Template manager modal (add / edit / delete) -----
+function openTemplateManager(){
+  var ex = document.getElementById('tmpl-mgr-ov'); if(ex) ex.remove();
+  var ov = document.createElement('div');
+  ov.id = 'tmpl-mgr-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.innerHTML = '<div style="background:var(--bg2,#fff);border:1px solid var(--border,#ddd);border-radius:12px;width:min(720px,96vw);max-height:88vh;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.25)">'
+    + '<div style="padding:16px 20px;border-bottom:1px solid var(--border,#eee);display:flex;align-items:center;gap:10px">'
+      + '<div style="flex:1;font-size:15px;font-weight:700;color:var(--text,#111)">Reply Templates</div>'
+      + '<button class="btn btn-sm btn-teal" onclick="editTemplate(null)">+ New Template</button>'
+      + '<button class="btn btn-sm" onclick="document.getElementById(\'tmpl-mgr-ov\').remove()">Close</button>'
+    + '</div>'
+    + '<div id="tmpl-mgr-body" style="overflow-y:auto;padding:14px 20px;flex:1"></div>'
+  + '</div>';
+  document.body.appendChild(ov);
+  ov.addEventListener('click', function(e){ if(e.target===ov) ov.remove(); });
+  renderTemplateManagerBody();
+}
+
+function renderTemplateManagerBody(){
+  var body = document.getElementById('tmpl-mgr-body'); if(!body) return;
+  var all = (S.templates||[]).slice().sort(function(a,b){ return (a.category||'~').localeCompare(b.category||'~') || (a.sort_order||0)-(b.sort_order||0); });
+  if(!all.length){ body.innerHTML = '<div style="color:var(--text3,#888);font-size:13px;padding:24px;text-align:center">No templates yet. Click "+ New Template" to create one.</div>'; return; }
+  var groups = {};
+  all.forEach(function(x){ var c = x.category||'All categories'; (groups[c]=groups[c]||[]).push(x); });
+  var html = '';
+  Object.keys(groups).forEach(function(cat){
+    html += '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--teal,#0d9488);margin:12px 0 6px">'+escapeHtml(cat)+'</div>';
+    groups[cat].forEach(function(x){
+      html += '<div style="border:1px solid var(--border,#eee);border-radius:8px;padding:10px 12px;margin-bottom:8px">'
+        + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
+          + '<div style="flex:1;font-weight:600;font-size:13px;color:var(--text,#111)">'+escapeHtml(x.title)+'</div>'
+          + '<button class="btn btn-sm" onclick="editTemplate(\''+x.id+'\')">Edit</button>'
+          + '<button class="btn btn-sm" style="color:var(--red,#dc2626)" onclick="deleteTemplate(\''+x.id+'\')">Delete</button>'
+        + '</div>'
+        + '<div style="font-size:12px;color:var(--text2,#555);white-space:pre-wrap;max-height:80px;overflow:hidden">'+escapeHtml(x.body)+'</div>'
+      + '</div>';
+    });
+  });
+  body.innerHTML = html;
+}
+
+function editTemplate(id){
+  var tmpl = id ? (S.templates||[]).find(function(x){return x.id===id;}) : null;
+  var body = document.getElementById('tmpl-mgr-body'); if(!body) return;
+  var catOpts = ['<option value="">All categories</option>'].concat(TK_CATEGORY_OPTIONS.map(function(c){
+    return '<option value="'+c+'" '+((tmpl&&tmpl.category===c)?'selected':'')+'>'+escapeHtml(c)+'</option>';
+  })).join('');
+  body.innerHTML = '<div style="font-size:11px;color:var(--text3,#888);margin-bottom:10px">Tokens: {{order_number}} {{customer_name}} {{first_name}} {{customer_email}} {{pn}} {{tracking}} {{ticket_number}} {{agent}}</div>'
+    + '<div class="form-group"><label class="form-label">Title</label><input id="tm-title" class="form-input" value="'+(tmpl?escapeHtml(tmpl.title):'')+'" placeholder="e.g. Return approved"></div>'
+    + '<div class="form-group"><label class="form-label">Category</label><select id="tm-cat" class="form-input">'+catOpts+'</select></div>'
+    + '<div class="form-group"><label class="form-label">Body</label><textarea id="tm-body" class="form-input" rows="8" style="resize:vertical">'+(tmpl?escapeHtml(tmpl.body):'')+'</textarea></div>'
+    + '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">'
+      + '<button class="btn btn-sm" onclick="renderTemplateManagerBody()">Cancel</button>'
+      + '<button class="btn btn-sm btn-primary" onclick="saveTemplate('+(id?('\''+id+'\''):'null')+')">Save</button>'
+    + '</div>';
+  var ti = document.getElementById('tm-title'); if(ti) ti.focus();
+}
+
+async function saveTemplate(id){
+  var title = (document.getElementById('tm-title').value||'').trim();
+  var cat = document.getElementById('tm-cat').value||null;
+  var bodyTxt = (document.getElementById('tm-body').value||'').trim();
+  if(!title || !bodyTxt){ toast('Title and body are required', true); return; }
+  try{
+    if(id){
+      var up = await sb.from('ticket_templates').update({ title:title, category:cat, body:bodyTxt, updated_at:new Date().toISOString() }).eq('id', id).select().single();
+      if(up.error) throw up.error;
+      S.templates = (S.templates||[]).map(function(x){ return x.id===id ? up.data : x; });
+    } else {
+      var ins = await sb.from('ticket_templates').insert({ title:title, category:cat, body:bodyTxt, created_by:(S.user&&S.user.email)||null }).select().single();
+      if(ins.error) throw ins.error;
+      S.templates = (S.templates||[]).concat([ins.data]);
+    }
+    toast('Template saved');
+    renderTemplateManagerBody();
+    var picker = document.getElementById('tmplPicker');
+    if(picker && S.activeTicket) picker.innerHTML = templatePickerOptions(S.activeTicket);
+  }catch(e){ toast('Save failed: '+e.message, true); }
+}
+
+async function deleteTemplate(id){
+  if(!confirm('Delete this template?')) return;
+  try{
+    var r = await sb.from('ticket_templates').delete().eq('id', id);
+    if(r.error) throw r.error;
+    S.templates = (S.templates||[]).filter(function(x){ return x.id!==id; });
+    toast('Template deleted');
+    renderTemplateManagerBody();
+    var picker = document.getElementById('tmplPicker');
+    if(picker && S.activeTicket) picker.innerHTML = templatePickerOptions(S.activeTicket);
+  }catch(e){ toast('Delete failed: '+e.message, true); }
+}
+
+
 function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
@@ -1001,6 +1164,7 @@ function filteredTickets(){
   else if(f.status) list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
+  if(f.category) list = list.filter(t=>(t.category||'')===f.category);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
   if(f.assignedTo === '__unassigned__') list = list.filter(t=>!t.assigned_to);
   else if(f.assignedTo) list = list.filter(t=>t.assigned_to===f.assignedTo);
@@ -1039,7 +1203,7 @@ function ticketTable(list, enableBulk){
   return `<div class="tbl-wrap"><table>
     <thead><tr>
       ${enableBulk ? `<th style="width:28px"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAllTickets(this.checked, ${JSON.stringify(list.map(t=>t.id))})"></th>` : ''}
-      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
+      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Category</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
     </tr></thead>
     <tbody>
       ${list.map(t=>`
@@ -1049,6 +1213,7 @@ function ticketTable(list, enableBulk){
           <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.archived?' <span class="pill pill-muted">🗄 Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
+          <td>${t.category?`<span class="pill pill-muted">${escapeHtml(t.category)}</span>`:''}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
           <td>${(t.tags||[]).slice(0,2).map(tag=>`<span class="pill pill-muted" style="margin-right:3px">${escapeHtml(tag)}</span>`).join('')}${(t.tags||[]).length>2?`<span style="font-size:10px;color:var(--text3)">+${t.tags.length-2}</span>`:''}</td>
           <td><span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span></td>
@@ -1721,6 +1886,15 @@ function renderTicketPanel(t){
         </div>
       </div>
       <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Category</label>
+          <select class="form-input" onchange="updateTicketField('${t.id}','category',this.value)">
+            <option value="">-- Select --</option>
+            ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${(t.category||'')===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group"></div>
+      </div>
+      <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Assigned To</label>
           <select class="form-input" onchange="updateTicketField('${t.id}','assigned_to',this.value)">
             <option value="">Unassigned</option>
@@ -1836,6 +2010,12 @@ function renderTicketPanel(t){
       <div id="threadBox">${renderThread(msgs, false)}</div>
       <div id="replyComposer" style="margin-top:12px" data-mode="conv">
         <div id="composerModeLabel" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px">Replying in Conversation — visible to customer</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+          <select id="tmplPicker" class="form-input" style="width:auto;flex:1" onchange="applyTemplate('${t.id}', this.value); this.value='';">
+            ${templatePickerOptions(t)}
+          </select>
+          <button class="btn btn-sm" type="button" onclick="openTemplateManager()" title="Add or edit templates">Edit</button>
+        </div>
         <textarea id="msgBox" rows="3" placeholder="Type a reply..." class="form-input" style="resize:vertical"></textarea>
         <div class="checkbox-row" style="justify-content:flex-end">
           <label class="btn btn-sm" style="cursor:pointer;margin:0">📎 Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
