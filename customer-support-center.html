@@ -77,8 +77,8 @@
 
 <div class="tgk-support-center">
   <div class="wrap">
-    <div class="tabs" id="tabs"></div>
-    <div id="content"></div>
+    <div class="tabs" id="tgkSupportTabs"></div>
+    <div id="tgkSupportContent"></div>
     <div class="footer-note">TGK Motorsport · We typically respond within 1–2 business days</div>
   </div>
 </div>
@@ -100,7 +100,7 @@
 ============================================================ */
 document.addEventListener('DOMContentLoaded', function(){
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
+const SUPABASE_ANON_KEY = "sb_publishable_JHTuiKlkCD_EHoyDtWtKsQ_gyQ6kgfJ";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ---------------- Shopify placeholders (unwired until Customer Account API is connected) ---------------- */
@@ -120,13 +120,13 @@ const LABELS = {
 };
 
 function renderTabs(active){
-  document.getElementById('tabs').innerHTML = PAGES.map(p =>
+  document.getElementById('tgkSupportTabs').innerHTML = PAGES.map(p =>
     `<button class="tab-btn ${p===active?'active':''}" onclick="goPage('${p}')">${LABELS[p]}</button>`
   ).join('');
 }
 function goPage(p){
   renderTabs(p);
-  document.getElementById('content').innerHTML = RENDER[p]();
+  document.getElementById('tgkSupportContent').innerHTML = RENDER[p]();
   initSpamGuard(p);
   window.scrollTo(0,0);
 }
