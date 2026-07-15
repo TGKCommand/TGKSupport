@@ -39,6 +39,13 @@ input,button,select,textarea{font-family:var(--font)}
 .nav-item:hover{background:var(--bg3);color:var(--text)}
 .nav-item.active{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.2)}
 .nav-dot{width:5px;height:5px;border-radius:50%;background:var(--text3);flex-shrink:0;transition:all .15s}
+.nav-sub{margin:2px 8px 8px 8px;display:flex;flex-direction:column;gap:1px}
+.nav-subitem{display:flex;align-items:center;gap:8px;padding:5px 12px 5px 26px;border-radius:7px;cursor:pointer;border:1px solid transparent;background:transparent;color:var(--text3);font-size:12px;text-align:left;width:100%;transition:all .12s}
+.nav-subitem:hover{background:var(--bg3);color:var(--text)}
+.nav-subitem.active{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.2)}
+.nav-subitem .nav-badge{margin-left:auto}
+.nav-subdot{width:4px;height:4px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.nav-subitem.active .nav-subdot{background:var(--teal)}
 .nav-item.active .nav-dot{background:var(--teal)}
 .nav-badge{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--text3);background:var(--bg4);border:1px solid var(--border);padding:1px 6px;border-radius:10px;min-width:22px;text-align:center;margin-left:auto}
 .nav-item.active .nav-badge{color:var(--teal);background:var(--teal-dim);border-color:rgba(13,148,136,.22)}
@@ -239,7 +246,7 @@ select.form-input{cursor:pointer}
       </label>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.4</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.5</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -277,7 +284,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.4';
+const TGK_SUPPORT_VERSION = 'v1.5';
 const TGK_SUPPORT_BUILD_DATE = '2026-07-14';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -706,7 +713,7 @@ function renderNav(){
     }
     return `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
       <span class="nav-dot"></span>${n.label}${badge}
-    </button>`;
+    </button>` + (n.id==='tickets' && S.page==='tickets' ? renderCategorySubnav() : '');
   }).join('');
 }
 
@@ -724,6 +731,36 @@ function closeMobileSidebar(){
   if(sb)sb.classList.remove('mobile-open');
   if(scrim)scrim.classList.remove('active');
 }
+function renderCategorySubnav(){
+  var active = S.tickets.filter(function(t){ return !t.archived && !['resolved','closed'].includes(t.status); });
+  var cur = S.filters.category||'';
+  function sub(labelText, cat){
+    var count;
+    if(cat==='__none__') count = active.filter(function(t){ return !t.category; }).length;
+    else if(cat==='') count = active.length;
+    else count = active.filter(function(t){ return (t.category||'')===cat; }).length;
+    var on = cur===cat;
+    return '<button class="nav-subitem '+(on?'active':'')+'" onclick="goCategory(\''+cat+'\')">'
+      + '<span class="nav-subdot"></span>'+escapeHtml(labelText)
+      + (count?'<span class="nav-badge">'+count+'</span>':'')
+      + '</button>';
+  }
+  return '<div class="nav-sub">'
+    + sub('All Tickets','')
+    + TK_CATEGORY_OPTIONS.map(function(c){ return sub(c,c); }).join('')
+    + sub('Uncategorized','__none__')
+    + '</div>';
+}
+
+function goCategory(cat){
+  S.page = 'tickets';
+  S.filters.category = cat;
+  closeMobileSidebar();
+  renderNav();
+  var pt = document.getElementById('pageTitle'); if(pt) pt.textContent = 'Tickets';
+  renderPage();
+}
+
 function goPage(id){
   S.page = id;
   closeMobileSidebar(); // tapping a nav link on mobile should close the drawer, not leave it covering the new page
@@ -839,9 +876,10 @@ function renderTicketsList(){
         <option value="">All Sources</option>
         ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${S.filters.source===s?'selected':''}>${label(s)}</option>`).join('')}
       </select>
-      <select class="form-input" style="width:auto" onchange="S.filters.category=this.value; renderTicketsList()">
+      <select class="form-input" style="width:auto" onchange="S.filters.category=this.value; renderNav(); renderTicketsList()">
         <option value="">All Categories</option>
         ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${S.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+        <option value="__none__" ${S.filters.category==='__none__'?'selected':''}>Uncategorized</option>
       </select>
       <select class="form-input" style="width:auto" onchange="S.filters.tag=this.value; renderTicketsList()">
         <option value="">All Tags</option>
@@ -1164,7 +1202,8 @@ function filteredTickets(){
   else if(f.status) list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
-  if(f.category) list = list.filter(t=>(t.category||'')===f.category);
+  if(f.category === '__none__') list = list.filter(t=>!t.category);
+  else if(f.category) list = list.filter(t=>(t.category||'')===f.category);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
   if(f.assignedTo === '__unassigned__') list = list.filter(t=>!t.assigned_to);
   else if(f.assignedTo) list = list.filter(t=>t.assigned_to===f.assignedTo);
