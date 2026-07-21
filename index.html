@@ -249,7 +249,7 @@ select.form-input{cursor:pointer}
       </label>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.7</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.8</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -287,8 +287,8 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.7';
-const TGK_SUPPORT_BUILD_DATE = '2026-07-14';
+const TGK_SUPPORT_VERSION = 'v1.8';
+const TGK_SUPPORT_BUILD_DATE = '2026-07-21';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1377,11 +1377,54 @@ async function convertToTicket(kind, recordId){
 }
 let warrantyClaimItems = [];
 
+/* Item type sent to the ERP per warranty line. "Finished Good" was added so Support can send the
+   warehouse ANY saleable item, not just tracked parts/assemblies. This 'type' string is the contract
+   the ERP's ship logic reads to decide where to deduct inventory -- keep the values in sync with it. */
+const CLAIM_ITEM_TYPE_OPTIONS = [
+  { value:'part', label:'Part' },
+  { value:'assembly', label:'Assembly' },
+  { value:'finished_good', label:'Finished Good' }
+];
+
+// Classify a SKU via assemblies + parts (canonical pn OR new_sku). Anything that is neither a tracked
+// part nor assembly is treated as a finished good so it can still be shipped. Supabase queries resolve
+// with {data,error} (no throw), so a table without a new_sku column just yields an ignorable error.
+async function resolveClaimItemType(pn){
+  pn = (pn||'').trim();
+  if(!pn) return 'part';
+  const inTable = async (table) => {
+    try{
+      const [byPn, byNew] = await Promise.all([
+        sb.from(table).select('pn').eq('pn', pn).limit(1),
+        sb.from(table).select('pn').eq('new_sku', pn).limit(1)
+      ]);
+      return !!((byPn.data && byPn.data.length) || (byNew.data && byNew.data.length));
+    }catch(e){ return false; }
+  };
+  if(await inTable('assemblies')) return 'assembly';
+  if(await inTable('parts')) return 'part';
+  return 'finished_good';
+}
+window.resolveClaimItemType = resolveClaimItemType;
+
+// Auto-set a row's type after its SKU is entered, unless staff manually chose one.
+async function detectWarrantyItemType(i){
+  const item = warrantyClaimItems[i];
+  if(!item || item.typeManual) return;
+  item.type = await resolveClaimItemType(item.pn);
+  const container = document.getElementById('warrantyItemsContainer');
+  if(container) container.innerHTML = renderWarrantyItemsRows();
+}
+window.detectWarrantyItemType = detectWarrantyItemType;
+
 function renderWarrantyItemsRows(){
   return warrantyClaimItems.map((item, i) => `
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" data-item-row="${i}">
-      <input class="form-input" style="flex:2" placeholder="Part number" value="${escapeHtml(item.pn||'')}" oninput="warrantyClaimItems[${i}].pn=this.value">
-      <input class="form-input" style="flex:0 0 60px" type="number" min="1" placeholder="Qty" value="${item.qty||1}" oninput="warrantyClaimItems[${i}].qty=parseInt(this.value,10)||1">
+      <input class="form-input" style="flex:2" placeholder="Part / SKU" value="${escapeHtml(item.pn||'')}" oninput="warrantyClaimItems[${i}].pn=this.value" onchange="detectWarrantyItemType(${i})">
+      <select class="form-input" style="flex:0 0 132px" title="Item type sent to the ERP" onchange="warrantyClaimItems[${i}].type=this.value; warrantyClaimItems[${i}].typeManual=true">
+        ${CLAIM_ITEM_TYPE_OPTIONS.map(o=>`<option value="${o.value}" ${((item.type||'part')===o.value)?'selected':''}>${o.label}</option>`).join('')}
+      </select>
+      <input class="form-input" style="flex:0 0 56px" type="number" min="1" placeholder="Qty" value="${item.qty||1}" oninput="warrantyClaimItems[${i}].qty=parseInt(this.value,10)||1">
       <input class="form-input" style="flex:3" placeholder="Description (optional)" value="${escapeHtml(item.description||'')}" oninput="warrantyClaimItems[${i}].description=this.value">
       ${warrantyClaimItems.length > 1 ? `<button type="button" class="btn btn-sm" style="color:var(--red);flex:0 0 auto" onclick="removeWarrantyItem(${i})">✕</button>` : ''}
     </div>
@@ -1389,7 +1432,7 @@ function renderWarrantyItemsRows(){
 }
 
 function addWarrantyItem(){
-  warrantyClaimItems.push({ pn: '', qty: 1, description: '' });
+  warrantyClaimItems.push({ pn: '', qty: 1, description: '', type: 'part' });
   document.getElementById('warrantyItemsContainer').innerHTML = renderWarrantyItemsRows();
 }
 window.addWarrantyItem = addWarrantyItem;
@@ -1415,7 +1458,7 @@ function openSendToERPModal(ticketId, kind){
   //   issue, status, resolution, resolved_at, notes, resolution_type, shipping_details,
   //   ss_order_id, claim_items, tracking_number, carrier, shipped_at, claim_cost
   if(kind === 'warranty'){
-    warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '' }];
+    warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '', type: 'part' }];
   }
   const warrantyFields = `
     <div class="form-group" style="margin-bottom:8px">
@@ -1524,6 +1567,9 @@ function openSendToERPModal(ticketId, kind){
       </div>
     </div>
   `;
+  if(kind === 'warranty'){
+    warrantyClaimItems.forEach((it, i)=>{ if(it.pn) detectWarrantyItemType(i); });
+  }
 }
 window.openSendToERPModal = openSendToERPModal;
 
@@ -1587,26 +1633,15 @@ async function confirmSendToERP(ticketId, kind){
     const t = S.tickets.find(x=>x.id===ticketId);
     const validItems = warrantyClaimItems.filter(i=>i.pn && i.pn.trim());
     const primaryPn = validItems.length ? validItems[0].pn.trim() : '';
-    // [TYPE] The ERP labels each claim item part-vs-assembly from claim_items[].type. We don't load the
-    // assemblies table here, so resolve it on the fly (matching .pn OR .new_sku) purely so the ERP shows
-    // the right label -- deduction itself is table-resolved server-side and does not depend on this.
-    const _asmSet = new Set();
-    if(validItems.length){
-      try{
-        const _pns = validItems.map(i=>i.pn.trim());
-        const [_byPn,_byNew] = await Promise.all([
-          sb.from('assemblies').select('pn,new_sku').in('pn', _pns),
-          sb.from('assemblies').select('pn,new_sku').in('new_sku', _pns)
-        ]);
-        [...(_byPn.data||[]), ...(_byNew.data||[])].forEach(a=>{ if(a.pn)_asmSet.add(a.pn); if(a.new_sku)_asmSet.add(a.new_sku); });
-      }catch(_e){ /* label-only; ignore lookup failure */ }
-    }
+    // Each line carries its own type (part / assembly / finished_good) chosen in the form -- auto-detected
+    // from parts/assemblies and overridable by staff. Finished goods are included so Support can send the
+    // warehouse anything a customer needs. This is exactly what the ERP's ship logic reads.
     const __resTypeSel = val('erpResolutionType');
     const __resType = __resTypeSel === 'other' ? val('erpResolutionTypeOther') : __resTypeSel;
     payload = {
       order_number: val('erpOrder'),
       pn: primaryPn,
-      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), type: _asmSet.has(i.pn.trim())?'assembly':'part', qty: i.qty||1, description: i.description||'' })) : null,
+      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), type: i.type || 'part', qty: i.qty||1, description: i.description||'' })) : null,
       customer_name: val('erpCustomer') || null,
       issue: val('erpIssue') || null,
       status: val('erpStatus'),
