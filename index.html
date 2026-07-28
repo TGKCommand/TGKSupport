@@ -274,7 +274,7 @@ select.form-input{cursor:pointer}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.11</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.12</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -312,7 +312,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.11';
+const TGK_SUPPORT_VERSION = 'v1.12';
 const TGK_SUPPORT_BUILD_DATE = '2026-07-21';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -488,6 +488,7 @@ async function afterLogin(user){
   await loadAll();
   renderNav();
   goPage('dashboard');
+  setupBackButton();
   subscribeRealtime();
 
   try{
@@ -804,6 +805,29 @@ function goPage(id){
   renderPage();
 }
 window.goPage = goPage;
+
+function setupBackButton(){
+  // Trap the phone/browser Back button so it dismisses the current layer instead of closing the app.
+  // Order: modal -> ticket panel -> mobile sidebar drawer -> non-dashboard page. One spare history
+  // entry is kept and re-armed after each dismissal; only a Back from the dashboard (nothing open) exits.
+  try{ history.pushState({tkTrap:1}, ''); }catch(_){}
+  window.addEventListener('popstate', function(){
+    const ov=document.getElementById('modalOverlay');
+    const modalOpen = ov && !ov.classList.contains('hidden') && (ov.innerHTML||'').trim()!=='';
+    const panel=document.getElementById('tk-panel');
+    const panelOpen = panel && panel.classList.contains('open');
+    const drawer=document.querySelector('.sidebar-wrap');
+    const drawerOpen = drawer && drawer.classList.contains('mobile-open');
+    let handled=false;
+    if(modalOpen){ try{closeModal();}catch(_){} handled=true; }
+    else if(panelOpen){ try{closePanel();}catch(_){} handled=true; }
+    else if(drawerOpen){ try{closeMobileSidebar();}catch(_){} handled=true; }
+    else if(S.page && S.page!=='dashboard'){ try{goPage('dashboard');}catch(_){} handled=true; }
+    if(handled){ try{ history.pushState({tkTrap:1}, ''); }catch(_){} }
+    // else: at dashboard with nothing open -> allow the app to close (do not re-arm)
+  });
+}
+window.setupBackButton = setupBackButton;
 
 function renderPage(){
   if(S.page === 'dashboard') return renderDashboard();
