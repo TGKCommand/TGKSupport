@@ -91,6 +91,20 @@ input,button,select,textarea{font-family:var(--font)}
   .kpi-grid-4,.kpi-grid-5{grid-template-columns:repeat(2,1fr)}
   .cols-2{grid-template-columns:1fr}
   .stack-sm{grid-template-columns:1fr!important}
+  /* Ticket list: table -> cards */
+  .tk-desktop{display:none}
+  .tk-cards{display:flex;flex-direction:column;gap:10px}
+  /* Filter bar: stack full-width, tappable */
+  .filter-bar{flex-direction:column;align-items:stretch;gap:10px}
+  .filter-bar .search-wrap{max-width:none;min-width:0;width:100%}
+  .filter-bar .form-input{width:100%!important}
+  .filter-bar .checkbox-row{padding:6px 2px}
+  .filter-bar > .btn{width:100%;justify-content:center}
+  /* Bigger touch targets; 16px inputs stop iOS zoom-on-focus */
+  .form-input{min-height:44px;font-size:16px;padding:11px 12px}
+  .btn{min-height:42px;padding:10px 14px;font-size:13px}
+  .btn-sm{min-height:38px}
+  .topbar-actions .btn{padding:9px 12px}
 }
 
 /* Buttons */
@@ -129,6 +143,14 @@ td.main-col{color:var(--text);font-weight:500}
 .rowlink{cursor:pointer}
 .rowlink:hover td{background:var(--teal-dim)!important}
 .pn{font-family:var(--mono);font-size:12px;color:var(--text3)}
+.tk-cards{display:none}
+.tk-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:13px 14px;cursor:pointer;display:flex;flex-direction:column;gap:7px}
+.tk-card:active{background:var(--bg3)}
+.tk-card-top{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.tk-card-num{font-family:var(--mono);font-size:12px;color:var(--text3);font-weight:600}
+.tk-card-subj{font-size:14px;font-weight:600;color:var(--text);line-height:1.32}
+.tk-card-meta{font-size:12px;color:var(--text3);display:flex;flex-wrap:wrap;gap:3px 12px}
+.tk-card-chk{width:20px;height:20px;flex-shrink:0}
 
 /* Pills */
 .pill{display:inline-flex;align-items:center;padding:2.5px 9px;font-size:10.5px;font-weight:600;border-radius:10px;border:1px solid transparent}
@@ -252,7 +274,7 @@ select.form-input{cursor:pointer}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.9</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.10</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -290,7 +312,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.9';
+const TGK_SUPPORT_VERSION = 'v1.10';
 const TGK_SUPPORT_BUILD_DATE = '2026-07-21';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1252,7 +1274,7 @@ const TICKET_CATEGORIES = ['Shipping','Warranty/Defect','Billing','Return/Refund
 function ticketTable(list, enableBulk){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
   const allSelected = enableBulk && list.length>0 && list.every(t=>S.selectedTickets.has(t.id));
-  return `<div class="tbl-wrap"><table>
+  return `<div class="tk-desktop"><div class="tbl-wrap"><table>
     <thead><tr>
       ${enableBulk ? `<th style="width:28px"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAllTickets(this.checked, ${JSON.stringify(list.map(t=>t.id))})"></th>` : ''}
       <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Category</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
@@ -1274,10 +1296,32 @@ function ticketTable(list, enableBulk){
         </tr>
       `).join('')}
     </tbody>
-  </table></div>`;
+  </table></div></div>
+  <div class="tk-cards">${list.map(t=>ticketCard(t, enableBulk)).join('')}</div>`;
+}
+
+function ticketCard(t, enableBulk){
+  const badges = `${t.archived?' <span class="pill pill-muted">Archived</span>':''}${t.has_unread?` <span class="pill pill-red">${t.unread_count||1} new</span>`:''}${isStale(t)?' <span class="pill pill-orange">Stale</span>':''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">ERP</span>':''}`;
+  return `<div class="tk-card" onclick="openTicket('${t.id}')">
+    <div class="tk-card-top">
+      ${enableBulk?`<input type="checkbox" class="tk-card-chk" ${S.selectedTickets.has(t.id)?'checked':''} onclick="event.stopPropagation()" onchange="toggleTicketSelect('${t.id}', this.checked)">`:''}
+      <span class="tk-card-num">#${t.ticket_number}</span>
+      <span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span>
+      <span class="pill ${STATUS_PILL[t.status]||'pill-muted'}">${label(t.status)}</span>
+      ${t.category?`<span class="pill pill-muted">${escapeHtml(t.category)}</span>`:''}
+    </div>
+    <div class="tk-card-subj" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${badges}</div>
+    <div class="tk-card-meta">
+      <span>${escapeHtml(t.customer_name||t.customer_email||'No customer')}</span>
+      ${t.order_number?`<span>#${escapeHtml(t.order_number)}</span>`:''}
+      <span>${label(t.source)}</span>
+      <span>${timeAgo(t.updated_at)}</span>
+    </div>
+  </div>`;
 }
 
 function friendlyStaffName(){
+
   if(!S.user || !S.user.email) return '';
   return S.user.email.split('@')[0].replace(/[._]/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
 }
