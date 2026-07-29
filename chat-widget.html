@@ -21,7 +21,7 @@ body{position:relative;width:100%;height:100%}
 
 /* ---------- Bubble ---------- */
 #bubble{
-  position:absolute;bottom:8px;right:8px;width:52px;height:52px;border-radius:50%;
+  position:absolute;bottom:20px;right:20px;width:52px;height:52px;border-radius:50%;
   background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;
   cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);border:none;outline:none;z-index:9999;
   padding:0;line-height:0;transition:transform .15s,background .15s;
@@ -50,8 +50,8 @@ body{position:relative;width:100%;height:100%}
 
 /* ---------- Panel ---------- */
 #panel{
-  position:absolute;top:0;left:0;right:0;bottom:0;
-  background:var(--bg);border-radius:var(--r);box-shadow:0 14px 48px rgba(0,0,0,.5);
+  position:absolute;top:16px;left:16px;right:16px;bottom:16px;
+  background:var(--bg);border-radius:var(--r);box-shadow:0 8px 24px rgba(0,0,0,.5);
   display:none;flex-direction:column;overflow:hidden;z-index:9999;border:1px solid var(--border);
 }
 #panel.open{display:flex}
@@ -163,7 +163,7 @@ body{position:relative;width:100%;height:100%}
 </div>
 
 <script>
-const TGK_CHAT_WIDGET_VERSION = 'v2.1';
+const TGK_CHAT_WIDGET_VERSION = 'v2.2';
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const SUPPORT_PAGE_URL = "https://contact.tgkmotorsport.com";
