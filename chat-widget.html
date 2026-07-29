@@ -165,7 +165,7 @@ body{position:relative;width:100%;height:100%}
 </div>
 
 <script>
-const TGK_CHAT_WIDGET_VERSION = 'v2.4';
+const TGK_CHAT_WIDGET_VERSION = 'v2.5';
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const SUPPORT_PAGE_URL = "https://contact.tgkmotorsport.com";
@@ -323,7 +323,9 @@ function clearChatSession(){
 function togglePanel(){
   panelOpen = !panelOpen;
   const panel = document.getElementById('panel');
+  const bubble = document.getElementById('bubble');
   if(panelOpen){
+    bubble.style.display = 'none'; // hide instantly - it scales with the iframe and would flash huge
     notifyParentSize(); // grow the iframe first so the panel never renders inside the tiny circle
     setTimeout(function(){ panel.classList.add('open'); }, 60);
     if(chatState){
@@ -335,6 +337,7 @@ function togglePanel(){
     }
   } else {
     panel.classList.remove('open'); // hide first, then shrink the iframe
+    bubble.style.display = 'flex';
     notifyParentSize();
     if(chatState) startPolling(); // drop to background cadence while collapsed
   }
