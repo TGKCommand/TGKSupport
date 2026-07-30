@@ -227,7 +227,7 @@ select.form-input{cursor:pointer}
 </style>
 <style>
 /* ================================================================
-   MACHINED SKIN - Support Center (v1.18). Same design system as
+   MACHINED SKIN - Support Center (v1.19). Same design system as
    ERP v20.86: aluminum field, hairline-ringed plates, stealth
    forged carbon trim, teal-orange signature. CSS + one decorative
    script only; delete this block (and the nameplate script at the
@@ -365,7 +365,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.18</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.19</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -403,7 +403,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.18';
+const TGK_SUPPORT_VERSION = 'v1.19';
 const TGK_SUPPORT_BUILD_DATE = '2026-07-21';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2141,6 +2141,7 @@ function renderTicketPanel(t){
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
       <div class="tk-head-title">#${t.ticket_number}</div>
+      <button class="tk-close" title="Forward this conversation to an external email" onclick="openForwardModal('${t.id}')">↗</button>
       <button class="tk-close" title="Mark as unread" onclick="markTicketUnread('${t.id}')">📩</button>
       <button class="tk-close" title="Archive ticket" style="color:var(--red)" onclick="archiveTicket('${t.id}')">🗑</button>
       <button class="tk-close" onclick="closePanel()">✕</button>
@@ -2667,6 +2668,91 @@ async function emailReturnLabel(ticketId){
   }
 }
 window.emailReturnLabel = emailReturnLabel;
+
+/* ============ FORWARD CONVERSATION (v1.19) ============
+   Sends the full ticket thread to any external address through the same
+   send-ticket-email edge function used for customer replies. Logs an
+   internal note on the ticket; note is removed if the send fails. */
+function _fwFormatThread(t, msgs, includeNotes){
+  var lines=[];
+  lines.push('---------- Forwarded conversation ----------');
+  lines.push('Ticket #'+String(t.ticket_number).padStart(4,'0')+(t.subject?' - '+t.subject:''));
+  lines.push('Customer: '+(t.customer_name||'-')+' <'+(t.customer_email||'-')+'>'+(t.order_number?'  |  Order #'+t.order_number:''));
+  lines.push('Status: '+(t.status||'-')+'  |  Opened: '+new Date(t.created_at).toLocaleString());
+  lines.push('=============================================');
+  (msgs||[]).forEach(function(m){
+    if(m.is_internal_note && !includeNotes) return;
+    var who=m.sender_type==='staff'?('TGK Staff ('+(m.sender_name||'staff')+')'):('Customer ('+(m.sender_name||t.customer_name||'customer')+')');
+    if(m.is_internal_note) who='[INTERNAL NOTE] '+(m.sender_name||'staff');
+    lines.push('');
+    lines.push('['+new Date(m.created_at).toLocaleString()+'] '+who+':');
+    lines.push((m.body||'').trim());
+    (m.attachments||[]).forEach(function(a){ lines.push('  [attachment] '+(a.name||'file')+': '+(a.url||'')); });
+    lines.push('---------------------------------------------');
+  });
+  return lines.join('\n');
+}
+function openForwardModal(ticketId){
+  var t=(S.tickets||[]).find(function(x){return x.id===ticketId;});
+  if(!t){toast('Ticket not found',true);return;}
+  var old=document.getElementById('fw-overlay'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='fw-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(3px)';
+  ov.innerHTML='<div style="background:#fff;border-radius:6px;width:460px;max-width:94vw;padding:20px 22px;box-shadow:0 16px 48px rgba(14,20,24,.2)" onclick="event.stopPropagation()">'
+    +'<div style="font-size:14px;font-weight:800;margin-bottom:4px">Forward conversation</div>'
+    +'<div style="font-size:11px;color:var(--text3);margin-bottom:14px">Ticket #'+String(t.ticket_number).padStart(4,'0')+' \u2014 the full thread will be emailed as plain text.</div>'
+    +'<div class="form-group" style="margin-bottom:10px"><label class="form-label">To (external email)</label><input id="fw-to" class="form-input" type="email" placeholder="name@example.com"></div>'
+    +'<div class="form-group" style="margin-bottom:10px"><label class="form-label">Add a note (optional, appears above the thread)</label><textarea id="fw-note" class="form-input" rows="3" style="resize:vertical" placeholder="FYI \u2014 see conversation below."></textarea></div>'
+    +'<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2);margin-bottom:16px;cursor:pointer"><input type="checkbox" id="fw-notes"> Include internal notes <span style="color:var(--text3);font-size:10.5px">(off by default \u2014 notes stay private)</span></label>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="document.getElementById(\'fw-overlay\').remove()">Cancel</button><button class="btn btn-primary" id="fw-send" onclick="sendForward(\''+ticketId+'\')">\u2197 Forward</button></div>'
+    +'</div>';
+  ov.addEventListener('click',function(){ov.remove();});
+  document.body.appendChild(ov);
+  setTimeout(function(){var i=document.getElementById('fw-to');if(i)i.focus();},50);
+}
+async function sendForward(ticketId){
+  var t=(S.tickets||[]).find(function(x){return x.id===ticketId;});
+  var to=(document.getElementById('fw-to')||{}).value||''; to=to.trim();
+  var note=((document.getElementById('fw-note')||{}).value||'').trim();
+  var incNotes=!!(document.getElementById('fw-notes')||{}).checked;
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)){toast('Enter a valid email address',true);return;}
+  var btn=document.getElementById('fw-send'); if(btn){btn.disabled=true;btn.textContent='Sending\u2026';}
+  var msgs=S.messages[ticketId]||[];
+  var body=(note?note+'\n\n':'')+_fwFormatThread(t,msgs,incNotes);
+  var noteRow=null;
+  try{
+    var ins=await sb.from('ticket_messages').insert({
+      ticket_id:ticketId, sender_type:'staff', sender_name:S.user.email,
+      body:'\u2197 Conversation forwarded to '+to+(incNotes?' (including internal notes)':''),
+      is_internal_note:true
+    }).select().single();
+    if(ins.error) throw ins.error;
+    noteRow=ins.data;
+    var resp=await fetch(SUPABASE_URL+'/functions/v1/send-ticket-email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+SUPABASE_ANON_KEY,'apikey':SUPABASE_ANON_KEY},
+      body:JSON.stringify({
+        ticket_id:ticketId, ticket_number:t.ticket_number, message_id:noteRow.id,
+        to:to,
+        subject:'Fwd: TGK Motorsport Support #'+String(t.ticket_number).padStart(4,'0')+(t.subject?' \u2014 '+t.subject:''),
+        body:body, attachments:[], staff_name:friendlyStaffName()
+      })
+    });
+    var result=await resp.json();
+    if(!resp.ok) throw new Error(result.error||'Email send failed');
+    if(!S.messages[ticketId])S.messages[ticketId]=[];
+    S.messages[ticketId].push(noteRow);
+    var tb=document.getElementById('threadBox');
+    if(tb)tb.innerHTML=renderThread(S.messages[ticketId], showingNotes);
+    var ovl=document.getElementById('fw-overlay'); if(ovl)ovl.remove();
+    toast('Conversation forwarded to '+to);
+  }catch(e){
+    if(noteRow&&noteRow.id){try{await sb.from('ticket_messages').delete().eq('id',noteRow.id);}catch(_){}}
+    if(btn){btn.disabled=false;btn.textContent='\u2197 Forward';}
+    toast('Forward failed: '+e.message,true);
+  }
+}
+window.openForwardModal=openForwardModal;window.sendForward=sendForward;
 
 async function checkReturnRate(ticketId){
   const val = id => document.getElementById(id).value.trim();
@@ -3390,7 +3476,7 @@ if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').cat
 window.enableSupportPush=enableSupportPush;
 </script>
 <script>
-/* MACHINED nameplate header (Support v1.18) - presentation only. */
+/* MACHINED nameplate header (Support v1.19) - presentation only. */
 (function(){
   function esc(x){return String(x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function meta(){
