@@ -140,7 +140,14 @@ body{position:relative;width:100%;height:100%}
 }
 .offline-box a:hover{background:var(--orange-hover)}
 .loading-box{padding:34px 16px;text-align:center;color:var(--text3);font-size:13px}
-.ended-box{padding:26px 18px;text-align:center;color:var(--text2);font-size:13px;line-height:1.55}
+.ended-box{padding:26px 18px 14px;text-align:center;color:var(--text2);font-size:13px;line-height:1.55}
+.ended-actions{padding:0 18px 22px;text-align:center}
+.ended-actions button{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:11px 20px;
+  font-weight:700;cursor:pointer;font-size:12.5px;font-family:inherit;letter-spacing:.4px;text-transform:uppercase}
+.ended-actions button:hover{filter:brightness(1.07)}
+.chat-endlink{display:block;width:100%;text-align:center;background:none;border:none;cursor:pointer;
+  font-family:inherit;font-size:10.5px;color:var(--text3);padding:5px 0 7px;letter-spacing:.3px}
+.chat-endlink:hover{color:var(--orange);text-decoration:underline}
 </style>
 </head>
 <body>
@@ -165,7 +172,7 @@ body{position:relative;width:100%;height:100%}
 </div>
 
 <script>
-const TGK_CHAT_WIDGET_VERSION = 'v2.6';
+const TGK_CHAT_WIDGET_VERSION = 'v2.7';
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const SUPPORT_PAGE_URL = "https://tgkmotorsport.com/pages/support";
@@ -294,6 +301,18 @@ function fmtMsgDate(d){
 
 // ---------- Session persistence ----------
 const CHAT_STORAGE_KEY = 'tgk_chat_session';
+// The saved session lives in localStorage, which survives closing the browser. Without an
+// age cap the widget reattached to the same conversation indefinitely - a chat from last
+// week would reopen as if it were still live. Resume only a genuinely recent session;
+// anything older starts fresh. Sessions saved before this version carry no timestamp and
+// are treated as stale, which clears any conversation currently stuck open.
+const RESUME_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
+function sessionFresh(sv){
+  if(!sv || !sv.ticket_id || !sv.session_token) return false;
+  const t = Number(sv.started_at || 0);
+  if(!t) return false;
+  return (Date.now() - t) < RESUME_MAX_AGE_MS;
+}
 
 function saveChatSession(state){
   try{ localStorage.setItem(CHAT_STORAGE_KEY, JSON.stringify(state)); }catch(e){ /* storage may be blocked — chat still works, just won't persist */ }
@@ -313,10 +332,12 @@ function clearChatSession(){
 // a fresh one. Doesn't force the panel open — just gets it ready.
 (function restoreSessionOnLoad(){
   const saved = loadChatSession();
-  if(saved && saved.ticket_id && saved.session_token){
+  if(sessionFresh(saved)){
     chatState = saved;
     staffMsgSeen = saved.seen || 0;
     startPolling(); // background cadence - keeps the unread badge live across page loads
+  } else if(saved){
+    clearChatSession(); // stale or pre-timestamp session - don't resurrect it
   }
 })();
 
@@ -329,9 +350,9 @@ function togglePanel(){
     notifyParentSize(); // grow the iframe first so the panel never renders inside the tiny circle
     setTimeout(function(){ panel.classList.add('open'); }, 60);
     if(chatState){
-      renderChatWindow();
-      markAllRead();
-      startPolling();
+      // Confirm the conversation is still open before showing it. Staff may have ended it
+      // while the widget was closed; rendering first meant the visitor saw a dead chat.
+      resumeOrEnd();
     } else {
       checkAvailabilityAndRender();
     }
@@ -355,6 +376,30 @@ function notifyParentSize(){
 
 // Tell the parent our size immediately on load too, in case it starts collapsed
 window.addEventListener('load', notifyParentSize);
+
+async function resumeOrEnd(){
+  if(!chatState){ checkAvailabilityAndRender(); return; }
+  const content = document.getElementById('panelContent');
+  content.innerHTML = '<div class="loading-box">Reconnecting...</div>';
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/get-chat-messages?ticket_id=${chatState.ticket_id}&session_token=${chatState.session_token}`, {
+      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY }
+    });
+    const result = await resp.json();
+    if(!result.ok || result.ended){ renderEnded(); return; }
+    renderChatWindow();
+    renderMessages(result.messages || []);
+    trackUnread(result.messages || []);
+    markAllRead();
+    startPolling();
+  }catch(e){
+    // Network hiccup - show the chat rather than stranding the visitor; polling will
+    // catch an ended conversation on its next pass.
+    renderChatWindow();
+    markAllRead();
+    startPolling();
+  }
+}
 
 async function checkAvailabilityAndRender(){
   const content = document.getElementById('panelContent');
@@ -409,7 +454,7 @@ async function startChat(){
     const result = await resp.json();
     if(!resp.ok || result.error) throw new Error(result.error || 'Could not start chat');
 
-    chatState = { ticket_id: result.ticket_id, session_token: result.session_token, ended: false, seen: 0 };
+    chatState = { ticket_id: result.ticket_id, session_token: result.session_token, ended: false, seen: 0, started_at: Date.now() };
     staffMsgSeen = 0; lastStaffCount = 0; unreadCount = 0; updateUnreadBadge();
     saveChatSession(chatState);
     renderChatWindow();
@@ -433,6 +478,7 @@ function renderChatWindow(){
       <textarea class="chat-input" id="chatInput" rows="1" placeholder="Type a message..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMsg();}"></textarea>
       <button class="chat-send" onclick="sendChatMsg()">Send</button>
     </div>
+    <button class="chat-endlink" onclick="endChatByVisitor()">End this chat</button>
   `;
 }
 
@@ -512,7 +558,8 @@ function renderEnded(){
   unreadCount = 0;
   updateUnreadBadge();
   document.getElementById('panelContent').innerHTML = `
-    <div class="ended-box">This chat has ended. Thanks for reaching out! If you need anything else, feel free to start a new chat.</div>
+    <div class="ended-box">This chat has ended. Thanks for reaching out!</div>
+    <div class="ended-actions"><button onclick="startNewChat()">Start a new chat</button></div>
   `;
   chatState = null;
   clearChatSession();
@@ -556,6 +603,30 @@ function startPolling(){
   if(pollTimer) clearInterval(pollTimer); // never stack intervals across open/close cycles
   pollMessages();
   pollTimer = setInterval(pollMessages, panelOpen ? POLL_OPEN_MS : POLL_BG_MS);
+}
+
+function startNewChat(){
+  if(pollTimer){ clearInterval(pollTimer); pollTimer = null; }
+  chatState = null;
+  clearChatSession();
+  staffMsgSeen = 0; lastStaffCount = 0; unreadCount = 0;
+  updateUnreadBadge();
+  checkAvailabilityAndRender();
+}
+
+async function endChatByVisitor(){
+  if(!chatState) { renderEnded(); return; }
+  if(!confirm('End this chat?')) return;
+  // Courtesy note so staff see why the visitor stopped replying. The ticket itself stays
+  // open for staff to resolve - a customer closing the window should not close the ticket.
+  try{
+    await fetch(`${SUPABASE_URL}/functions/v1/send-chat-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      body: JSON.stringify({ ticket_id: chatState.ticket_id, session_token: chatState.session_token, body: 'The visitor ended this chat.' })
+    });
+  }catch(e){ /* non-critical */ }
+  renderEnded();
 }
 
 function escapeHtml(s){
