@@ -70,6 +70,27 @@
 .tgk-support-center .success .check{width:52px;height:52px;border-radius:50%;background:rgba(22,163,74,.12);color:#16a34a;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 16px}
 .tgk-support-center .success h2{font-size:18px;margin-bottom:8px}
 .tgk-support-center .success p{font-size:13.5px;color:var(--text3);line-height:1.6}
+/* ---- Wholesale application form controls ---- */
+.tgk-support-center .form-hint{font-size:11.5px;color:var(--text3);line-height:1.45;margin-top:1px}
+.tgk-support-center .sec-title{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--navy);padding-bottom:7px;border-bottom:1px solid var(--border);margin:26px 0 16px}
+.tgk-support-center select.form-input{appearance:none;-webkit-appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%236b7280' stroke-width='1.6' d='M1 1.6l5 5 5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;background-size:11px;padding-right:32px;cursor:pointer}
+.tgk-support-center .form-input.bad{border-color:var(--red);background:var(--red-dim)}
+.tgk-support-center .opts{display:flex;flex-direction:column;gap:7px;margin-top:2px}
+.tgk-support-center .opts.bad{outline:1px solid var(--red);outline-offset:4px;border-radius:var(--r)}
+.tgk-support-center .opt{display:flex;align-items:flex-start;gap:9px;padding:9px 11px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:13.5px;font-weight:500;color:var(--text2);transition:border-color .15s,background-color .15s}
+.tgk-support-center .opt:hover{border-color:var(--border2);background:var(--bg3)}
+.tgk-support-center .opt.on{border-color:var(--teal);background:rgba(45,212,191,.09);color:var(--text);font-weight:600}
+.tgk-support-center .opt input{width:15px;height:15px;margin:1px 0 0;accent-color:var(--teal-d);cursor:pointer;flex:none}
+.tgk-support-center .drop{border:1.5px dashed var(--border2);border-radius:var(--r-lg);background:var(--bg2);padding:22px 16px;text-align:center;cursor:pointer;transition:border-color .15s,background-color .15s}
+.tgk-support-center .drop:hover,.tgk-support-center .drop.over{border-color:var(--teal);background:rgba(45,212,191,.07)}
+.tgk-support-center .drop .dt{font-size:14px;font-weight:700;color:var(--navy);margin-bottom:4px}
+.tgk-support-center .drop .ds{font-size:11.5px;color:var(--text3)}
+.tgk-support-center .drop .browse{display:inline-block;margin-top:11px;padding:7px 16px;font-size:12.5px;font-weight:700;border:1px solid var(--border2);border-radius:var(--r);background:var(--bg);color:var(--navy)}
+.tgk-support-center .filelist{margin-top:9px;display:flex;flex-direction:column;gap:6px}
+.tgk-support-center .fileitem{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12.5px;background:var(--bg3);border:1px solid var(--border);border-radius:var(--r);padding:7px 11px;color:var(--text2)}
+.tgk-support-center .fileitem button{border:none;background:transparent;color:var(--red);font-weight:700;cursor:pointer;font-size:12.5px;font-family:inherit;padding:0 2px;flex:none}
+.tgk-support-center .tier-note{font-size:11.5px;color:var(--yellow-d);background:var(--yellow-dim);border-radius:var(--r);padding:9px 11px;margin-top:9px;font-weight:600;line-height:1.5}
+.tgk-support-center .sig-input{font-size:18px;padding:12px 14px}
 @media(max-width:600px){.tgk-support-center .form-row{grid-template-columns:1fr}}
 </style>
 </head>
@@ -119,6 +140,10 @@ const LABELS = {
   warranty:'Returns and Warranty Information'
 };
 
+/* Page id -> anti-spam field prefix. These deliberately differ from the page ids
+   (the guard's inputs are named ret-*, ct-*, ws-*), so goPage must translate. */
+const SPAM_PREFIX = { 'return':'ret', contact:'ct', wholesale:'ws' };
+
 function renderTabs(active){
   document.getElementById('tgkSupportTabs').innerHTML = PAGES.map(p =>
     `<button class="tab-btn ${p===active?'active':''}" onclick="goPage('${p}')">${LABELS[p]}</button>`
@@ -127,7 +152,8 @@ function renderTabs(active){
 function goPage(p){
   renderTabs(p);
   document.getElementById('tgkSupportContent').innerHTML = RENDER[p]();
-  initSpamGuard(p);
+  initSpamGuard(SPAM_PREFIX[p]);
+  if(p === 'wholesale') initWholesale();
   window.scrollTo(0,0);
 }
 window.goPage = goPage;
@@ -146,6 +172,7 @@ function spamGuardHtml(prefix){
     </div>`;
 }
 function initSpamGuard(prefix){
+  if(!prefix) return;
   const label = document.getElementById(`${prefix}-mathLabel`);
   if(!label) return;
   const a = Math.floor(Math.random()*8)+2, b = Math.floor(Math.random()*8)+2;
@@ -154,7 +181,15 @@ function initSpamGuard(prefix){
 }
 function passesSpamGuard(prefix, errEl){
   const st = spamState[prefix];
-  const honeypot = document.getElementById(`${prefix}-website`).value.trim();
+  if(!st){
+    // Should not happen now that goPage translates the prefix, but fail closed
+    // and re-arm the guard rather than throwing and silently losing the submit.
+    initSpamGuard(prefix);
+    errEl.textContent = 'Please answer the quick check question below, then submit again.';
+    return false;
+  }
+  const hp = document.getElementById(`${prefix}-website`);
+  const honeypot = hp ? hp.value.trim() : '';
   if(honeypot){ errEl.textContent = 'Something went wrong. Please try again.'; return false; }
   if(Date.now() - st.loadedAt < 2500){ errEl.textContent = 'Please take a moment to review the form before submitting.'; return false; }
   const answer = parseInt(document.getElementById(`${prefix}-mathAnswer`).value, 10);
@@ -177,6 +212,84 @@ async function uploadAttachments(files){
 
 function escapeHtml(s){
   return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------------- Wholesale application: option data + control helpers ----------------
+   Lists are ASCII-only on purpose (no accented country spellings) so this block stays
+   safe to inject/patch programmatically. */
+const WS_STATES = [
+  'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut','Delaware',
+  'District of Columbia','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
+  'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan','Minnesota',
+  'Mississippi','Missouri','Montana','Nebraska','Nevada','New Hampshire','New Jersey',
+  'New Mexico','New York','North Carolina','North Dakota','Ohio','Oklahoma','Oregon',
+  'Pennsylvania','Rhode Island','South Carolina','South Dakota','Tennessee','Texas','Utah',
+  'Vermont','Virginia','Washington','West Virginia','Wisconsin','Wyoming',
+  'American Samoa','Guam','Northern Mariana Islands','Puerto Rico','U.S. Virgin Islands',
+  'Alberta','British Columbia','Manitoba','New Brunswick','Newfoundland and Labrador',
+  'Northwest Territories','Nova Scotia','Nunavut','Ontario','Prince Edward Island',
+  'Quebec','Saskatchewan','Yukon',
+  'Other / Not Applicable'
+];
+const WS_COUNTRIES_TOP = ['United States','Canada'];
+const WS_COUNTRIES = [
+  'Afghanistan','Albania','Algeria','Andorra','Angola','Antigua and Barbuda','Argentina',
+  'Armenia','Aruba','Australia','Austria','Azerbaijan','Bahamas','Bahrain','Bangladesh',
+  'Barbados','Belarus','Belgium','Belize','Benin','Bermuda','Bhutan','Bolivia',
+  'Bosnia and Herzegovina','Botswana','Brazil','Brunei','Bulgaria','Burkina Faso','Burundi',
+  'Cambodia','Cameroon','Cape Verde','Cayman Islands','Central African Republic','Chad',
+  'Chile','China','Colombia','Comoros','Congo (Democratic Republic)','Congo (Republic)',
+  'Costa Rica','Cote d Ivoire','Croatia','Cuba','Curacao','Cyprus','Czech Republic',
+  'Denmark','Djibouti','Dominica','Dominican Republic','Ecuador','Egypt','El Salvador',
+  'Equatorial Guinea','Eritrea','Estonia','Eswatini','Ethiopia','Fiji','Finland','France',
+  'French Polynesia','Gabon','Gambia','Georgia','Germany','Ghana','Gibraltar','Greece',
+  'Greenland','Grenada','Guadeloupe','Guatemala','Guernsey','Guinea','Guinea-Bissau',
+  'Guyana','Haiti','Honduras','Hong Kong','Hungary','Iceland','India','Indonesia','Iran',
+  'Iraq','Ireland','Isle of Man','Israel','Italy','Jamaica','Japan','Jersey','Jordan',
+  'Kazakhstan','Kenya','Kiribati','Kosovo','Kuwait','Kyrgyzstan','Laos','Latvia','Lebanon',
+  'Lesotho','Liberia','Libya','Liechtenstein','Lithuania','Luxembourg','Macau','Madagascar',
+  'Malawi','Malaysia','Maldives','Mali','Malta','Marshall Islands','Martinique','Mauritania',
+  'Mauritius','Mexico','Micronesia','Moldova','Monaco','Mongolia','Montenegro','Montserrat',
+  'Morocco','Mozambique','Myanmar','Namibia','Nauru','Nepal','Netherlands','New Caledonia',
+  'New Zealand','Nicaragua','Niger','Nigeria','North Macedonia','Norway','Oman','Pakistan',
+  'Palau','Palestine','Panama','Papua New Guinea','Paraguay','Peru','Philippines','Poland',
+  'Portugal','Qatar','Reunion','Romania','Russia','Rwanda','Saint Kitts and Nevis',
+  'Saint Lucia','Saint Vincent and the Grenadines','Samoa','San Marino',
+  'Sao Tome and Principe','Saudi Arabia','Senegal','Serbia','Seychelles','Sierra Leone',
+  'Singapore','Sint Maarten','Slovakia','Slovenia','Solomon Islands','Somalia',
+  'South Africa','South Korea','South Sudan','Spain','Sri Lanka','Sudan','Suriname',
+  'Sweden','Switzerland','Syria','Taiwan','Tajikistan','Tanzania','Thailand','Timor-Leste',
+  'Togo','Tonga','Trinidad and Tobago','Tunisia','Turkey','Turkmenistan',
+  'Turks and Caicos Islands','Tuvalu','Uganda','Ukraine','United Arab Emirates',
+  'United Kingdom','Uruguay','Uzbekistan','Vanuatu','Vatican City','Venezuela','Vietnam',
+  'Yemen','Zambia','Zimbabwe'
+];
+const WS_BIZTYPES = ['Retailer','Distributor','Service Shop','Other'];
+const WS_YEARS = ['Not Started Yet','Less Than One Month','1 - 12 Months','12 - 36 Months','Over 36 Months'];
+const WS_TURNOVER = ['$500 - $1,000','$1,000 - $5,000','$5,000 - $10,000','$10,000+'];
+
+const WS_PERMIT_TYPES = ['image/jpeg','image/jpg','image/png','image/gif','application/pdf'];
+const WS_PERMIT_MAX = 10 * 1024 * 1024;
+const WS_PERMIT_MAXCOUNT = 3;
+let wsFiles = [];
+
+function wsSelect(id, placeholder, items, top){
+  const opt = v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`;
+  return `<select class="form-input" id="${id}">`
+    + `<option value="">${escapeHtml(placeholder)}</option>`
+    + (top && top.length ? top.map(opt).join('') + '<option value="" disabled>--------</option>' : '')
+    + items.map(opt).join('')
+    + `</select>`;
+}
+function wsOpts(name, type, items){
+  return `<div class="opts" id="${name}-group">` + items.map((v,i) =>
+    `<label class="opt" for="${name}-${i}">`
+    + `<input type="${type}" name="${name}" id="${name}-${i}" value="${escapeHtml(v)}">`
+    + `<span>${escapeHtml(v)}</span></label>`
+  ).join('') + `</div>`;
+}
+function wsChecked(name){
+  return Array.from(document.querySelectorAll(`input[name="${name}"]:checked`)).map(el => el.value);
 }
 
 const RENDER = {
@@ -260,19 +373,102 @@ const RENDER = {
     </div>`,
 
   wholesale: () => `
-    <div class="card">
-      <h1>Wholesale Information</h1>
-      <p class="sub">Interested in carrying TGK products or ordering in bulk?</p>
-      <ul class="plain"><li>Wholesale accounts get tiered pricing based on volume.</li></ul>
-      <div class="form-row" style="margin-top:16px">
-        <div class="form-group"><label class="form-label">Business Name <span class="req">*</span></label>
-          <input class="form-input" id="ws-biz"></div>
-        <div class="form-group"><label class="form-label">Business Email <span class="req">*</span></label>
-          <input class="form-input" id="ws-email" type="email"></div>
+    <div class="card" id="ws-card">
+      <h1>Wholesale Account Application</h1>
+      <p class="sub">Please complete the following information to establish a wholesale account.</p>
+
+      <div class="sec-title">Business Details</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Legal Business Name <span class="req">*</span></label>
+          <input class="form-input" id="ws-legal" autocomplete="organization"></div>
+        <div class="form-group"><label class="form-label">Doing Business As (DBA) <span class="req">*</span></label>
+          <input class="form-input" id="ws-dba"></div>
       </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Employer Identification Number (EIN) <span class="req">*</span></label>
+          <input class="form-input" id="ws-ein" placeholder="12-3456789"></div>
+        <div class="form-group"><label class="form-label">Website URL <span class="req">*</span></label>
+          <input class="form-input" id="ws-weburl" placeholder="https://mywebsite.com">
+          <p class="form-hint">If a website isn't available, type: N/A</p></div>
+      </div>
+      <div class="form-group"><label class="form-label">Business Type <span class="req">*</span></label>
+        ${wsOpts('ws-biztype','checkbox',WS_BIZTYPES)}
+        <input class="form-input" id="ws-biztype-other" placeholder="Please describe your business type" style="display:none;margin-top:7px">
+        <p class="form-hint">Select all that apply.</p>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">How Long Have You Been In Business? <span class="req">*</span></label>
+          ${wsOpts('ws-years','radio',WS_YEARS)}</div>
+        <div class="form-group"><label class="form-label">Expected Annual Turnover <span class="req">*</span></label>
+          ${wsOpts('ws-turnover','radio',WS_TURNOVER)}
+          <div class="tier-note">Account opening is a buy-in tiered process. A $500 buy-in locks in 10% discounts, a $1,500 buy-in locks in 20% discounts. Opportunity to increase tier depends on annual sales volume.</div></div>
+      </div>
+
+      <div class="sec-title">Contact Information</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">First Name <span class="req">*</span></label>
+          <input class="form-input" id="ws-first" autocomplete="given-name"></div>
+        <div class="form-group"><label class="form-label">Last Name <span class="req">*</span></label>
+          <input class="form-input" id="ws-last" autocomplete="family-name"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Email <span class="req">*</span></label>
+          <input class="form-input" id="ws-email" type="email" autocomplete="email"></div>
+        <div class="form-group"><label class="form-label">Accounts Payable Email Address</label>
+          <input class="form-input" id="ws-apemail" type="email">
+          <p class="form-hint">Optional. Leave blank to use the email above.</p></div>
+      </div>
+      <div class="form-group" style="max-width:50%"><label class="form-label">Telephone No. <span class="req">*</span></label>
+        <input class="form-input" id="ws-phone" type="tel" autocomplete="tel">
+        <p class="form-hint">Please include the country code if this is an international phone number.</p></div>
+
+      <div class="sec-title">Business Address</div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Street Address Line 1 <span class="req">*</span></label>
+          <input class="form-input" id="ws-addr1" autocomplete="address-line1"></div>
+        <div class="form-group"><label class="form-label">Street Address Line 2</label>
+          <input class="form-input" id="ws-addr2" autocomplete="address-line2"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">City <span class="req">*</span></label>
+          <input class="form-input" id="ws-city" autocomplete="address-level2"></div>
+        <div class="form-group"><label class="form-label">State <span class="req">*</span></label>
+          ${wsSelect('ws-state','Please select',WS_STATES,null)}</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">Zip Code <span class="req">*</span></label>
+          <input class="form-input" id="ws-zip" autocomplete="postal-code"></div>
+        <div class="form-group"><label class="form-label">Country <span class="req">*</span></label>
+          ${wsSelect('ws-country','Please select',WS_COUNTRIES,WS_COUNTRIES_TOP)}</div>
+      </div>
+      <div class="form-group"><label class="form-label">Additional Shipping Info</label>
+        <textarea class="form-input" id="ws-shipinfo" style="min-height:76px"></textarea>
+        <p class="form-hint">If there are specific shipping instructions, please list them here.</p></div>
+      <div class="form-group"><label class="form-label">How Did You Hear About Us?</label>
+        <input class="form-input" id="ws-hear"></div>
+
+      <div class="sec-title">Resellers Permit</div>
+      <div class="form-group"><label class="form-label">Resellers Permit Copy</label>
+        <div class="drop" id="ws-drop" role="button" tabindex="0">
+          <div class="dt">Choose file or drag here</div>
+          <div class="ds">Supported formats: JPG, JPEG, PNG, GIF, PDF. Max 10 MB per file, up to 3 files.</div>
+          <span class="browse">Browse file</span>
+        </div>
+        <input type="file" id="ws-permit" multiple accept="image/jpeg,image/png,image/gif,application/pdf" style="position:absolute;left:-9999px" tabindex="-1">
+        <div class="filelist" id="ws-filelist"></div>
+        <p class="form-hint">Upload a copy now, or email it to us prior to your first order.</p></div>
+
+      <div class="sec-title">Discount Code and Signature</div>
+      <div class="form-group" style="max-width:50%"><label class="form-label">Discount Code <span class="req">*</span></label>
+        <input class="form-input" id="ws-code" maxlength="24" placeholder="e.g. SHOPNAME">
+        <p class="form-hint">Enter the discount code you would like for your discounts. This code will be entered at checkout to redeem your discount.</p></div>
+      <div class="form-group"><label class="form-label">Please Provide An Electronic Signature By Typing Your Full Name <span class="req">*</span></label>
+        <input class="form-input sig-input" id="ws-sig" placeholder="Name" autocomplete="off">
+        <p class="form-hint">Typing your name here acts as your electronic signature, and must match the first and last name entered above.</p></div>
+
       ${spamGuardHtml('ws')}
       <div class="status-msg" id="ws-status"></div>
-      <button class="btn" id="ws-submitBtn" onclick="submitWholesale()">Request Wholesale Info</button>
+      <button class="btn" id="ws-submitBtn" onclick="submitWholesale()">Submit Application</button>
     </div>`,
 
   warranty: () => `
@@ -428,39 +624,301 @@ async function submitContact(){
 }
 window.submitContact = submitContact;
 
-/* ---------------- Wholesale inquiry -> real Supabase ticket ---------------- */
+/* ---------------- Wholesale application: post-render wiring ---------------- */
+function wsRenderFileList(){
+  const box = document.getElementById('ws-filelist');
+  if(!box) return;
+  box.innerHTML = wsFiles.map((f,i) =>
+    `<div class="fileitem"><span>${escapeHtml(f.name)} (${(f.size/1024/1024).toFixed(2)} MB)</span>`
+    + `<button type="button" onclick="wsRemoveFile(${i})" aria-label="Remove file">Remove</button></div>`
+  ).join('');
+}
+function wsRemoveFile(i){
+  wsFiles.splice(i,1);
+  wsRenderFileList();
+}
+window.wsRemoveFile = wsRemoveFile;
+
+function wsAddFiles(list){
+  const errEl = document.getElementById('ws-status');
+  const rejected = [];
+  Array.from(list||[]).forEach(function(f){
+    if(wsFiles.length >= WS_PERMIT_MAXCOUNT){ rejected.push(f.name + ' (limit of ' + WS_PERMIT_MAXCOUNT + ' files reached)'); return; }
+    if(WS_PERMIT_TYPES.indexOf(f.type) === -1){ rejected.push(f.name + ' (unsupported format)'); return; }
+    if(f.size > WS_PERMIT_MAX){ rejected.push(f.name + ' (over 10 MB)'); return; }
+    if(wsFiles.some(function(x){ return x.name === f.name && x.size === f.size; })) return;
+    wsFiles.push(f);
+  });
+  wsRenderFileList();
+  if(rejected.length && errEl){
+    errEl.className = 'status-msg err';
+    errEl.textContent = 'Could not attach: ' + rejected.join('; ') + '.';
+  }
+}
+
+function initWholesale(){
+  wsFiles = [];
+  wsRenderFileList();
+
+  const card = document.getElementById('ws-card');
+  if(!card) return;
+
+  // Highlight selected radio/checkbox rows, and reveal the "Other" business-type field.
+  card.addEventListener('change', function(e){
+    const el = e.target;
+    if(!el || (el.type !== 'radio' && el.type !== 'checkbox')) return;
+    const group = el.closest('.opts');
+    if(group){
+      group.classList.remove('bad');
+      Array.from(group.querySelectorAll('.opt')).forEach(function(lab){
+        const inp = lab.querySelector('input');
+        lab.classList.toggle('on', !!(inp && inp.checked));
+      });
+    }
+    if(el.name === 'ws-biztype'){
+      const other = document.getElementById('ws-biztype-other');
+      const on = wsChecked('ws-biztype').indexOf('Other') !== -1;
+      if(other){
+        other.style.display = on ? 'block' : 'none';
+        if(!on){ other.value = ''; other.classList.remove('bad'); }
+      }
+    }
+  });
+
+  // Clear the invalid state as soon as the visitor starts fixing a field.
+  card.addEventListener('input', function(e){
+    if(e.target && e.target.classList) e.target.classList.remove('bad');
+  });
+
+  // EIN convenience formatting: only when the value is purely numeric, so a
+  // non-US tax ID containing letters is left exactly as the visitor typed it.
+  const ein = document.getElementById('ws-ein');
+  if(ein) ein.addEventListener('input', function(){
+    if(/[^0-9-]/.test(ein.value)) return;
+    const d = ein.value.replace(/\D/g,'').slice(0,9);
+    ein.value = d.length > 2 ? d.slice(0,2) + '-' + d.slice(2) : d;
+  });
+
+  const code = document.getElementById('ws-code');
+  if(code) code.addEventListener('input', function(){
+    code.value = code.value.toUpperCase().replace(/[^A-Z0-9-]/g,'');
+  });
+
+  // Dropzone
+  const drop = document.getElementById('ws-drop');
+  const input = document.getElementById('ws-permit');
+  if(drop && input){
+    drop.addEventListener('click', function(){ input.click(); });
+    drop.addEventListener('keydown', function(e){
+      if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); input.click(); }
+    });
+    input.addEventListener('change', function(){ wsAddFiles(input.files); input.value = ''; });
+    ['dragenter','dragover'].forEach(function(ev){
+      drop.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); });
+    });
+    ['dragleave','drop'].forEach(function(ev){
+      drop.addEventListener(ev, function(e){ e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); });
+    });
+    drop.addEventListener('drop', function(e){
+      if(e.dataTransfer && e.dataTransfer.files) wsAddFiles(e.dataTransfer.files);
+    });
+  }
+}
+
+/* ---------------- Wholesale application -> real Supabase ticket ----------------
+   Lands in the same `tickets` table as every other form here, so it shows up in the
+   Support Center inbox with no schema change and no new RLS policy. The full field
+   set is written into `description` as readable text rather than being dropped. */
+const WS_REQUIRED = [
+  ['ws-legal','Legal Business Name'],
+  ['ws-dba','Doing Business As (DBA)'],
+  ['ws-ein','Employer Identification Number (EIN)'],
+  ['ws-weburl','Website URL'],
+  ['ws-first','First Name'],
+  ['ws-last','Last Name'],
+  ['ws-email','Email'],
+  ['ws-phone','Telephone No.'],
+  ['ws-addr1','Street Address Line 1'],
+  ['ws-city','City'],
+  ['ws-state','State'],
+  ['ws-zip','Zip Code'],
+  ['ws-country','Country'],
+  ['ws-code','Discount Code'],
+  ['ws-sig','Electronic Signature']
+];
+const WS_GROUPS = [
+  ['ws-biztype','Business Type'],
+  ['ws-years','How Long Have You Been In Business?'],
+  ['ws-turnover','Expected Annual Turnover']
+];
+
+function wsVal(id){
+  const el = document.getElementById(id);
+  return el ? el.value.trim() : '';
+}
+function wsFail(errEl, msg, firstBad){
+  errEl.className = 'status-msg err';
+  errEl.textContent = msg;
+  if(firstBad){
+    firstBad.classList.add('bad');
+    if(typeof firstBad.scrollIntoView === 'function'){
+      try{ firstBad.scrollIntoView({ behavior:'smooth', block:'center' }); }catch(e){}
+    }
+    if(firstBad.tagName !== 'DIV' && typeof firstBad.focus === 'function'){
+      try{ firstBad.focus({ preventScroll:true }); }catch(e){}
+    }
+  }
+  return false;
+}
+
 async function submitWholesale(){
   const errEl = document.getElementById('ws-status');
   const btn = document.getElementById('ws-submitBtn');
-  errEl.className = 'status-msg'; errEl.style.display='none'; errEl.textContent='';
+  errEl.className = 'status-msg'; errEl.textContent = '';
+  Array.from(document.querySelectorAll('#ws-card .bad')).forEach(el => el.classList.remove('bad'));
 
-  const biz = document.getElementById('ws-biz').value.trim();
-  const email = document.getElementById('ws-email').value.trim();
-  if(!biz || !email){
-    errEl.className='status-msg err'; errEl.style.display='block'; errEl.textContent='Business name and email are required.'; return;
+  /* --- required fields --- */
+  const missing = [];
+  let firstBad = null;
+  WS_REQUIRED.forEach(function(pair){
+    const el = document.getElementById(pair[0]);
+    if(el && !el.value.trim()){
+      missing.push(pair[1]);
+      el.classList.add('bad');
+      if(!firstBad) firstBad = el;
+    }
+  });
+  WS_GROUPS.forEach(function(pair){
+    if(!wsChecked(pair[0]).length){
+      missing.push(pair[1]);
+      const g = document.getElementById(pair[0] + '-group');
+      if(g){ g.classList.add('bad'); if(!firstBad) firstBad = g; }
+    }
+  });
+  const bizTypes = wsChecked('ws-biztype');
+  const bizOther = wsVal('ws-biztype-other');
+  if(bizTypes.indexOf('Other') !== -1 && !bizOther){
+    missing.push('Business Type (please describe "Other")');
+    const el = document.getElementById('ws-biztype-other');
+    if(el){ el.classList.add('bad'); if(!firstBad) firstBad = el; }
   }
-  if(!passesSpamGuard('ws', errEl)){ errEl.className='status-msg err'; errEl.style.display='block'; return; }
+  if(missing.length){
+    return wsFail(errEl, 'Please complete the following required field'
+      + (missing.length > 1 ? 's' : '') + ': ' + missing.join(', ') + '.', firstBad);
+  }
+
+  /* --- format checks --- */
+  const legal = wsVal('ws-legal'), dba = wsVal('ws-dba'), ein = wsVal('ws-ein');
+  const first = wsVal('ws-first'), last = wsVal('ws-last');
+  const email = wsVal('ws-email'), apEmail = wsVal('ws-apemail'), phone = wsVal('ws-phone');
+  const addr1 = wsVal('ws-addr1'), addr2 = wsVal('ws-addr2'), city = wsVal('ws-city');
+  const state = wsVal('ws-state'), zip = wsVal('ws-zip'), country = wsVal('ws-country');
+  const shipInfo = wsVal('ws-shipinfo'), hear = wsVal('ws-hear'), website = wsVal('ws-weburl');
+  const code = wsVal('ws-code'), sig = wsVal('ws-sig');
+  const years = wsChecked('ws-years')[0], turnover = wsChecked('ws-turnover')[0];
+
+  const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  if(!emailRe.test(email)){
+    return wsFail(errEl, 'Please enter a valid email address.', document.getElementById('ws-email'));
+  }
+  if(apEmail && !emailRe.test(apEmail)){
+    return wsFail(errEl, 'Please enter a valid accounts payable email address, or leave it blank.', document.getElementById('ws-apemail'));
+  }
+  if(phone.replace(/\D/g,'').length < 7){
+    return wsFail(errEl, 'Please enter a valid telephone number, including the country code if international.', document.getElementById('ws-phone'));
+  }
+  // EIN is a US-specific identifier, so only enforce the 9-digit shape for US applicants.
+  if(country === 'United States' && ein.replace(/\D/g,'').length !== 9){
+    return wsFail(errEl, 'A US EIN is nine digits (for example 12-3456789). Please check the number entered.', document.getElementById('ws-ein'));
+  }
+  if(code.length < 3){
+    return wsFail(errEl, 'Please enter a discount code of at least 3 characters (letters, numbers and dashes only).', document.getElementById('ws-code'));
+  }
+  const sigLc = sig.toLowerCase();
+  if(sigLc.indexOf(first.toLowerCase()) === -1 || sigLc.indexOf(last.toLowerCase()) === -1){
+    return wsFail(errEl, 'Your electronic signature must match the first and last name entered above.', document.getElementById('ws-sig'));
+  }
+  if(!passesSpamGuard('ws', errEl)){ errEl.className = 'status-msg err'; return false; }
+
+  /* --- build the application record --- */
+  const typeList = bizTypes.map(function(t){ return t === 'Other' ? 'Other: ' + bizOther : t; }).join(', ');
+  const L = [];
+  L.push('WHOLESALE ACCOUNT APPLICATION');
+  L.push('');
+  L.push('-- BUSINESS --');
+  L.push('Legal Business Name: ' + legal);
+  L.push('Doing Business As (DBA): ' + dba);
+  L.push('EIN / Tax ID: ' + ein);
+  L.push('Business Type: ' + typeList);
+  L.push('Website URL: ' + website);
+  L.push('Time In Business: ' + years);
+  L.push('Expected Annual Turnover: ' + turnover);
+  L.push('Requested Discount Code: ' + code);
+  L.push('');
+  L.push('-- CONTACT --');
+  L.push('Name: ' + first + ' ' + last);
+  L.push('Email: ' + email);
+  L.push('Accounts Payable Email: ' + (apEmail || '(not provided)'));
+  L.push('Telephone: ' + phone);
+  L.push('');
+  L.push('-- ADDRESS --');
+  L.push(addr1);
+  if(addr2) L.push(addr2);
+  L.push(city + ', ' + state + ' ' + zip);
+  L.push(country);
+  L.push('');
+  L.push('-- ADDITIONAL SHIPPING INFO --');
+  L.push(shipInfo || '(none provided)');
+  L.push('');
+  L.push('-- HOW DID YOU HEAR ABOUT US --');
+  L.push(hear || '(not answered)');
+  L.push('');
+  L.push('-- RESELLERS PERMIT --');
+  L.push(wsFiles.length
+    ? wsFiles.length + ' file(s) attached to this ticket.'
+    : 'Not uploaded. Applicant advised to email a copy prior to their first order.');
+  L.push('');
+  L.push('-- ELECTRONIC SIGNATURE --');
+  L.push('Signed: ' + sig);
+  L.push('Date: ' + new Date().toISOString());
+  const description = L.join('\n');
 
   btn.disabled = true; btn.textContent = 'Submitting...';
   try{
+    const attachments = await uploadAttachments(wsFiles);
+    if(wsFiles.length && !attachments.length){
+      throw new Error('the resellers permit upload failed. Please try again, or submit without it and email the permit separately.');
+    }
     const { data: ticket, error } = await sb.from('tickets').insert({
       source: 'website', status: 'open', priority: 'low',
-      subject: `Wholesale inquiry — ${biz}`,
-      description: `Wholesale information request from ${biz}.`,
-      customer_name: biz, customer_email: email,
-      has_unread: true, unread_count: 1
+      subject: 'Wholesale application - ' + legal,
+      description: description,
+      customer_name: first + ' ' + last,
+      customer_email: email,
+      attachments, has_unread: true, unread_count: 1
     }).select().single();
     if(error) throw error;
 
-    errEl.className = 'status-msg ok'; errEl.style.display='block';
-    errEl.textContent = `Request received (ticket #${ticket.ticket_number}). Our wholesale team will reach out at ${email}.`;
-    ['ws-biz','ws-email'].forEach(id => document.getElementById(id).value='');
-    btn.textContent = 'Request Wholesale Info'; btn.disabled = false;
+    wsFiles = [];
+    document.getElementById('tgkSupportContent').innerHTML = `
+      <div class="card">
+        <div class="success">
+          <div class="check"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
+          <h2>Application received</h2>
+          <p>Thank you, ${escapeHtml(first)}. Your wholesale application for <strong>${escapeHtml(legal)}</strong> has been submitted as ticket <strong>#${escapeHtml(String(ticket.ticket_number))}</strong>.<br><br>
+          Our wholesale team will review it and follow up at <strong>${escapeHtml(email)}</strong>.${wsAttachNote(attachments.length)}</p>
+          <button class="btn btn-dark" style="margin-top:18px" onclick="goPage('wholesale')">Submit Another Application</button>
+        </div>
+      </div>`;
+    window.scrollTo(0,0);
+    return true;
   }catch(e){
-    errEl.className = 'status-msg err'; errEl.style.display='block';
-    errEl.textContent = 'Something went wrong: ' + (e.message||'unknown error');
-    btn.textContent = 'Request Wholesale Info'; btn.disabled = false;
+    btn.textContent = 'Submit Application'; btn.disabled = false;
+    return wsFail(errEl, 'Something went wrong: ' + (e.message || 'unknown error'), null);
   }
+}
+function wsAttachNote(n){
+  return n ? '' : '<br><br>Remember to email a copy of your resellers permit before placing your first order.';
 }
 window.submitWholesale = submitWholesale;
 
