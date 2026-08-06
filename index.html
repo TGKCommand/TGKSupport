@@ -394,7 +394,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.22</span>
+        <span style="font-size:9px;font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.23</span>
         <span style="font-size:9px;font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -432,8 +432,8 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.22';
-const TGK_SUPPORT_BUILD_DATE = '2026-07-21';
+const TGK_SUPPORT_VERSION = 'v1.23';
+const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -456,6 +456,9 @@ const S = {
   dealers: [],
   team: [],
   templates: [],
+  settings: {},
+  settingsTable: 'unknown',
+  settingsTab: 'categories',
   activeTicket: null,
   filters: { status: '__active__', priority: '', source: '', category: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
@@ -686,7 +689,8 @@ async function loadAll(){
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
       sb.from('dealers').select('id,name,email').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
-      sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[])
+      sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
+      loadSettings() // resolves to undefined; writes straight into S.settings
     ]);
     S.tickets = tickets;
     S.warranty = warranty;
@@ -750,6 +754,14 @@ function subscribeRealtime(){
       else if(payload.eventType==='DELETE'){ S.templates=(S.templates||[]).filter(x=>x.id!==(payload.old&&payload.old.id)); }
       var _pk=document.getElementById('tmplPicker'); if(_pk && S.activeTicket) _pk.innerHTML=templatePickerOptions(S.activeTicket);
       if(document.getElementById('tmpl-mgr-body')) renderTemplateManagerBody();
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'support_settings' }, function(payload){
+      var row = payload.new || payload.old; if(!row || !row.key) return;
+      if(payload.eventType === 'DELETE') delete S.settings[row.key];
+      else S.settings[row.key] = row.value;
+      renderNav();
+      if(S.page === 'settings') renderSettings();
+      else if(S.page === 'tickets' || S.page === 'dashboard') renderPage();
     })
     .subscribe();
 }
@@ -845,6 +857,7 @@ const NAV = [
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
   { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
   { id:'reports', label:'Reports' },
+  { id:'settings', label:'Settings' },
 ];
 
 function renderNav(){
@@ -965,6 +978,7 @@ function renderPage(){
   if(S.page === 'shiperrors') return renderShipErrorsList();
   if(S.page === 'customers') return renderCustomerLookup();
   if(S.page === 'reports') return renderReports();
+  if(S.page === 'settings') return renderSettings();
 }
 
 /* ============================================================
@@ -1233,8 +1247,101 @@ function exportTicketsToCSV(){
 }
 window.exportTicketsToCSV = exportTicketsToCSV;
 
-/* ===== Ticket categories + reply templates ===== */
-const TK_CATEGORY_OPTIONS = ['Inquiry','Return','Warranty','Shipment Error','Wholesale/Dealer','Other'];
+/* ===== Ticket categories + reply templates =====
+   Categories, tag presets and the stale threshold are stored in the Supabase
+   table public.support_settings (key text PK, value jsonb). They are exposed
+   here as live window getters so every existing call site picks up edits with
+   no code change. If the table is missing or empty the built-in defaults below
+   are used, so the app can never end up with an empty category list. */
+
+var TK_CATEGORY_DEFAULTS = [
+  { name:'Inquiry',          color:'pill-muted'  },
+  { name:'Return',           color:'pill-orange' },
+  { name:'Warranty',         color:'pill-red'    },
+  { name:'Shipment Error',   color:'pill-yellow' },
+  { name:'Wholesale/Dealer', color:'pill-teal'   },
+  { name:'Other',            color:'pill-muted'  }
+];
+var TAG_PRESET_DEFAULTS = ['Shipping','Warranty/Defect','Billing','Return/Refund','Part Compatibility','General Question','Other'];
+var STALE_HOURS_DEFAULT = 24;
+var PILL_COLORS = [
+  { v:'pill-muted',  label:'Grey'   },
+  { v:'pill-teal',   label:'Teal'   },
+  { v:'pill-orange', label:'Orange' },
+  { v:'pill-red',    label:'Red'    },
+  { v:'pill-green',  label:'Green'  },
+  { v:'pill-yellow', label:'Yellow' }
+];
+
+function tkCategoryList(){
+  var v = S.settings && S.settings.ticket_categories;
+  if(Array.isArray(v) && v.length){
+    return v.filter(function(c){ return c && c.name; })
+            .map(function(c){ return { name:String(c.name), color:c.color||'pill-muted' }; });
+  }
+  return TK_CATEGORY_DEFAULTS;
+}
+function tkCategoryColor(name){
+  if(!name) return 'pill-muted';
+  var row = tkCategoryList().filter(function(c){ return c.name === name; })[0];
+  return (row && row.color) ? row.color : 'pill-muted';
+}
+function categoryTicketCount(name){
+  return S.tickets.filter(function(t){ return (t.category||'') === name; }).length;
+}
+Object.defineProperty(window, 'TK_CATEGORY_OPTIONS', {
+  configurable: true,
+  get: function(){ return tkCategoryList().map(function(c){ return c.name; }); }
+});
+Object.defineProperty(window, 'TICKET_CATEGORIES', {
+  configurable: true,
+  get: function(){
+    var v = S.settings && S.settings.tag_presets;
+    return (Array.isArray(v) && v.length) ? v.map(String) : TAG_PRESET_DEFAULTS;
+  }
+});
+Object.defineProperty(window, 'STALE_THRESHOLD_HOURS', {
+  configurable: true,
+  get: function(){
+    var n = Number(S.settings && S.settings.stale_hours);
+    return (isFinite(n) && n > 0) ? n : STALE_HOURS_DEFAULT;
+  }
+});
+
+// Pull every settings row into S.settings. A missing table is not fatal: the
+// app falls back to defaults and the Settings page shows the setup SQL.
+async function loadSettings(){
+  try{
+    var r = await sb.from('support_settings').select('key,value');
+    if(r.error) throw r.error;
+    var out = {};
+    (r.data||[]).forEach(function(row){ out[row.key] = row.value; });
+    S.settings = out;
+    S.settingsTable = 'ok';
+  }catch(e){
+    S.settings = {};
+    S.settingsTable = 'missing';
+    console.warn('support_settings unavailable - using built-in defaults:', e.message);
+  }
+}
+
+async function saveSetting(key, value){
+  if(S.settingsTable === 'missing'){
+    toast('Cannot save: the support_settings table does not exist yet (see the SQL Setup tab)', true);
+    return false;
+  }
+  try{
+    var r = await sb.from('support_settings')
+      .upsert({ key:key, value:value, updated_at:new Date().toISOString(), updated_by:(S.user&&S.user.email)||null }, { onConflict:'key' })
+      .select().single();
+    if(r.error) throw r.error;
+    S.settings[key] = r.data.value;
+    return true;
+  }catch(e){
+    toast('Save failed: ' + e.message, true);
+    return false;
+  }
+}
 
 // Fallback category (for defaulting the template picker) when a ticket has no explicit category yet
 function ticketCategory(t){
@@ -1420,7 +1527,7 @@ function label(s){ return (s||'').replace(/_/g,' ').replace(/\b\w/g, c=>c.toUppe
 const CLAIM_DONE_STATUSES = ['Resolved','Closed','Denied'];
 function isActiveClaim(status){ return !CLAIM_DONE_STATUSES.includes(status); }
 
-const STALE_THRESHOLD_HOURS = 24;
+/* STALE_THRESHOLD_HOURS is now a live getter defined with the settings block above. */
 function isStale(t){
   if(!['open','pending'].includes(t.status)) return false;
   return (Date.now() - new Date(t.updated_at).getTime()) > STALE_THRESHOLD_HOURS * 3600000;
@@ -1428,7 +1535,7 @@ function isStale(t){
 
 const STATUS_PILL = { open:'pill-teal', pending:'pill-yellow', waiting_customer:'pill-orange', resolved:'pill-green', closed:'pill-muted' };
 const PRIORITY_PILL = { low:'pill-muted', medium:'pill-yellow', high:'pill-orange', urgent:'pill-red' };
-const TICKET_CATEGORIES = ['Shipping','Warranty/Defect','Billing','Return/Refund','Part Compatibility','General Question','Other'];
+/* TICKET_CATEGORIES (tag presets) is now a live getter defined with the settings block above. */
 
 function ticketTable(list, enableBulk){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
@@ -1446,7 +1553,7 @@ function ticketTable(list, enableBulk){
           <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.archived?' <span class="pill pill-muted">🗄 Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)">📦</span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
-          <td>${t.category?`<span class="pill pill-muted">${escapeHtml(t.category)}</span>`:''}</td>
+          <td>${t.category?`<span class="pill ${tkCategoryColor(t.category)}">${escapeHtml(t.category)}</span>`:''}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
           <td>${(t.tags||[]).slice(0,2).map(tag=>`<span class="pill pill-muted" style="margin-right:3px">${escapeHtml(tag)}</span>`).join('')}${(t.tags||[]).length>2?`<span style="font-size:10px;color:var(--text3)">+${t.tags.length-2}</span>`:''}</td>
           <td><span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span></td>
@@ -1467,7 +1574,7 @@ function ticketCard(t, enableBulk){
       <span class="tk-card-num">#${t.ticket_number}</span>
       <span class="pill ${PRIORITY_PILL[t.priority]||'pill-muted'}">${label(t.priority)}</span>
       <span class="pill ${STATUS_PILL[t.status]||'pill-muted'}">${label(t.status)}</span>
-      ${t.category?`<span class="pill pill-muted">${escapeHtml(t.category)}</span>`:''}
+      ${t.category?`<span class="pill ${tkCategoryColor(t.category)}">${escapeHtml(t.category)}</span>`:''}
     </div>
     <div class="tk-card-subj" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${badges}</div>
     <div class="tk-card-meta">
@@ -3763,6 +3870,506 @@ async function createTicket(){
   }
 }
 window.createTicket = createTicket;
+
+/* ============================================================
+   SETTINGS PAGE (v1.23)
+   Ticket categories, tag presets, reply templates, workflow
+   thresholds and team display names, all editable in-app.
+   ============================================================ */
+function goSettingsTab(id){ S.settingsTab = id; S._catDeleteIdx = null; renderSettings(); }
+window.goSettingsTab = goSettingsTab;
+
+function settingsTabBtn(id, labelText){
+  var on = (S.settingsTab||'categories') === id;
+  return '<button class="btn btn-sm' + (on ? ' btn-teal' : '') + '" onclick="goSettingsTab(\'' + id + '\')">' + labelText + '</button>';
+}
+
+function renderSettings(){
+  var el = document.getElementById('content'); if(!el) return;
+  var tab = S.settingsTab || 'categories';
+  var warn = '';
+  if(S.settingsTable === 'missing'){
+    warn = '<div class="panel" style="border-color:rgba(224,85,85,.4);margin-bottom:16px">'
+      + '<div class="panel-title" style="color:var(--red)">Settings table not found</div>'
+      + '<div style="font-size:12.5px;color:var(--text2);line-height:1.6">'
+      + 'The Support Center is running on its built-in defaults and nothing on this page can be saved. '
+      + 'Run the SQL in the <b>SQL Setup</b> tab against the Supabase project, then reload this page.'
+      + '</div></div>';
+  }
+  el.innerHTML = warn
+    + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">'
+      + settingsTabBtn('categories','Ticket Categories')
+      + settingsTabBtn('tags','Tag Presets')
+      + settingsTabBtn('templates','Reply Templates')
+      + settingsTabBtn('workflow','Workflow')
+      + settingsTabBtn('team','Team')
+      + settingsTabBtn('sql','SQL Setup')
+    + '</div><div id="settings-body"></div>';
+
+  var body = document.getElementById('settings-body');
+  if(tab === 'categories')      body.innerHTML = renderSettingsCategories();
+  else if(tab === 'tags')       body.innerHTML = renderSettingsTags();
+  else if(tab === 'workflow')   body.innerHTML = renderSettingsWorkflow();
+  else if(tab === 'team')       body.innerHTML = renderSettingsTeam();
+  else if(tab === 'sql')        body.innerHTML = renderSettingsSql();
+  else if(tab === 'templates'){
+    body.innerHTML = '<div class="panel">'
+      + '<div class="panel-title" style="display:flex;align-items:center;gap:10px">'
+        + '<span style="flex:1">Reply Templates</span>'
+        + '<button class="btn btn-sm btn-teal" onclick="editTemplate(null)">+ New Template</button>'
+      + '</div><div id="tmpl-mgr-body"></div></div>';
+    renderTemplateManagerBody();
+  }
+}
+window.renderSettings = renderSettings;
+
+/* ---------------- Ticket categories ---------------- */
+function renderSettingsCategories(){
+  var list = tkCategoryList();
+  var uncat = S.tickets.filter(function(t){ return !t.category; }).length;
+  var orphans = {};
+  S.tickets.forEach(function(t){
+    if(t.category && !list.some(function(c){ return c.name === t.category; })){
+      orphans[t.category] = (orphans[t.category]||0) + 1;
+    }
+  });
+  var orphanKeys = Object.keys(orphans);
+
+  var rows = list.map(function(c, i){
+    var n = categoryTicketCount(c.name);
+    return '<tr>'
+      + '<td style="white-space:nowrap;width:70px">'
+        + '<button class="btn btn-sm" style="padding:2px 7px" ' + (i===0 ? 'disabled' : '') + ' onclick="moveCategory(' + i + ',-1)" title="Move up">&#9650;</button> '
+        + '<button class="btn btn-sm" style="padding:2px 7px" ' + (i===list.length-1 ? 'disabled' : '') + ' onclick="moveCategory(' + i + ',1)" title="Move down">&#9660;</button>'
+      + '</td>'
+      + '<td><input class="form-input" value="' + escapeHtml(c.name) + '" onchange="renameCategory(' + i + ', this.value, this)"></td>'
+      + '<td style="width:120px"><select class="form-input" onchange="setCategoryColor(' + i + ', this.value)">'
+        + PILL_COLORS.map(function(p){ return '<option value="' + p.v + '"' + ((c.color||'pill-muted')===p.v ? ' selected' : '') + '>' + p.label + '</option>'; }).join('')
+      + '</select></td>'
+      + '<td style="width:150px"><span class="pill ' + (c.color||'pill-muted') + '">' + escapeHtml(c.name) + '</span></td>'
+      + '<td style="width:100px;font-family:var(--mono);font-size:11.5px;color:var(--text3)">' + n + ' ticket' + (n===1?'':'s') + '</td>'
+      + '<td style="width:76px"><button class="btn btn-sm" style="color:var(--red)" onclick="promptDeleteCategory(' + i + ')">Delete</button></td>'
+    + '</tr>';
+  }).join('');
+
+  var addColor = PILL_COLORS.map(function(p){ return '<option value="' + p.v + '">' + p.label + '</option>'; }).join('');
+
+  var html = '<div class="panel">'
+    + '<div class="panel-title">Ticket Categories</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6">'
+      + 'These drive the sidebar sub-nav, the tickets filter bar, the category field on a ticket and the reply-template grouping. '
+      + 'Renaming a category also renames it on every ticket that uses it.'
+    + '</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>Order</th><th>Name</th><th>Colour</th><th>Preview</th><th>In use</th><th></th></tr></thead>'
+    + '<tbody>' + rows + '</tbody></table></div>';
+
+  if(S._catDeleteIdx != null && list[S._catDeleteIdx]){
+    var dc = list[S._catDeleteIdx];
+    var dn = categoryTicketCount(dc.name);
+    var destOpts = '<option value="__clear__">Clear the category (leave blank)</option>'
+      + list.filter(function(x){ return x.name !== dc.name; })
+            .map(function(x){ return '<option value="' + escapeHtml(x.name) + '">Move to "' + escapeHtml(x.name) + '"</option>'; }).join('');
+    html += '<div style="margin-top:14px;border:1px solid rgba(224,85,85,.4);border-radius:var(--r-lg);padding:14px 16px">'
+      + '<div style="font-size:12.5px;font-weight:700;color:var(--red);margin-bottom:8px">Delete "' + escapeHtml(dc.name) + '"</div>'
+      + '<div style="font-size:12.5px;color:var(--text2);margin-bottom:10px">' + dn + ' ticket' + (dn===1?'':'s') + ' currently use this category. Choose what happens to them:</div>'
+      + '<select class="form-input" id="catDelDest" style="max-width:340px;margin-bottom:10px">' + destOpts + '</select>'
+      + '<div style="display:flex;gap:8px">'
+        + '<button class="btn btn-sm" onclick="S._catDeleteIdx=null; renderSettings()">Cancel</button>'
+        + '<button class="btn btn-sm btn-primary" onclick="confirmDeleteCategory()">Delete Category</button>'
+      + '</div></div>';
+  }
+
+  html += '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+      + '<div class="form-group" style="flex:1;min-width:200px"><label class="form-label">New category</label>'
+        + '<input class="form-input" id="newCatName" placeholder="e.g. Tech Support" onkeydown="if(event.key===\'Enter\')addCategory()"></div>'
+      + '<div class="form-group" style="width:130px"><label class="form-label">Colour</label>'
+        + '<select class="form-input" id="newCatColor">' + addColor + '</select></div>'
+      + '<button class="btn btn-teal" onclick="addCategory()">+ Add Category</button>'
+    + '</div>';
+
+  html += '<div style="margin-top:14px;font-size:11.5px;color:var(--text3)">Uncategorised tickets: <b style="font-family:var(--mono)">' + uncat + '</b></div>';
+
+  if(orphanKeys.length){
+    html += '<div style="margin-top:12px;border:1px solid rgba(212,168,67,.4);border-radius:var(--r-lg);padding:12px 14px">'
+      + '<div style="font-size:11.5px;font-weight:700;color:var(--yellow);margin-bottom:6px">Values not in the list above</div>'
+      + '<div style="font-size:12px;color:var(--text2);line-height:1.7">These tickets carry a category string that is no longer configured, so they will not show under any sub-nav item. Add the name back above, or reassign the tickets.<br>'
+      + orphanKeys.map(function(k){ return escapeHtml(k) + ' (' + orphans[k] + ')'; }).join(', ')
+      + '</div></div>';
+  }
+
+  return html + '</div>';
+}
+
+async function commitCategories(next, msg){
+  var ok = await saveSetting('ticket_categories', next);
+  if(!ok) return false;
+  if(msg) toast(msg);
+  renderNav();
+  renderSettings();
+  return true;
+}
+
+async function moveCategory(i, dir){
+  var list = tkCategoryList().slice();
+  var j = i + dir;
+  if(j < 0 || j >= list.length) return;
+  var tmp = list[i]; list[i] = list[j]; list[j] = tmp;
+  await commitCategories(list);
+}
+window.moveCategory = moveCategory;
+
+async function setCategoryColor(i, color){
+  var list = tkCategoryList().slice();
+  if(!list[i]) return;
+  list[i] = { name:list[i].name, color:color };
+  await commitCategories(list);
+}
+window.setCategoryColor = setCategoryColor;
+
+async function addCategory(){
+  var inp = document.getElementById('newCatName');
+  var name = ((inp && inp.value) || '').trim();
+  if(!name){ toast('Enter a category name', true); return; }
+  var list = tkCategoryList().slice();
+  if(list.some(function(c){ return c.name.toLowerCase() === name.toLowerCase(); })){
+    toast('That category already exists', true); return;
+  }
+  var colEl = document.getElementById('newCatColor');
+  list.push({ name:name, color:(colEl && colEl.value) || 'pill-muted' });
+  await commitCategories(list, 'Category added');
+}
+window.addCategory = addCategory;
+
+// Renaming has to carry the tickets with it, otherwise every ticket holding the
+// old string silently drops out of the sub-nav and the filters.
+async function renameCategory(i, raw, inputEl){
+  var list = tkCategoryList();
+  var c = list[i]; if(!c) return;
+  var oldName = c.name;
+  var newName = String(raw||'').trim();
+  if(!newName){ toast('Category name cannot be empty', true); if(inputEl) inputEl.value = oldName; return; }
+  if(newName === oldName) return;
+  if(list.some(function(x, j){ return j !== i && x.name.toLowerCase() === newName.toLowerCase(); })){
+    toast('A category with that name already exists', true); if(inputEl) inputEl.value = oldName; return;
+  }
+  var n = categoryTicketCount(oldName);
+  if(n && !confirm('Rename "' + oldName + '" to "' + newName + '"?\n\n' + n + ' ticket(s) use this category and will be updated to match.')){
+    if(inputEl) inputEl.value = oldName; return;
+  }
+  var next = list.slice();
+  next[i] = { name:newName, color:c.color||'pill-muted' };
+  var ok = await saveSetting('ticket_categories', next);
+  if(!ok){ if(inputEl) inputEl.value = oldName; return; }
+  try{
+    if(n){
+      var r = await sb.from('tickets').update({ category:newName }).eq('category', oldName);
+      if(r.error) throw r.error;
+      S.tickets.forEach(function(t){ if(t.category === oldName) t.category = newName; });
+    }
+    var tr = await sb.from('ticket_templates').update({ category:newName }).eq('category', oldName);
+    if(tr.error) throw tr.error;
+    (S.templates||[]).forEach(function(x){ if(x.category === oldName) x.category = newName; });
+    toast('Category renamed' + (n ? (' - ' + n + ' ticket(s) updated') : ''));
+  }catch(e){
+    toast('Renamed in settings but updating tickets failed: ' + e.message, true);
+  }
+  if(S.filters.category === oldName) S.filters.category = newName;
+  renderNav();
+  renderSettings();
+}
+window.renameCategory = renameCategory;
+
+function promptDeleteCategory(i){
+  var list = tkCategoryList();
+  var c = list[i]; if(!c) return;
+  if(!categoryTicketCount(c.name)){
+    if(!confirm('Delete the category "' + c.name + '"?')) return;
+    var next = list.slice(); next.splice(i, 1);
+    if(!next.length){ toast('Keep at least one category', true); return; }
+    commitCategories(next, 'Category deleted');
+    return;
+  }
+  S._catDeleteIdx = i;
+  renderSettings();
+}
+window.promptDeleteCategory = promptDeleteCategory;
+
+async function confirmDeleteCategory(){
+  var i = S._catDeleteIdx; if(i == null) return;
+  var list = tkCategoryList();
+  var c = list[i]; if(!c) return;
+  var next = list.slice(); next.splice(i, 1);
+  if(!next.length){ toast('Keep at least one category', true); return; }
+  var destEl = document.getElementById('catDelDest');
+  var dest = (destEl && destEl.value) || '__clear__';
+  var newVal = (dest === '__clear__') ? null : dest;
+  var affected = categoryTicketCount(c.name);
+
+  // Settings row first: if that write fails no ticket data has been touched.
+  var ok = await saveSetting('ticket_categories', next);
+  if(!ok) return;
+  try{
+    if(affected){
+      var r = await sb.from('tickets').update({ category:newVal }).eq('category', c.name);
+      if(r.error) throw r.error;
+      S.tickets.forEach(function(t){ if(t.category === c.name) t.category = newVal; });
+    }
+    var tr = await sb.from('ticket_templates').update({ category:newVal }).eq('category', c.name);
+    if(tr.error) throw tr.error;
+    (S.templates||[]).forEach(function(x){ if(x.category === c.name) x.category = newVal; });
+    toast('Category deleted' + (affected ? (' - ' + affected + ' ticket(s) reassigned') : ''));
+  }catch(e){
+    toast('Category removed but reassigning tickets failed: ' + e.message, true);
+  }
+  if(S.filters.category === c.name) S.filters.category = '';
+  S._catDeleteIdx = null;
+  renderNav();
+  renderSettings();
+}
+window.confirmDeleteCategory = confirmDeleteCategory;
+
+/* ---------------- Tag presets ---------------- */
+function tagTicketCount(tag){
+  return S.tickets.filter(function(t){ return (t.tags||[]).indexOf(tag) !== -1; }).length;
+}
+
+function renderSettingsTags(){
+  var tags = window.TICKET_CATEGORIES;
+  var rows = tags.map(function(tg, i){
+    var n = tagTicketCount(tg);
+    return '<tr>'
+      + '<td><input class="form-input" value="' + escapeHtml(tg) + '" onchange="renameTagPreset(' + i + ', this.value, this)"></td>'
+      + '<td style="width:150px"><span class="pill pill-muted">' + escapeHtml(tg) + '</span></td>'
+      + '<td style="width:100px;font-family:var(--mono);font-size:11.5px;color:var(--text3)">' + n + ' ticket' + (n===1?'':'s') + '</td>'
+      + '<td style="width:76px"><button class="btn btn-sm" style="color:var(--red)" onclick="deleteTagPreset(' + i + ')">Delete</button></td>'
+    + '</tr>';
+  }).join('');
+
+  return '<div class="panel">'
+    + '<div class="panel-title">Tag Presets</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6">'
+      + 'The quick-pick list in the "Category / Tags" box on a ticket. Staff can still type any free-text tag; this list is just the shortcut menu.'
+    + '</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>Tag</th><th>Preview</th><th>In use</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+    + '<div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">'
+      + '<div class="form-group" style="flex:1;min-width:220px"><label class="form-label">New tag preset</label>'
+        + '<input class="form-input" id="newTagName" placeholder="e.g. Escalated" onkeydown="if(event.key===\'Enter\')addTagPreset()"></div>'
+      + '<button class="btn btn-teal" onclick="addTagPreset()">+ Add Tag</button>'
+    + '</div></div>';
+}
+
+async function commitTags(next, msg){
+  var ok = await saveSetting('tag_presets', next);
+  if(!ok) return false;
+  if(msg) toast(msg);
+  renderSettings();
+  return true;
+}
+
+async function addTagPreset(){
+  var inp = document.getElementById('newTagName');
+  var name = ((inp && inp.value) || '').trim();
+  if(!name){ toast('Enter a tag name', true); return; }
+  var tags = window.TICKET_CATEGORIES.slice();
+  if(tags.some(function(t){ return t.toLowerCase() === name.toLowerCase(); })){ toast('That tag already exists', true); return; }
+  tags.push(name);
+  await commitTags(tags, 'Tag preset added');
+}
+window.addTagPreset = addTagPreset;
+
+async function renameTagPreset(i, raw, inputEl){
+  var tags = window.TICKET_CATEGORIES.slice();
+  var oldName = tags[i]; if(oldName == null) return;
+  var newName = String(raw||'').trim();
+  if(!newName){ toast('Tag cannot be empty', true); if(inputEl) inputEl.value = oldName; return; }
+  if(newName === oldName) return;
+  if(tags.some(function(t, j){ return j !== i && t.toLowerCase() === newName.toLowerCase(); })){
+    toast('That tag already exists', true); if(inputEl) inputEl.value = oldName; return;
+  }
+  var affected = S.tickets.filter(function(t){ return (t.tags||[]).indexOf(oldName) !== -1; });
+  var migrate = false;
+  if(affected.length){
+    migrate = confirm('Also rename this tag on the ' + affected.length + ' ticket(s) that carry it?\n\nOK = rename everywhere.\nCancel = only change the preset list.');
+  }
+  tags[i] = newName;
+  var ok = await saveSetting('tag_presets', tags);
+  if(!ok){ if(inputEl) inputEl.value = oldName; return; }
+  if(migrate){
+    var failed = 0;
+    for(var k = 0; k < affected.length; k++){
+      var t = affected[k];
+      var nt = (t.tags||[]).map(function(x){ return x === oldName ? newName : x; });
+      try{
+        var r = await sb.from('tickets').update({ tags:nt }).eq('id', t.id);
+        if(r.error) throw r.error;
+        t.tags = nt;
+      }catch(e){ failed++; }
+    }
+    toast(failed ? ('Renamed, but ' + failed + ' ticket(s) failed to update') : ('Tag renamed on ' + affected.length + ' ticket(s)'), !!failed);
+  } else {
+    toast('Tag preset renamed');
+  }
+  renderSettings();
+}
+window.renameTagPreset = renameTagPreset;
+
+async function deleteTagPreset(i){
+  var tags = window.TICKET_CATEGORIES.slice();
+  var name = tags[i]; if(name == null) return;
+  var affected = S.tickets.filter(function(t){ return (t.tags||[]).indexOf(name) !== -1; });
+  if(!confirm('Remove "' + name + '" from the preset list?' + (affected.length ? ('\n\n' + affected.length + ' ticket(s) currently carry this tag - they keep it unless you strip it in the next step.') : ''))) return;
+  tags.splice(i, 1);
+  var ok = await saveSetting('tag_presets', tags);
+  if(!ok) return;
+  if(affected.length && confirm('Also strip "' + name + '" from those ' + affected.length + ' ticket(s)?')){
+    var failed = 0;
+    for(var k = 0; k < affected.length; k++){
+      var t = affected[k];
+      var nt = (t.tags||[]).filter(function(x){ return x !== name; });
+      try{
+        var r = await sb.from('tickets').update({ tags:nt }).eq('id', t.id);
+        if(r.error) throw r.error;
+        t.tags = nt;
+      }catch(e){ failed++; }
+    }
+    if(failed) toast(failed + ' ticket(s) failed to update', true);
+  }
+  if(S.filters.tag === name) S.filters.tag = '';
+  toast('Tag preset deleted');
+  renderSettings();
+}
+window.deleteTagPreset = deleteTagPreset;
+
+/* ---------------- Workflow ---------------- */
+function renderSettingsWorkflow(){
+  return '<div class="panel">'
+    + '<div class="panel-title">Workflow</div>'
+    + '<div class="form-group" style="max-width:320px;margin-bottom:12px">'
+      + '<label class="form-label">Stale threshold (hours)</label>'
+      + '<input class="form-input" type="number" min="1" step="1" id="setStaleHours" value="' + window.STALE_THRESHOLD_HOURS + '">'
+      + '<div style="font-size:11.5px;color:var(--text3);margin-top:4px">An open or pending ticket with no update in this many hours is flagged Stale on the list and in the dashboard counter.</div>'
+    + '</div>'
+    + '<button class="btn btn-primary" onclick="saveWorkflowSettings()">Save</button>'
+  + '</div>';
+}
+
+async function saveWorkflowSettings(){
+  var el = document.getElementById('setStaleHours');
+  var n = Number(el && el.value);
+  if(!isFinite(n) || n <= 0){ toast('Enter a positive number of hours', true); return; }
+  var ok = await saveSetting('stale_hours', n);
+  if(!ok) return;
+  toast('Workflow settings saved');
+  renderNav();
+  renderSettings();
+}
+window.saveWorkflowSettings = saveWorkflowSettings;
+
+/* ---------------- Team ---------------- */
+function renderSettingsTeam(){
+  var rows = (S.team||[]).slice().sort(function(a,b){
+    return String(a.display_name||a.email).localeCompare(String(b.display_name||b.email));
+  }).map(function(m){
+    return '<tr>'
+      + '<td style="font-family:var(--mono);font-size:11.5px">' + escapeHtml(m.email) + '</td>'
+      + '<td><input class="form-input" value="' + escapeHtml(m.display_name||'') + '" placeholder="Display name" onchange="saveTeamDisplayName(\'' + escapeHtml(m.email) + '\', this.value, this)"></td>'
+    + '</tr>';
+  }).join('');
+  if(!rows) rows = '<tr><td colspan="2" style="color:var(--text3)">No team members found.</td></tr>';
+  return '<div class="panel">'
+    + '<div class="panel-title">Team</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6">'
+      + 'Display names shown on assignments, replies and the chat widget. Adding or removing staff accounts is done in Supabase (team_members and profiles).'
+    + '</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th>Email</th><th>Display name</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
+  + '</div>';
+}
+
+async function saveTeamDisplayName(email, raw, inputEl){
+  var name = String(raw||'').trim();
+  var prev = ((S.team||[]).filter(function(m){ return m.email === email; })[0]||{}).display_name || '';
+  try{
+    var r = await sb.from('team_members').update({ display_name: name || null }).ilike('email', email);
+    if(r.error) throw r.error;
+    (S.team||[]).forEach(function(m){ if(m.email === email) m.display_name = name || null; });
+    toast('Display name saved');
+  }catch(e){
+    toast('Save failed: ' + e.message, true);
+    if(inputEl) inputEl.value = prev;
+  }
+}
+window.saveTeamDisplayName = saveTeamDisplayName;
+
+/* ---------------- SQL setup ---------------- */
+var SUPPORT_SETTINGS_SQL = [
+  'create table if not exists public.support_settings (',
+  '  key         text primary key,',
+  '  value       jsonb not null,',
+  '  updated_at  timestamptz default now(),',
+  '  updated_by  text',
+  ');',
+  '',
+  'alter table public.support_settings enable row level security;',
+  '',
+  'drop policy if exists "support_settings read" on public.support_settings;',
+  'create policy "support_settings read" on public.support_settings',
+  '  for select to authenticated using (true);',
+  '',
+  'drop policy if exists "support_settings write" on public.support_settings;',
+  'create policy "support_settings write" on public.support_settings',
+  '  for all to authenticated using (true) with check (true);',
+  '',
+  '-- let the Support Center pick up edits live',
+  'do $$ begin',
+  '  alter publication supabase_realtime add table public.support_settings;',
+  'exception when duplicate_object then null; end $$;',
+  '',
+  '-- seed with the categories and tags the app ships with',
+  'insert into public.support_settings (key, value) values',
+  '  (\'ticket_categories\', \'[',
+  '    {"name":"Inquiry","color":"pill-muted"},',
+  '    {"name":"Return","color":"pill-orange"},',
+  '    {"name":"Warranty","color":"pill-red"},',
+  '    {"name":"Shipment Error","color":"pill-yellow"},',
+  '    {"name":"Wholesale/Dealer","color":"pill-teal"},',
+  '    {"name":"Other","color":"pill-muted"}',
+  '  ]\'::jsonb),',
+  '  (\'tag_presets\', \'["Shipping","Warranty/Defect","Billing","Return/Refund","Part Compatibility","General Question","Other"]\'::jsonb),',
+  '  (\'stale_hours\', \'24\'::jsonb)',
+  'on conflict (key) do nothing;'
+].join('\n');
+
+function renderSettingsSql(){
+  var status = S.settingsTable === 'ok'
+    ? '<span class="pill pill-green">Table present</span>'
+    : (S.settingsTable === 'missing' ? '<span class="pill pill-red">Table missing</span>' : '<span class="pill pill-muted">Not checked</span>');
+  return '<div class="panel">'
+    + '<div class="panel-title" style="display:flex;align-items:center;gap:10px"><span style="flex:1">SQL Setup</span>' + status + '</div>'
+    + '<div style="font-size:12px;color:var(--text3);margin-bottom:10px;line-height:1.6">'
+      + 'Run this once in the Supabase SQL editor for project <code>piamamighqiielfztgic</code>. It is safe to run more than once.'
+    + '</div>'
+    + '<textarea class="form-input" readonly rows="30" style="font-family:var(--mono);font-size:11.5px;line-height:1.5;resize:vertical" onclick="this.select()">' + escapeHtml(SUPPORT_SETTINGS_SQL) + '</textarea>'
+    + '<div style="margin-top:10px;display:flex;gap:8px">'
+      + '<button class="btn btn-sm" onclick="copySettingsSql()">Copy SQL</button>'
+      + '<button class="btn btn-sm" onclick="recheckSettingsTable()">Re-check table</button>'
+    + '</div></div>';
+}
+
+function copySettingsSql(){
+  try{
+    navigator.clipboard.writeText(SUPPORT_SETTINGS_SQL);
+    toast('SQL copied to clipboard');
+  }catch(e){ toast('Copy failed - select the text and copy manually', true); }
+}
+window.copySettingsSql = copySettingsSql;
+
+async function recheckSettingsTable(){
+  await loadSettings();
+  toast(S.settingsTable === 'ok' ? 'Settings table found' : 'Still not reachable', S.settingsTable !== 'ok');
+  renderNav();
+  renderSettings();
+}
+window.recheckSettingsTable = recheckSettingsTable;
 
 </script>
 
