@@ -267,6 +267,12 @@ const WS_COUNTRIES = [
 const WS_BIZTYPES = ['Retailer','Distributor','Service Shop','Other'];
 const WS_YEARS = ['Not Started Yet','Less Than One Month','1 - 12 Months','12 - 36 Months','Over 36 Months'];
 const WS_TURNOVER = ['$500 - $1,000','$1,000 - $5,000','$5,000 - $10,000','$10,000+'];
+// Keep these labels in step with the buy-in wording in the tier-note on the wholesale form.
+const WS_TIERS = [
+  '10% Discount Tier - no buy-in',
+  '20% Discount Tier - $1,000 buy-in',
+  'Not sure yet - please advise'
+];
 
 const WS_PERMIT_TYPES = ['image/jpeg','image/jpg','image/png','image/gif','application/pdf'];
 const WS_PERMIT_MAX = 10 * 1024 * 1024;
@@ -400,8 +406,12 @@ const RENDER = {
         <div class="form-group"><label class="form-label">How Long Have You Been In Business? <span class="req">*</span></label>
           ${wsOpts('ws-years','radio',WS_YEARS)}</div>
         <div class="form-group"><label class="form-label">Expected Annual Turnover <span class="req">*</span></label>
-          ${wsOpts('ws-turnover','radio',WS_TURNOVER)}
-          <div class="tier-note">Account opening is a buy-in tiered process. A $500 buy-in locks in 10% discounts, a $1,500 buy-in locks in 20% discounts. Opportunity to increase tier depends on annual sales volume.</div></div>
+          ${wsOpts('ws-turnover','radio',WS_TURNOVER)}</div>
+      </div>
+      <div class="form-group"><label class="form-label">Which Tier Are You Applying For? <span class="req">*</span></label>
+        <div class="tier-note" style="margin:0 0 9px">Account opening is a buy-in tiered process. There is no buy-in for a 10% discount, a $1,000 buy-in locks in 20% discounts. Opportunity to increase tier depends on annual sales volume.</div>
+        ${wsOpts('ws-tier','radio',WS_TIERS)}
+        <p class="form-hint">Your buy-in tier sets your opening discount level. Tiers can be reviewed and increased later based on annual sales volume.</p>
       </div>
 
       <div class="sec-title">Contact Information</div>
@@ -749,7 +759,8 @@ const WS_REQUIRED = [
 const WS_GROUPS = [
   ['ws-biztype','Business Type'],
   ['ws-years','How Long Have You Been In Business?'],
-  ['ws-turnover','Expected Annual Turnover']
+  ['ws-turnover','Expected Annual Turnover'],
+  ['ws-tier','Which Tier Are You Applying For?']
 ];
 
 function wsVal(id){
@@ -816,6 +827,7 @@ async function submitWholesale(){
   const shipInfo = wsVal('ws-shipinfo'), hear = wsVal('ws-hear'), website = wsVal('ws-weburl');
   const code = wsVal('ws-code'), sig = wsVal('ws-sig');
   const years = wsChecked('ws-years')[0], turnover = wsChecked('ws-turnover')[0];
+  const tier = wsChecked('ws-tier')[0];
 
   const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   if(!emailRe.test(email)){
@@ -853,6 +865,7 @@ async function submitWholesale(){
   L.push('Website URL: ' + website);
   L.push('Time In Business: ' + years);
   L.push('Expected Annual Turnover: ' + turnover);
+  L.push('Requested Buy-In Tier: ' + tier);
   L.push('Requested Discount Code: ' + code);
   L.push('');
   L.push('-- CONTACT --');
