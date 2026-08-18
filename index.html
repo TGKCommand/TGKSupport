@@ -186,8 +186,16 @@ select.form-input{cursor:pointer}
 /* Slide-over ticket panel (styled after the ERP's cart panel) */
 #tk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:600;display:none}
 #tk-overlay.open{display:block}
-#tk-panel{position:fixed;top:0;right:0;bottom:0;width:520px;max-width:96vw;background:var(--bg);border-left:1px solid var(--border2);z-index:601;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:-4px 0 24px rgba(0,0,0,.12)}
+#tk-panel{position:fixed;top:0;right:0;bottom:0;width:var(--tk-w,960px);max-width:96vw;background:var(--bg);border-left:1px solid var(--border2);z-index:601;display:flex;flex-direction:column;transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);box-shadow:-4px 0 24px rgba(0,0,0,.12)}
 #tk-panel.open{transform:translateX(0)}
+#tk-panel[data-w="narrow"]{--tk-w:520px}
+#tk-panel[data-w="wide"]{--tk-w:960px}
+#tk-panel[data-w="full"]{--tk-w:1600px}
+/* Once there is real width to work with, stop stretching single fields across the whole
+   panel - two columns reads far better. Below this the panel stays single-column. */
+#tk-panel[data-w="wide"] .tk-body .form-row.cols-2,
+#tk-panel[data-w="full"] .tk-body .form-row.cols-2{grid-template-columns:1fr 1fr}
+#tk-panel .tk-body{max-width:100%}
 .tk-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);gap:10px;flex-shrink:0;background:var(--bg2)}
 .tk-head-title{font-size:14px;font-weight:700;color:var(--text);flex:1}
 .tk-close{background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer;padding:2px 6px;border-radius:4px}
@@ -432,7 +440,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.23';
+const TGK_SUPPORT_VERSION = 'v1.24';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2509,6 +2517,25 @@ function wsaToggleRaw(btn){
 window.wsaToggleRaw = wsaToggleRaw;
 /* ============ END WHOLESALE APPLICATION VIEW ============ */
 
+// Panel width is a per-user preference, remembered across sessions. Applied to the element
+// rather than rewritten into the CSS so the slide-in transition keeps working.
+function _tkWidthGet(){
+  try{var v=localStorage.getItem('tk_panel_width');if(v==='narrow'||v==='wide'||v==='full')return v;}catch(_){}
+  return 'wide';
+}
+function applyTicketPanelWidth(){
+  var p=document.getElementById('tk-panel');if(!p)return;
+  var w=_tkWidthGet();
+  p.setAttribute('data-w',w);
+  var b=document.getElementById('tk-width-btn');
+  if(b)b.title='Panel width: '+w+' (click to cycle)';
+}
+function cycleTicketPanelWidth(){
+  var order=['narrow','wide','full'];
+  var next=order[(order.indexOf(_tkWidthGet())+1)%order.length];
+  try{localStorage.setItem('tk_panel_width',next);}catch(_){}
+  applyTicketPanelWidth();
+}
 function renderTicketPanel(t){
   const msgs = S.messages[t.id] || [];
   const dealer = S.dealers.find(d=>d.id===t.dealer_id);
@@ -2528,6 +2555,7 @@ function renderTicketPanel(t){
       <button class="tk-close" title="Forward this conversation to an external email" onclick="openForwardModal('${t.id}')">↗</button>
       <button class="tk-close" title="Mark as unread" onclick="markTicketUnread('${t.id}')">📩</button>
       <button class="tk-close" title="Archive ticket" style="color:var(--red)" onclick="archiveTicket('${t.id}')">🗑</button>
+      <button class="tk-close" id="tk-width-btn" title="Cycle panel width (narrow / wide / full)" onclick="cycleTicketPanelWidth()">⤡</button>
       <button class="tk-close" onclick="closePanel()">✕</button>
     </div>
     <div class="tk-body">
@@ -2708,6 +2736,7 @@ function renderTicketPanel(t){
       <button class="btn" onclick="openMergeModal('${t.id}')">Merge Into...</button>
     </div>
   `;
+  applyTicketPanelWidth();
   loadActivityLog(t.id);
 }
 
