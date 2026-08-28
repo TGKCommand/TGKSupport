@@ -440,7 +440,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.25';
+const TGK_SUPPORT_VERSION = 'v1.26';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1698,6 +1698,34 @@ async function convertToTicket(kind, recordId){
 }
 let warrantyClaimItems = [];
 
+// Shipment error items: the exact parts and quantities needed to correct the shipment, decided
+// here before anything reaches the ERP. Mirrors warrantyClaimItems - no "type" field, since the
+// ERP resolves part vs assembly by SKU lookup at the point an item is actually shipped, exactly
+// like the existing single-item flow already does.
+let shipErrorItems = [];
+function renderShipErrorItemsRows(){
+  return shipErrorItems.map((item, i) => `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px" data-item-row="${i}">
+      <input class="form-input" style="flex:2" placeholder="Part / SKU" value="${escapeHtml(item.pn||'')}" oninput="shipErrorItems[${i}].pn=this.value">
+      <input class="form-input" style="flex:0 0 56px" type="number" min="1" placeholder="Qty" value="${item.qty||1}" oninput="shipErrorItems[${i}].qty=parseInt(this.value,10)||1">
+      <input class="form-input" style="flex:3" placeholder="Description (optional)" value="${escapeHtml(item.description||'')}" oninput="shipErrorItems[${i}].description=this.value">
+      ${shipErrorItems.length > 1 ? `<button type="button" class="btn btn-sm" style="color:var(--red);flex:0 0 auto" onclick="removeShipErrorItem(${i})"><span class="ic ic-x"></span></button>` : ''}
+    </div>
+  `).join('');
+}
+function addShipErrorItem(){
+  shipErrorItems.push({ pn: '', qty: 1, description: '' });
+  const c = document.getElementById('shipErrorItemsContainer');
+  if(c) c.innerHTML = renderShipErrorItemsRows();
+}
+window.addShipErrorItem = addShipErrorItem;
+function removeShipErrorItem(i){
+  shipErrorItems.splice(i, 1);
+  const c = document.getElementById('shipErrorItemsContainer');
+  if(c) c.innerHTML = renderShipErrorItemsRows();
+}
+window.removeShipErrorItem = removeShipErrorItem;
+
 /* Item type sent to the ERP per warranty line. "Finished Good" was added so Support can send the
    warehouse ANY saleable item, not just tracked parts/assemblies. This 'type' string is the contract
    the ERP's ship logic reads to decide where to deduct inventory -- keep the values in sync with it. */
@@ -1780,6 +1808,8 @@ function openSendToERPModal(ticketId, kind){
   //   ss_order_id, claim_items, tracking_number, carrier, shipped_at, claim_cost
   if(kind === 'warranty'){
     warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '', type: 'part' }];
+  } else {
+    shipErrorItems = [{ pn: t.pn || '', qty: 1, description: '' }];
   }
   const warrantyFields = `
     <div class="form-group" style="margin-bottom:8px">
@@ -1841,9 +1871,10 @@ function openSendToERPModal(ticketId, kind){
         </select>
       </div>
     </div>
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Expected Part Number</label><input class="form-input" id="erpExpectedPn" value="${escapeHtml(t.pn)}"></div>
-      <div class="form-group"><label class="form-label">Expected Qty</label><input class="form-input" id="erpExpectedQty" type="number" min="0"></div>
+    <div class="form-group" style="margin-bottom:8px">
+      <label class="form-label">Parts &amp; Quantities Needed to Correct This</label>
+      <div id="shipErrorItemsContainer">${renderShipErrorItemsRows()}</div>
+      <button type="button" class="btn btn-sm" style="margin-top:6px" onclick="addShipErrorItem()">+ Add Another Part</button>
     </div>
     <div class="form-row cols-2">
       <div class="form-group"><label class="form-label">Actual Part Number (if wrong item)</label><input class="form-input" id="erpActualPn" placeholder="What actually shipped"></div>
@@ -1979,12 +2010,20 @@ async function confirmSendToERP(ticketId, kind){
     const t = S.tickets.find(x=>x.id===ticketId);
     const __resSel = val('erpResolution');
     const __resVal = __resSel.toLowerCase() === 'other' ? val('erpResolutionOther') : __resSel;
+    // The exact parts and quantities needed to correct this - decided here, not in the ERP.
+    // expected_pn/expected_qty stay populated from the FIRST line for every existing dashboard,
+    // export and list view that reads those two columns directly; line_items carries the full
+    // list, which is what the ERP's ship flow and inventory deduction actually use.
+    const validShipItems = shipErrorItems.filter(i=>i.pn && i.pn.trim());
+    const primaryItem = validShipItems[0] || null;
     payload = {
       order_number: val('erpOrder'),
       customer_name: val('erpCustomer') || null,
       customer_email: val('erpCustomerEmail') || null,
       error_type: val('erpErrorType'),
-      expected_pn: val('erpExpectedPn') || null,
+      expected_pn: primaryItem ? primaryItem.pn.trim() : null,
+      expected_qty: primaryItem ? (primaryItem.qty||1) : null,
+      line_items: validShipItems.length ? validShipItems.map(i=>({ pn: i.pn.trim(), qty: i.qty||1, description: i.description||'' })) : null,
       actual_pn: val('erpActualPn') || null,
       resolution: __resVal || null,
       notes: val('erpNotes') || null,
@@ -1994,10 +2033,9 @@ async function confirmSendToERP(ticketId, kind){
       claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null,
       shipping_details: (t && t.shipping_address && Object.values(t.shipping_address).some(v=>v)) ? t.shipping_address : null
     };
-    const expQty = val('erpExpectedQty'), actQty = val('erpActualQty');
-    if(expQty) payload.expected_qty = parseInt(expQty, 10);
+    const actQty = val('erpActualQty');
     if(actQty) payload.actual_qty = parseInt(actQty, 10);
-    if(!payload.order_number || !payload.expected_pn){ toast('Order number and expected part number are required', true); return; }
+    if(!payload.order_number || !primaryItem){ toast('Order number and at least one part number are required', true); return; }
     if(!__resVal){ toast(__resSel.toLowerCase() === 'other' ? 'Please describe the resolution' : 'Resolution type is required', true); return; }
   }
 
