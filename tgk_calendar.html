@@ -311,6 +311,27 @@ window.addEventListener('message',function(ev){
   }
 });
 
+// Same handoff the ERP already uses: the Command Center hands over its OWN real Supabase
+// session so this page does not need its own login. Only a session that genuinely verifies via
+// getUser() afterward ever sets meVerified - receiving the message is not itself proof, since a
+// message alone (without the origin+source check plus a working session) proves nothing.
+window.addEventListener('message', async function(ev){
+  if(ev.origin!=='https://command.tgkmotorsport.com')return;
+  var d=ev.data;
+  if(!d||d.source!=='TGK_CC'||d.type!=='AUTH_TOKEN'||!d.access_token)return;
+  try{
+    if(typeof db==='undefined'||!db||!db.auth)return;
+    var res=await db.auth.setSession({access_token:d.access_token,refresh_token:d.refresh_token||''});
+    if(res&&res.error){console.warn('[cal-sso] setSession failed:',res.error.message);return;}
+    var u=await db.auth.getUser();
+    var em=u&&u.data&&u.data.user&&u.data.user.email;
+    if(!em)return;
+    S.meVerified=true;
+    setMe(em,null);
+    console.log('[cal-sso] verified session established as',em);
+  }catch(e){console.warn('[cal-sso] token accept failed:',e);}
+});
+
 function pickIdentity(){
   return new Promise(function(resolve){
     var list=document.getElementById('pick-list');
