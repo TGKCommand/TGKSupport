@@ -440,7 +440,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.26';
+const TGK_SUPPORT_VERSION = 'v1.27';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1506,6 +1506,12 @@ async function deleteTemplate(id){
 function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
+  // A ticket merged into another is intentionally hidden from every queue --
+  // it lives on only for reference via its merged_into_id pointer. Without this
+  // guard the source ticket reappears the moment the status filter is anything
+  // other than "Active" (All Statuses, a category, a search), which reads as
+  // "the merge didn't work" even though it did.
+  list = list.filter(t=>!t.merged_into_id);
   if(!f.showArchived) list = list.filter(t=>!t.archived);
   if(f.status === '__active__') list = list.filter(t=>!['resolved','closed'].includes(t.status));
   else if(f.status) list = list.filter(t=>t.status===f.status);
@@ -3571,29 +3577,36 @@ async function confirmMerge(sourceId, targetId){
   if(!confirm(`Merge ticket #${source.ticket_number} into #${target.ticket_number}? This moves all its messages and closes #${source.ticket_number}.`)) return;
 
   try{
-    // Move all messages from source to target
-    const { error: moveErr } = await sb.from('ticket_messages').update({ ticket_id: targetId }).eq('ticket_id', sourceId);
-    if(moveErr) throw moveErr;
+    // Move all messages from source to target. .select() returns the moved rows
+    // so we can confirm the move actually took -- a 0-row result here (rather
+    // than an error) is the classic silent half-merge and we surface it loudly.
+    const { data: movedRows, error: moveErr } = await sb.from('ticket_messages')
+      .update({ ticket_id: targetId }).eq('ticket_id', sourceId).select('id');
+    if(moveErr) throw new Error('moving messages: ' + moveErr.message);
 
-    // Drop a system note in the target thread noting the merge
-    await sb.from('ticket_messages').insert({
+    // Drop a system note in the target thread noting the merge. Error-checked
+    // now (it was fire-and-forget before) so a rejected insert can't leave a
+    // half-done merge with no trace.
+    const { error: noteErr } = await sb.from('ticket_messages').insert({
       ticket_id: targetId,
       sender_type: 'system',
       sender_name: 'System',
-      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}.`,
+      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}. ${(movedRows||[]).length} message(s) moved over.`,
       is_internal_note: true
     });
+    if(noteErr) throw new Error('writing merge note: ' + noteErr.message);
 
     // Close and flag the source ticket
     const { data: updatedSource, error: srcErr } = await sb.from('tickets')
       .update({ status:'closed', merged_into_id: targetId, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', sourceId).select().single();
-    if(srcErr) throw srcErr;
+    if(srcErr) throw new Error('closing source ticket: ' + srcErr.message);
+    if(!updatedSource) throw new Error('source ticket update matched 0 rows -- merge_into_id may not have saved');
 
     const { data: updatedTarget, error: tgtErr } = await sb.from('tickets')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', targetId).select().single();
-    if(tgtErr) throw tgtErr;
+    if(tgtErr) throw new Error('touching target ticket: ' + tgtErr.message);
 
     const si = S.tickets.findIndex(x=>x.id===sourceId);
     if(si!==-1) S.tickets[si] = updatedSource;
