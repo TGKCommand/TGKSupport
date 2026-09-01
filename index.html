@@ -442,7 +442,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.32';
+const TGK_SUPPORT_VERSION = 'v1.33';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2979,8 +2979,9 @@ function emailFiltered(){
   let list = (S.emails||[]).filter(e=>emailInMailbox(e, mb));
   const f = S.emailFilters;
   if(f.view==='archived') list = list.filter(e=>e.status==='archived');
-  else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.has_unread);
-  else list = list.filter(e=>e.status!=='archived');
+  else if(f.view==='completed') list = list.filter(e=>e.status==='completed');
+  else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.status!=='completed' && e.has_unread);
+  else list = list.filter(e=>e.status!=='archived' && e.status!=='completed');
   if(f.q){
     const q=f.q.toLowerCase();
     list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q));
@@ -3007,19 +3008,40 @@ window.updateEmailField = updateEmailField;
 function renderEmailsList(){
   const el = document.getElementById('content');
   const f = S.emailFilters;
+  const orders = currentMailbox()==='orders';
+  const views = orders
+    ? [['open','Active'],['completed','Completed'],['archived','Archived']]
+    : [['open','Inbox'],['unread','Unread'],['archived','Archived']];
+  if(!views.some(v=>v[0]===f.view)) f.view='open';
   el.innerHTML = `
     <div class="filter-bar">
       <div class="search-wrap">
         <span class="search-icon"><span class="ic ic-search"></span></span>
         <input type="text" placeholder="Search sender or subject..." value="${escapeHtml(f.q)}" oninput="S.emailFilters.q=this.value; clearTimeout(window._emQT); window._emQT=setTimeout(renderEmailsBody,120)">
       </div>
-      ${['open','unread','archived'].map(v=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${v==='open'?'Inbox':label(v)}</button>`).join('')}
+      ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
     </div>
     <div id="emailsListBody">${emailTable(emailFiltered())}</div>
   `;
 }
 window.renderEmailsList = renderEmailsList;
+
+async function setOrderComplete(id, complete){
+  try{
+    const patch = complete
+      ? { status:'completed', has_unread:false, unread_count:0, completed_at:new Date().toISOString(), updated_at:new Date().toISOString() }
+      : { status:'read', completed_at:null, updated_at:new Date().toISOString() };
+    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
+    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; renderEmailPanel(data); }
+    renderNav();
+    if(S.page==='orders' || S.page==='emails') renderEmailsList();
+    toast(complete ? 'Order marked complete' : 'Order reopened');
+  }catch(e){ toast('Update failed: '+e.message, true); }
+}
+window.setOrderComplete = setOrderComplete;
 
 function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); if(b) b.innerHTML = emailTable(emailFiltered()); }
 window.renderEmailsBody = renderEmailsBody;
@@ -3032,7 +3054,7 @@ function emailTable(list){
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
         <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.customer_email||'\u2014')}</td>
         <td>${escapeHtml(e.subject||'(no subject)')}</td>
-        <td><span class="pill ${e.status==='archived'?'pill-muted':(e.has_unread?'pill-red':'pill-green')}">${e.status==='archived'?'Archived':(e.has_unread?'Unread':'Read')}</span></td>
+        <td>${e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.status==='completed'?'<span class="pill pill-green">Completed</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':(e.mailbox==='orders'?'<span class="pill pill-teal">Active</span>':'<span class="pill pill-green">Read</span>')}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
       </tr>`).join('')}
   </tbody></table></div>`;
@@ -3105,6 +3127,12 @@ function renderEmailPanel(e){
             <input class="form-input" value="${escapeHtml(e.po_number||'')}" placeholder="Dealer PO #" onchange="updateEmailField('${e.id}','po_number',this.value)">
           </div>
         </div>
+      </div>` : ''}
+      ${e.mailbox==='orders' ? `<div class="linked-box" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span style="font-size:var(--t-sm);color:var(--text3)">Order status: <strong style="color:${e.status==='completed'?'var(--green)':'var(--teal)'}">${e.status==='completed'?'Completed':'Active'}</strong></span>
+        ${e.status==='completed'
+          ? `<button class="btn btn-sm" onclick="setOrderComplete('${e.id}',false)"><span class="ic ic-refresh"></span>Reopen</button>`
+          : `<button class="btn btn-sm btn-teal" onclick="setOrderComplete('${e.id}',true)"><span class="ic ic-check"></span>Mark Complete</button>`}
       </div>` : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
