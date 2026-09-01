@@ -442,7 +442,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.29';
+const TGK_SUPPORT_VERSION = 'v1.30';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -760,8 +760,9 @@ function subscribeRealtime(){
       if(payload.eventType==='INSERT'){
         if(idx===-1){
           S.emails.unshift(payload.new);
-          toast('<span class="ic ic-mail"></span>New email from ' + (payload.new.customer_email||'someone'));
-          desktopNotify('<span class="ic ic-mail"></span>New Email', (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
+          const isOrder = payload.new.mailbox==='orders';
+          toast('<span class="ic ic-mail"></span>New ' + (isOrder?'order':'email') + ' from ' + (payload.new.customer_email||'someone'));
+          desktopNotify('<span class="ic ic-mail"></span>New ' + (isOrder?'Order':'Email'), (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
         }
       } else if(payload.eventType==='UPDATE'){
         if(idx!==-1) S.emails[idx] = payload.new;
@@ -769,7 +770,7 @@ function subscribeRealtime(){
         if(idx!==-1) S.emails.splice(idx,1);
       }
       renderNav();
-      if(S.page==='emails') renderEmailsList();
+      if(S.page==='emails' || S.page==='orders') renderEmailsList();
     })
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'email_messages' }, payload=>{
       const m = payload.new;
@@ -894,8 +895,9 @@ function handleTicketRealtime(payload){
 const NAV = [
   { id:'dashboard', label:'Dashboard' },
   { id:'livechat', label:'Live Chat', badgeKey:'livechat' },
-  { id:'tickets', label:'Tickets', badgeKey:'tickets' },
   { id:'emails', label:'Emails', badgeKey:'emails' },
+  { id:'orders', label:'Orders', badgeKey:'orders' },
+  { id:'tickets', label:'Tickets', badgeKey:'tickets' },
   { id:'customers', label:'Customer Lookup' },
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
   { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
@@ -924,7 +926,11 @@ function renderNav(){
       }
     }
     if(n.badgeKey==='emails'){
-      const unread = (S.emails||[]).filter(e=>e.status!=='archived' && e.has_unread).length;
+      const unread = (S.emails||[]).filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
+      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
+    }
+    if(n.badgeKey==='orders'){
+      const unread = (S.emails||[]).filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.has_unread).length;
       if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='warranty'){
@@ -1022,6 +1028,7 @@ function renderPage(){
   if(S.page === 'livechat') return renderLiveChatList();
   if(S.page === 'tickets') return renderTicketsList();
   if(S.page === 'emails') return renderEmailsList();
+  if(S.page === 'orders') return renderEmailsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
   if(S.page === 'customers') return renderCustomerLookup();
@@ -2962,8 +2969,11 @@ async function loadEmailMessages(emailId){
   return data;
 }
 
+function currentMailbox(){ return S.page==='orders' ? 'orders' : 'support'; }
+function emailInMailbox(e, mb){ return mb==='orders' ? e.mailbox==='orders' : e.mailbox!=='orders'; }
 function emailFiltered(){
-  let list = (S.emails||[]).slice();
+  const mb = currentMailbox();
+  let list = (S.emails||[]).filter(e=>emailInMailbox(e, mb));
   const f = S.emailFilters;
   if(f.view==='archived') list = list.filter(e=>e.status==='archived');
   else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.has_unread);
@@ -2996,7 +3006,7 @@ function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); 
 window.renderEmailsBody = renderEmailsBody;
 
 function emailTable(list){
-  if(!list.length) return `<div class="tbl-wrap"><div class="empty">No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here.</div></div>`;
+  if(!list.length) return `<div class="tbl-wrap"><div class="empty">${currentMailbox()==='orders'?'No orders yet. Mail to orders@ lands here.':"No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here."}</div></div>`;
   return `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
     ${list.map(e=>`
       <tr class="rowlink" onclick="openEmail('${e.id}')">
@@ -3048,7 +3058,7 @@ function renderEmailPanel(e){
   const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
-      <div class="tk-head-title">E${e.email_number} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
+      <div class="tk-head-title">${e.mailbox==='orders'?'Order ':''}E${e.email_number} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
       ${e.status!=='archived'
         ? `<button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
         : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>`}
