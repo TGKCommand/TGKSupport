@@ -442,7 +442,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.30';
+const TGK_SUPPORT_VERSION = 'v1.31';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2985,6 +2985,22 @@ function emailFiltered(){
   return list;
 }
 
+function emailRef(e){
+  const n = (e.display_number!=null ? e.display_number : e.email_number) || 0;
+  return (e.mailbox==='orders' ? 'ORD-' : 'E-') + String(n).padStart(4,'0');
+}
+async function updateEmailField(id, field, value){
+  if(value==='') value = null;
+  try{
+    const { data, error } = await sb.from('emails').update({ [field]: value, updated_at:new Date().toISOString() }).eq('id', id).select().single();
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
+    if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
+    toast('Saved');
+  }catch(e){ toast('Save failed: '+e.message, true); }
+}
+window.updateEmailField = updateEmailField;
+
 function renderEmailsList(){
   const el = document.getElementById('content');
   const f = S.emailFilters;
@@ -3010,7 +3026,7 @@ function emailTable(list){
   return `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
     ${list.map(e=>`
       <tr class="rowlink" onclick="openEmail('${e.id}')">
-        <td class="pn">E${e.email_number}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
+        <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
         <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.customer_email||'\u2014')}</td>
         <td>${escapeHtml(e.subject||'(no subject)')}</td>
         <td><span class="pill ${e.status==='archived'?'pill-muted':(e.has_unread?'pill-red':'pill-green')}">${e.status==='archived'?'Archived':(e.has_unread?'Unread':'Read')}</span></td>
@@ -3058,7 +3074,7 @@ function renderEmailPanel(e){
   const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
   document.getElementById('tk-panel').innerHTML = `
     <div class="tk-head">
-      <div class="tk-head-title">${e.mailbox==='orders'?'Order ':''}E${e.email_number} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
+      <div class="tk-head-title">${emailRef(e)} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
       ${e.status!=='archived'
         ? `<button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
         : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>`}
@@ -3072,6 +3088,21 @@ function renderEmailPanel(e){
           ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
           : `<button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button>`}
       </div>
+      ${e.mailbox==='orders' ? `<div class="linked-box">
+        <div class="form-row cols-2">
+          <div class="form-group">
+            <label class="form-label">Dealer</label>
+            <select class="form-input" onchange="updateEmailField('${e.id}','dealer_id',this.value)">
+              <option value="">\u2014 Unassigned \u2014</option>
+              ${(S.dealers||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(d=>`<option value="${d.id}" ${String(e.dealer_id)===String(d.id)?'selected':''}>${escapeHtml(d.name||d.email||'Dealer')}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">PO Number (optional)</label>
+            <input class="form-input" value="${escapeHtml(e.po_number||'')}" placeholder="Dealer PO #" onchange="updateEmailField('${e.id}','po_number',this.value)">
+          </div>
+        </div>
+      </div>` : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
       <div id="replyComposer" style="margin-top:12px">
@@ -3157,7 +3188,7 @@ async function convertEmailToTicket(id){
   const e = (S.emails||[]).find(x=>x.id===id);
   if(!e){ toast('Email not found', true); return; }
   if(e.converted_ticket_id){ toast('Already converted to a ticket', true); return; }
-  if(!confirm(`Convert email E${e.email_number} from ${e.customer_email||'unknown'} into a support ticket? The whole conversation moves into the new ticket and the email is archived.`)) return;
+  if(!confirm(`Convert ${emailRef(e)} from ${e.customer_email||'unknown'} into a support ticket? The whole conversation moves into the new ticket and the email is archived.`)) return;
   try{
     const msgs = S.emailMessages[e.id] && S.emailMessages[e.id].length ? S.emailMessages[e.id] : await loadEmailMessages(e.id);
     const { data:ticket, error:tErr } = await sb.from('tickets').insert({
