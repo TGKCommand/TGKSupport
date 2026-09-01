@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.34';
+const TGK_SUPPORT_VERSION = 'v1.37';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -486,6 +486,12 @@ function desktopNotify(title, body, ticketId){
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
   // Skip if the tab is already focused and visible — the in-app toast covers that case
   if(document.hasFocus() && !document.hidden) return;
+  // OS notifications render title/body as PLAIN TEXT only, so any HTML we use for
+  // in-app toasts (icon <span>s, etc.) would show up as literal markup. Strip tags
+  // and collapse whitespace here so every caller is covered.
+  const plain = (s)=> String(s==null?'':s).replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim();
+  title = plain(title);
+  body = plain(body);
   try{
     const n = new Notification(title, { body, icon: undefined, tag: ticketId || undefined });
     n.onclick = () => {
@@ -3048,13 +3054,25 @@ window.setOrderComplete = setOrderComplete;
 function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); if(b) b.innerHTML = emailTable(emailFiltered()); }
 window.renderEmailsBody = renderEmailsBody;
 
+function dealerName(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.name||d.email||'') : ''; }
+function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=>x.email===email); return (m&&(m.display_name||m.email))||email; }
+function emailListOrderMeta(e){
+  const parts=[];
+  const dn = dealerName(e.dealer_id);
+  if(dn) parts.push('<span class="pill pill-teal">'+escapeHtml(dn)+'</span>');
+  if(e.po_number) parts.push('<span class="pill pill-muted">PO '+escapeHtml(e.po_number)+'</span>');
+  if(e.assigned_to) parts.push('<span class="pill">'+escapeHtml(assigneeName(e.assigned_to))+'</span>');
+  if(!parts.length) return '';
+  return '<div style="margin-top:4px;font-weight:400;display:flex;gap:4px;flex-wrap:wrap">'+parts.join('')+'</div>';
+}
+
 function emailTable(list){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">${currentMailbox()==='orders'?'No orders yet. Mail to orders@ lands here.':"No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here."}</div></div>`;
   return `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
     ${list.map(e=>`
       <tr class="rowlink" onclick="openEmail('${e.id}')">
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
-        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.customer_email||'\u2014')}</td>
+        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.customer_email||'\u2014')}${e.mailbox==='orders' ? emailListOrderMeta(e) : ''}</td>
         <td>${escapeHtml(e.subject||'(no subject)')}</td>
         <td>${e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.status==='completed'?'<span class="pill pill-green">Completed</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':(e.mailbox==='orders'?'<span class="pill pill-teal">Active</span>':'<span class="pill pill-green">Read</span>')}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
@@ -3070,6 +3088,7 @@ async function openEmail(id){
   if(!e){ toast('Email not found', true); return; }
   S.activeEmail = e;
   S.activeTicket = null;
+  pendingMsgAttachments = [];
   await loadEmailMessages(id);
   renderEmailPanel(e);
   document.getElementById('tk-overlay').classList.add('open');
@@ -3115,6 +3134,15 @@ function renderEmailPanel(e){
           ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
           : `<button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button>`}
       </div>
+      <div class="linked-box">
+        <div class="form-group" style="margin:0">
+          <label class="form-label">Assigned to</label>
+          <select class="form-input" onchange="updateEmailField('${e.id}','assigned_to',this.value)">
+            <option value="">\u2014 Unassigned \u2014</option>
+            ${(S.team||[]).map(m=>`<option value="${m.email}" ${e.assigned_to===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
       ${e.mailbox==='orders' ? `<div class="linked-box">
         <div class="form-row cols-2">
           <div class="form-group">
@@ -3140,6 +3168,10 @@ function renderEmailPanel(e){
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
       <div id="replyComposer" style="margin-top:12px">
         <textarea id="msgBox" rows="3" placeholder="Reply to ${escapeHtml(e.customer_email||'the sender')}..." class="form-input" style="resize:vertical"></textarea>
+        <div class="checkbox-row" style="justify-content:flex-start;margin-top:6px">
+          <label class="btn btn-sm" style="cursor:pointer;margin:0"><span class="ic ic-link"></span>Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
+        </div>
+        <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
         <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:flex-end">
           <span style="font-size:var(--t-xs);color:var(--text3);margin-right:auto">Sends from support@ and threads back automatically</span>
           <button class="btn btn-primary" onclick="sendEmailReply('${e.id}')" id="sendBtn">Send Reply</button>
@@ -3165,10 +3197,12 @@ async function sendEmailReply(emailId){
       body: JSON.stringify({
         email_id: emailId,
         email_number: e.email_number,
+        display_number: e.display_number,
+        mailbox: e.mailbox,
         to: e.customer_email,
         subject: e.subject ? ('Re: '+e.subject) : 'Re: your message to TGK Motorsport',
         body,
-        attachments: [],
+        attachments: pendingMsgAttachments,
         staff_name: (typeof friendlyStaffName==='function')?friendlyStaffName():'',
         staff_email: (S.user&&S.user.email)||null
       })
@@ -3176,6 +3210,7 @@ async function sendEmailReply(emailId){
     const result = await resp.json();
     if(!resp.ok) throw new Error(result.error||'Send failed');
     box.value='';
+    pendingMsgAttachments = [];
     await loadEmailMessages(emailId);
     const i=S.emails.findIndex(x=>x.id===emailId);
     if(i!==-1){
