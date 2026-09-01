@@ -442,7 +442,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.28';
+const TGK_SUPPORT_VERSION = 'v1.29';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -470,6 +470,10 @@ const S = {
   settingsTable: 'unknown',
   settingsTab: 'categories',
   activeTicket: null,
+  emails: [],
+  emailMessages: {},
+  activeEmail: null,
+  emailFilters: { view: 'open', q: '' },
   filters: { status: '__active__', priority: '', source: '', category: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
 };
@@ -708,6 +712,7 @@ async function loadAll(){
     S.dealers = dealers;
     S.team = team;
     S.templates = templates;
+    await loadEmails();
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
@@ -747,6 +752,33 @@ function subscribeRealtime(){
             (m.sender_name||'Customer') + ': ' + (m.body||'').slice(0,120),
             m.ticket_id
           );
+        }
+      }
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'emails' }, payload=>{
+      const idx = S.emails.findIndex(x=>x.id === (payload.new?.id || payload.old?.id));
+      if(payload.eventType==='INSERT'){
+        if(idx===-1){
+          S.emails.unshift(payload.new);
+          toast('<span class="ic ic-mail"></span>New email from ' + (payload.new.customer_email||'someone'));
+          desktopNotify('<span class="ic ic-mail"></span>New Email', (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
+        }
+      } else if(payload.eventType==='UPDATE'){
+        if(idx!==-1) S.emails[idx] = payload.new;
+      } else if(payload.eventType==='DELETE'){
+        if(idx!==-1) S.emails.splice(idx,1);
+      }
+      renderNav();
+      if(S.page==='emails') renderEmailsList();
+    })
+    .on('postgres_changes', { event:'INSERT', schema:'public', table:'email_messages' }, payload=>{
+      const m = payload.new;
+      if(!S.emailMessages[m.email_id]) S.emailMessages[m.email_id] = [];
+      if(!S.emailMessages[m.email_id].some(x=>x.id===m.id)){
+        S.emailMessages[m.email_id].push(m);
+        if(S.activeEmail && S.activeEmail.id===m.email_id){
+          const tb=document.getElementById('threadBox');
+          if(tb){ tb.innerHTML = renderEmailThread(S.emailMessages[m.email_id]); scrollThreadToBottom(); }
         }
       }
     })
@@ -863,6 +895,7 @@ const NAV = [
   { id:'dashboard', label:'Dashboard' },
   { id:'livechat', label:'Live Chat', badgeKey:'livechat' },
   { id:'tickets', label:'Tickets', badgeKey:'tickets' },
+  { id:'emails', label:'Emails', badgeKey:'emails' },
   { id:'customers', label:'Customer Lookup' },
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
   { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
@@ -889,6 +922,10 @@ function renderNav(){
         const openCount = activeTix.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
         if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
       }
+    }
+    if(n.badgeKey==='emails'){
+      const unread = (S.emails||[]).filter(e=>e.status!=='archived' && e.has_unread).length;
+      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='warranty'){
       const c = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id)).length;
@@ -984,6 +1021,7 @@ function renderPage(){
   if(S.page === 'dashboard') return renderDashboard();
   if(S.page === 'livechat') return renderLiveChatList();
   if(S.page === 'tickets') return renderTicketsList();
+  if(S.page === 'emails') return renderEmailsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
   if(S.page === 'customers') return renderCustomerLookup();
@@ -2317,6 +2355,7 @@ function closePanel(){
   document.getElementById('tk-overlay').classList.remove('open');
   document.getElementById('tk-panel').classList.remove('open');
   S.activeTicket = null;
+  S.activeEmail = null;
 }
 window.closePanel = closePanel;
 
@@ -2901,6 +2940,248 @@ function renderThread(msgs, notesOnly){
     </div>
   `).join('');
 }
+
+/* ============================================================
+   EMAILS TAB (v1.29)
+   Inbox for support@ conversations that are NOT tied to a live ticket.
+   Reads emails / email_messages. Reply threads out via send-email-reply
+   (stamps [TGK-E####]); Convert to Ticket carries the whole thread into a
+   new ticket. Reuses the ticket slide-over panel and thread styles.
+   ============================================================ */
+async function loadEmails(){
+  try{
+    const rows = await fetchAll((f,t)=> sb.from('emails').select('*').order('last_message_at',{ascending:false}).range(f,t));
+    S.emails = rows || [];
+  }catch(e){ S.emails = S.emails || []; }
+}
+
+async function loadEmailMessages(emailId){
+  const { data, error } = await sb.from('email_messages').select('*').eq('email_id', emailId).order('created_at',{ascending:true});
+  if(error){ toast('Failed to load email', true); return []; }
+  S.emailMessages[emailId] = data;
+  return data;
+}
+
+function emailFiltered(){
+  let list = (S.emails||[]).slice();
+  const f = S.emailFilters;
+  if(f.view==='archived') list = list.filter(e=>e.status==='archived');
+  else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.has_unread);
+  else list = list.filter(e=>e.status!=='archived');
+  if(f.q){
+    const q=f.q.toLowerCase();
+    list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q));
+  }
+  return list;
+}
+
+function renderEmailsList(){
+  const el = document.getElementById('content');
+  const f = S.emailFilters;
+  el.innerHTML = `
+    <div class="filter-bar">
+      <div class="search-wrap">
+        <span class="search-icon"><span class="ic ic-search"></span></span>
+        <input type="text" placeholder="Search sender or subject..." value="${escapeHtml(f.q)}" oninput="S.emailFilters.q=this.value; clearTimeout(window._emQT); window._emQT=setTimeout(renderEmailsBody,120)">
+      </div>
+      ${['open','unread','archived'].map(v=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${v==='open'?'Inbox':label(v)}</button>`).join('')}
+      <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
+    </div>
+    <div id="emailsListBody">${emailTable(emailFiltered())}</div>
+  `;
+}
+window.renderEmailsList = renderEmailsList;
+
+function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); if(b) b.innerHTML = emailTable(emailFiltered()); }
+window.renderEmailsBody = renderEmailsBody;
+
+function emailTable(list){
+  if(!list.length) return `<div class="tbl-wrap"><div class="empty">No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here.</div></div>`;
+  return `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
+    ${list.map(e=>`
+      <tr class="rowlink" onclick="openEmail('${e.id}')">
+        <td class="pn">E${e.email_number}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
+        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.customer_email||'\u2014')}</td>
+        <td>${escapeHtml(e.subject||'(no subject)')}</td>
+        <td><span class="pill ${e.status==='archived'?'pill-muted':(e.has_unread?'pill-red':'pill-green')}">${e.status==='archived'?'Archived':(e.has_unread?'Unread':'Read')}</span></td>
+        <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
+      </tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+async function refreshEmails(){ await loadEmails(); renderNav(); renderEmailsList(); toast('Emails refreshed'); }
+window.refreshEmails = refreshEmails;
+
+async function openEmail(id){
+  const e = (S.emails||[]).find(x=>x.id===id);
+  if(!e){ toast('Email not found', true); return; }
+  S.activeEmail = e;
+  S.activeTicket = null;
+  await loadEmailMessages(id);
+  renderEmailPanel(e);
+  document.getElementById('tk-overlay').classList.add('open');
+  document.getElementById('tk-panel').classList.add('open');
+  scrollThreadToBottom();
+  // Stamp view + mark read. Panel already rendered with the prior viewer.
+  try{
+    const patch = { last_viewed_by:(S.user&&S.user.email)||null, last_viewed_at:new Date().toISOString() };
+    if(e.has_unread){ patch.has_unread=false; patch.unread_count=0; if(e.status!=='archived') patch.status='read'; }
+    const { data:updated } = await sb.from('emails').update(patch).eq('id', id).select().single();
+    if(updated){ const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=updated; S.activeEmail=updated; renderNav(); }
+  }catch(_){ /* non-critical */ }
+}
+window.openEmail = openEmail;
+
+function renderEmailThread(msgs){
+  if(!msgs || !msgs.length) return `<div class="empty">No messages yet.</div>`;
+  return msgs.map(m=>`
+    <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
+      <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
+      <div>${escapeHtml(m.body||'').replace(/\n/g,'<br>')}</div>
+      ${renderAttachments(m.attachments)}
+    </div>
+  `).join('');
+}
+
+function renderEmailPanel(e){
+  const msgs = S.emailMessages[e.id] || [];
+  const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
+  document.getElementById('tk-panel').innerHTML = `
+    <div class="tk-head">
+      <div class="tk-head-title">E${e.email_number} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
+      ${e.status!=='archived'
+        ? `<button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
+        : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>`}
+      <button class="tk-close" onclick="closePanel()"><span class="ic ic-x"></span></button>
+    </div>
+    ${renderTicketTracker(e)}
+    <div class="tk-body">
+      <div class="linked-box" style="background:var(--bg2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span><span class="ic ic-user"></span><strong>${escapeHtml(e.customer_email||'unknown sender')}</strong></span>
+        ${linkedTicket
+          ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
+          : `<button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button>`}
+      </div>
+      <div id="threadBox">${renderEmailThread(msgs)}</div>
+      ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
+      <div id="replyComposer" style="margin-top:12px">
+        <textarea id="msgBox" rows="3" placeholder="Reply to ${escapeHtml(e.customer_email||'the sender')}..." class="form-input" style="resize:vertical"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:flex-end">
+          <span style="font-size:var(--t-xs);color:var(--text3);margin-right:auto">Sends from support@ and threads back automatically</span>
+          <button class="btn btn-primary" onclick="sendEmailReply('${e.id}')" id="sendBtn">Send Reply</button>
+        </div>
+      </div>`}
+    </div>
+  `;
+}
+
+async function sendEmailReply(emailId){
+  const box = document.getElementById('msgBox');
+  const body = box.value.trim();
+  if(!body) return;
+  const e = (S.emails||[]).find(x=>x.id===emailId);
+  if(!e){ toast('Email not found', true); return; }
+  if(!e.customer_email){ toast('No sender address on this email', true); return; }
+  const btn = document.getElementById('sendBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
+  try{
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email-reply`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        email_id: emailId,
+        email_number: e.email_number,
+        to: e.customer_email,
+        subject: e.subject ? ('Re: '+e.subject) : 'Re: your message to TGK Motorsport',
+        body,
+        attachments: [],
+        staff_name: (typeof friendlyStaffName==='function')?friendlyStaffName():'',
+        staff_email: (S.user&&S.user.email)||null
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error||'Send failed');
+    box.value='';
+    await loadEmailMessages(emailId);
+    const i=S.emails.findIndex(x=>x.id===emailId);
+    if(i!==-1){
+      S.emails[i].last_message_at=new Date().toISOString();
+      S.emails[i].last_reply_by=(S.user&&S.user.email)||null;
+      S.emails[i].last_reply_at=new Date().toISOString();
+      S.emails[i].has_unread=false; S.emails[i].unread_count=0;
+      if(S.emails[i].status!=='archived') S.emails[i].status='read';
+      S.activeEmail=S.emails[i];
+    }
+    renderEmailPanel(S.activeEmail);
+    scrollThreadToBottom();
+    renderNav();
+    toast('Reply sent to '+e.customer_email);
+  }catch(err){
+    toast('Send failed: '+err.message, true);
+    if(btn){ btn.disabled=false; btn.textContent='Send Reply'; }
+  }
+}
+window.sendEmailReply = sendEmailReply;
+
+async function archiveEmail(id){
+  try{
+    const { data } = await sb.from('emails').update({ status:'archived', has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', id).select().single();
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1 && data) S.emails[i]=data;
+    toast('Email archived');
+    closePanel(); renderNav(); renderEmailsList();
+  }catch(e){ toast('Archive failed: '+e.message, true); }
+}
+window.archiveEmail = archiveEmail;
+
+async function unarchiveEmail(id){
+  try{
+    const { data } = await sb.from('emails').update({ status:'read', updated_at:new Date().toISOString() }).eq('id', id).select().single();
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1 && data) S.emails[i]=data;
+    toast('Email restored to inbox'); renderNav();
+    if(data) openEmail(id);
+  }catch(e){ toast('Restore failed: '+e.message, true); }
+}
+window.unarchiveEmail = unarchiveEmail;
+
+async function convertEmailToTicket(id){
+  const e = (S.emails||[]).find(x=>x.id===id);
+  if(!e){ toast('Email not found', true); return; }
+  if(e.converted_ticket_id){ toast('Already converted to a ticket', true); return; }
+  if(!confirm(`Convert email E${e.email_number} from ${e.customer_email||'unknown'} into a support ticket? The whole conversation moves into the new ticket and the email is archived.`)) return;
+  try{
+    const msgs = S.emailMessages[e.id] && S.emailMessages[e.id].length ? S.emailMessages[e.id] : await loadEmailMessages(e.id);
+    const { data:ticket, error:tErr } = await sb.from('tickets').insert({
+      source:'email', status:'open', priority:'medium',
+      subject: e.subject || '(no subject)',
+      customer_email: e.customer_email || null,
+      has_unread: false, unread_count: 0
+    }).select().single();
+    if(tErr) throw tErr;
+    if(msgs.length){
+      const rows = msgs.map(m=>({
+        ticket_id: ticket.id,
+        sender_type: m.direction==='outbound' ? 'staff' : 'customer',
+        sender_name: m.sender_name || m.from_email || (m.direction==='outbound'?'TGK Support':(e.customer_email||'Customer')),
+        body: m.body || '',
+        is_internal_note: false,
+        attachments: m.attachments || [],
+        created_at: m.created_at
+      }));
+      const { error:mErr } = await sb.from('ticket_messages').insert(rows);
+      if(mErr) throw mErr;
+    }
+    const { data:updatedEmail } = await sb.from('emails').update({ converted_ticket_id: ticket.id, status:'archived', has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', e.id).select().single();
+    const i=S.emails.findIndex(x=>x.id===e.id); if(i!==-1 && updatedEmail) S.emails[i]=updatedEmail;
+    S.tickets.unshift(ticket);
+    toast('Converted to ticket #'+ticket.ticket_number);
+    closePanel();
+    goPage('tickets');
+    setTimeout(()=>openTicket(ticket.id), 60);
+  }catch(err){
+    toast('Convert failed: '+err.message, true);
+  }
+}
+window.convertEmailToTicket = convertEmailToTicket;
 
 const TRACKED_ACTIVITY_FIELDS = ['status','priority','assigned_to'];
 
