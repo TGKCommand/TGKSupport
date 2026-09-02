@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.51';
+const TGK_SUPPORT_VERSION = 'v1.52';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3797,9 +3797,9 @@ async function convertTicketToOrder(ticketId){
     }).select().single();
     if(error) throw error;
     const rows=[];
-    if(t.description) rows.push({ email_id:order.id, direction:'inbound', sender_name: t.customer_name||t.customer_email||'Customer', from_email: t.customer_email||null, body: t.description, created_at: t.created_at });
+    if(t.description) rows.push({ email_id:order.id, direction:'inbound', sender_name: t.customer_name||t.customer_email||'Customer', from_email: t.customer_email||null, body: t.description, attachments: (t.attachments||[]), created_at: t.created_at });
     (msgs||[]).filter(m=>!m.is_internal_note).forEach(m=>{
-      rows.push({ email_id:order.id, direction: m.sender_type==='staff'?'outbound':'inbound', sender_name: m.sender_name||(m.sender_type==='staff'?'TGK Support':(t.customer_email||'Customer')), body: m.body||'', attachments: m.attachments||[], created_at: m.created_at });
+      rows.push({ email_id:order.id, direction: m.sender_type==='staff'?'outbound':'inbound', sender_name: m.sender_name||(m.sender_type==='staff'?'TGK Support':(t.customer_email||'Customer')), body: m.body||'', attachments: (m.attachments||[]), created_at: m.created_at });
     });
     if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
     await sb.from('tickets').update({ status:'resolved', converted_order_id: order.id, resolved_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', ticketId);
@@ -3827,7 +3827,7 @@ async function convertEmailToOrder(emailId){
       source_email_id: emailId, ship_name: e.ship_name || null, ship_email: e.customer_email || null
     }).select().single();
     if(error) throw error;
-    const rows=(msgs||[]).map(m=>({ email_id:order.id, direction:m.direction, sender_name:m.sender_name, from_email:m.from_email, to_email:m.to_email, body:m.body||'', attachments:m.attachments||[], created_at:m.created_at }));
+    const rows=(msgs||[]).map(m=>({ email_id:order.id, direction:m.direction, sender_name:m.sender_name, from_email:m.from_email, to_email:m.to_email, body:m.body||'', attachments:(m.attachments||[]), created_at:m.created_at }));
     if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
     await sb.from('emails').update({ status:'archived', converted_order_id: order.id, has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', emailId);
     const si=S.emails.findIndex(x=>x.id===emailId); if(si!==-1){ S.emails[si].status='archived'; S.emails[si].converted_order_id=order.id; }
