@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.50';
+const TGK_SUPPORT_VERSION = 'v1.51';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2760,6 +2760,7 @@ function renderTicketPanel(t){
       </div>
       <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Phone</label><input class="form-input" value="${escapeHtml(t.customer_phone||'')}" onchange="updateTicketField('${t.id}','customer_phone',this.value)"></div>
       ${(t.customer_email || t.order_number) ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="goPage('customers'); setTimeout(()=>{document.getElementById('custSearchInput').value='${escapeHtml(t.customer_email||t.order_number||'').replace(/'/g,"\\'")}'; runCustomerSearch(); closePanel();},50)">View Full Customer History</button>` : ''}
+      ${t.converted_order_id ? `<div style="margin-bottom:10px"><span class="pill pill-teal">Converted to an order \u2014 communication continues there</span></div>` : `<button class="btn btn-sm" style="margin-bottom:10px;margin-left:6px" onclick="convertTicketToOrder('${t.id}')"><span class="ic ic-box"></span>Create Order</button>`}
 
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">Shipping Address</label>
@@ -2976,15 +2977,30 @@ function renderAttachments(attachments){
    messages, and the original submission. */
 async function aiTranslate(text, targetLang){
   const prompt = 'Translate the following text into ' + (targetLang||'English') + '. Auto-detect the source language. Output ONLY the translation itself with no preamble, notes, or quotation marks.\n\n---\n' + text;
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/anthropic-proxy`, {
+  let token = SUPABASE_ANON_KEY;
+  try{ const s = await sb.auth.getSession(); if(s && s.data && s.data.session && s.data.session.access_token) token = s.data.session.access_token; }catch(_){}
+  const call = (tok)=> fetch(`${SUPABASE_URL}/functions/v1/anthropic-proxy`, {
     method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}` },
+    headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+tok },
     body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1500, messages:[{ role:'user', content: prompt }] })
   });
-  const data = await resp.json();
-  if(data && data.error) throw new Error(data.error.message || (data.error.type==='proxy_not_configured' ? 'AI proxy not configured (add ANTHROPIC_API_KEY to the anthropic-proxy edge function secrets).' : 'AI error'));
+  let resp = await call(token);
+  if(resp.status===401){
+    try{ await sb.auth.refreshSession(); const s=await sb.auth.getSession(); const nt=s&&s.data&&s.data.session&&s.data.session.access_token; if(nt){ resp = await call(nt); } }catch(_){}
+  }
+  if(resp.status===503) throw new Error('AI proxy not configured (add ANTHROPIC_API_KEY to the anthropic-proxy edge function secrets).');
+  let data=null; try{ data = await resp.json(); }catch(_){ data=null; }
+  if(!resp.ok){
+    const m = (data && data.error && (data.error.message||data.error.type)) || ('HTTP '+resp.status);
+    throw new Error(typeof m==='string'?m:JSON.stringify(m));
+  }
+  if(data && data.error){
+    const m = data.error.message || data.error.type || (typeof data.error==='string'?data.error:JSON.stringify(data.error));
+    throw new Error(m);
+  }
   const out = (data && data.content && data.content[0] && data.content[0].text) ? data.content[0].text : '';
-  return out.trim() || '(no translation returned)';
+  if(!out) throw new Error('Empty response from AI');
+  return out.trim();
 }
 async function translateEl(bodyId){
   const el = document.getElementById(bodyId); if(!el) return;
@@ -3553,7 +3569,9 @@ function renderEmailPanel(e){
         <span><span class="ic ic-user"></span><strong>${escapeHtml(e.customer_email || (e.mailbox==='orders' ? ((e.ship_name||'').trim() || 'Manual order \u2014 assign a dealer') : 'unknown sender'))}</strong></span>
         ${linkedTicket
           ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
-          : `<button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button>`}
+          : e.mailbox==='orders'
+            ? (()=>{ const st = e.source_ticket_id ? S.tickets.find(x=>x.id===e.source_ticket_id) : null; const se = e.source_email_id ? S.emails.find(x=>x.id===e.source_email_id) : null; return st ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${st.id}'),60)">From ticket #${st.ticket_number} \u2197</span>` : se ? `<span class="pill pill-teal">From ${emailRef(se)}</span>` : ''; })()
+            : `<span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button><button class="btn btn-sm" onclick="convertEmailToOrder('${e.id}')"><span class="ic ic-box"></span>Create Order</button></span>`}
       </div>
       <div class="linked-box">
         <div class="form-group" style="margin:0">
@@ -3748,6 +3766,78 @@ async function convertEmailToTicket(id){
   }
 }
 window.convertEmailToTicket = convertEmailToTicket;
+
+function _nextOrderDisplayNumber(){
+  const orders=(S.emails||[]).filter(e=>e.mailbox==='orders');
+  return orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
+}
+function _matchDealerByEmail(email){
+  if(!email) return null;
+  const d=(S.dealers||[]).find(x=>x.email && String(x.email).toLowerCase()===String(email).toLowerCase());
+  return d ? d.id : null;
+}
+async function convertTicketToOrder(ticketId){
+  const t=S.tickets.find(x=>x.id===ticketId); if(!t) return;
+  if(t.converted_order_id){ toast('This ticket was already converted to an order', true); return; }
+  if(!confirm('Create an order from ticket #'+t.ticket_number+'? The conversation copies onto the order and communication continues there.')) return;
+  try{
+    const msgs = (S.messages[ticketId] && S.messages[ticketId].length) ? S.messages[ticketId] : await loadMessages(ticketId);
+    const num = _nextOrderDisplayNumber();
+    const addr = t.shipping_address || {};
+    const hasAddr = !!(addr.street1 || addr.city);
+    const { data: order, error } = await sb.from('emails').insert({
+      mailbox:'orders', subject: t.subject||'Order', status:'read', has_unread:false, unread_count:0,
+      display_number: num, last_message_at:new Date().toISOString(),
+      customer_email: t.customer_email||null, dealer_id: _matchDealerByEmail(t.customer_email),
+      source_ticket_id: ticketId, is_dropship: hasAddr,
+      ship_name: addr.name || t.customer_name || null, ship_email: t.customer_email || null, ship_phone: t.customer_phone || null,
+      ship_address1: addr.street1 || null, ship_address2: addr.street2 || null,
+      ship_city: addr.city || null, ship_province: addr.state || null,
+      ship_zip: addr.postal_code || null, ship_country: addr.country || 'US'
+    }).select().single();
+    if(error) throw error;
+    const rows=[];
+    if(t.description) rows.push({ email_id:order.id, direction:'inbound', sender_name: t.customer_name||t.customer_email||'Customer', from_email: t.customer_email||null, body: t.description, created_at: t.created_at });
+    (msgs||[]).filter(m=>!m.is_internal_note).forEach(m=>{
+      rows.push({ email_id:order.id, direction: m.sender_type==='staff'?'outbound':'inbound', sender_name: m.sender_name||(m.sender_type==='staff'?'TGK Support':(t.customer_email||'Customer')), body: m.body||'', attachments: m.attachments||[], created_at: m.created_at });
+    });
+    if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
+    await sb.from('tickets').update({ status:'resolved', converted_order_id: order.id, resolved_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', ticketId);
+    try{ await sb.from('ticket_messages').insert({ ticket_id:ticketId, sender_type:'system', sender_name:'System', body:'Converted to order ORD-'+String(num).padStart(4,'0')+' by '+((S.user&&S.user.email)||'staff')+'. Communication continues on that order.', is_internal_note:true }); }catch(_){}
+    const ti=S.tickets.findIndex(x=>x.id===ticketId); if(ti!==-1){ S.tickets[ti].status='resolved'; S.tickets[ti].converted_order_id=order.id; }
+    S.emails.unshift(order);
+    toast('Created order ORD-'+String(num).padStart(4,'0'));
+    closePanel(); renderNav();
+    goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
+  }catch(err){ toast('Convert failed: '+err.message, true); }
+}
+window.convertTicketToOrder = convertTicketToOrder;
+
+async function convertEmailToOrder(emailId){
+  const e=(S.emails||[]).find(x=>x.id===emailId); if(!e) return;
+  if(e.converted_order_id){ toast('This email was already converted to an order', true); return; }
+  if(!confirm('Create an order from '+emailRef(e)+'? The conversation copies onto the order and communication continues there.')) return;
+  try{
+    const msgs = (S.emailMessages[emailId] && S.emailMessages[emailId].length) ? S.emailMessages[emailId] : await loadEmailMessages(emailId);
+    const num = _nextOrderDisplayNumber();
+    const { data: order, error } = await sb.from('emails').insert({
+      mailbox:'orders', subject: e.subject||'Order', status:'read', has_unread:false, unread_count:0,
+      display_number: num, last_message_at:new Date().toISOString(),
+      customer_email: e.customer_email||null, dealer_id: e.dealer_id || _matchDealerByEmail(e.customer_email),
+      source_email_id: emailId, ship_name: e.ship_name || null, ship_email: e.customer_email || null
+    }).select().single();
+    if(error) throw error;
+    const rows=(msgs||[]).map(m=>({ email_id:order.id, direction:m.direction, sender_name:m.sender_name, from_email:m.from_email, to_email:m.to_email, body:m.body||'', attachments:m.attachments||[], created_at:m.created_at }));
+    if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
+    await sb.from('emails').update({ status:'archived', converted_order_id: order.id, has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', emailId);
+    const si=S.emails.findIndex(x=>x.id===emailId); if(si!==-1){ S.emails[si].status='archived'; S.emails[si].converted_order_id=order.id; }
+    S.emails.unshift(order);
+    toast('Created order '+emailRef(order));
+    closePanel(); renderNav();
+    goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
+  }catch(err){ toast('Convert failed: '+err.message, true); }
+}
+window.convertEmailToOrder = convertEmailToOrder;
 
 const TRACKED_ACTIVITY_FIELDS = ['status','priority','assigned_to'];
 
