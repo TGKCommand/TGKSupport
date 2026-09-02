@@ -418,6 +418,8 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
       </button>
       <div class="topbar-title" id="pageTitle">Dashboard</div>
       <div class="topbar-actions">
+        <button class="btn" id="undoBtn" onclick="doUndo()" title="Undo (Ctrl+Z)" disabled>Undo</button>
+        <button class="btn" id="redoBtn" onclick="doRedo()" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
         <button class="btn btn-primary" onclick="openNewTicket()">+ New Ticket</button>
       </div>
     </div>
@@ -441,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.54';
+const TGK_SUPPORT_VERSION = 'v1.55';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -909,6 +911,45 @@ const NAV = [
   { id:'reports', label:'Reports', section:'Tools' },
   { id:'settings', label:'Settings', section:'Tools' },
 ];
+
+/* ============================================================
+   UNDO / REDO (universal, for reversible field edits)
+   Covers record field changes routed through updateTicketField /
+   updateEmailField. Does NOT cover irreversible/external actions
+   (sent emails, Shopify draft/invoice/complete, permanent deletes,
+   merges, convert-to-order) -- those are never pushed.
+   ============================================================ */
+const UNDO = { stack: [], redo: [], max: 60 };
+function updateUndoButtons(){
+  const u=document.getElementById('undoBtn'), r=document.getElementById('redoBtn');
+  if(u){ u.disabled = !UNDO.stack.length; u.title = UNDO.stack.length ? ('Undo: '+UNDO.stack[UNDO.stack.length-1].label+' (Ctrl+Z)') : 'Nothing to undo'; }
+  if(r){ r.disabled = !UNDO.redo.length; r.title = UNDO.redo.length ? ('Redo: '+UNDO.redo[UNDO.redo.length-1].label+' (Ctrl+Shift+Z)') : 'Nothing to redo'; }
+}
+function pushUndo(entry){ UNDO.stack.push(entry); if(UNDO.stack.length>UNDO.max) UNDO.stack.shift(); UNDO.redo=[]; updateUndoButtons(); }
+window.pushUndo = pushUndo;
+async function doUndo(){
+  const e = UNDO.stack.pop(); if(!e){ toast('Nothing to undo'); updateUndoButtons(); return; }
+  try{ await e.undo(); UNDO.redo.push(e); toast('Undid: '+e.label); }
+  catch(err){ UNDO.stack.push(e); toast('Undo failed: '+err.message, true); }
+  updateUndoButtons();
+}
+window.doUndo = doUndo;
+async function doRedo(){
+  const e = UNDO.redo.pop(); if(!e){ toast('Nothing to redo'); updateUndoButtons(); return; }
+  try{ await e.redo(); UNDO.stack.push(e); toast('Redid: '+e.label); }
+  catch(err){ UNDO.redo.push(e); toast('Redo failed: '+err.message, true); }
+  updateUndoButtons();
+}
+window.doRedo = doRedo;
+document.addEventListener('keydown', (ev)=>{
+  if(!(ev.ctrlKey || ev.metaKey)) return;
+  const k = (ev.key||'').toLowerCase();
+  const tag = (ev.target && ev.target.tagName || '').toLowerCase();
+  const editable = tag==='input' || tag==='textarea' || (ev.target && ev.target.isContentEditable);
+  if(editable) return; // let the browser's native text undo work inside fields
+  if(k==='z' && !ev.shiftKey){ ev.preventDefault(); doUndo(); }
+  else if((k==='z' && ev.shiftKey) || k==='y'){ ev.preventDefault(); doRedo(); }
+});
 
 function renderNav(){
   const nav = document.getElementById('navList');
@@ -3080,13 +3121,17 @@ function emailRef(e){
   const n = (e.display_number!=null ? e.display_number : e.email_number) || 0;
   return (e.mailbox==='orders' ? 'ORD-' : 'E-') + String(n).padStart(4,'0');
 }
-async function updateEmailField(id, field, value, quiet){
+async function updateEmailField(id, field, value, quiet, skipUndo){
   if(value==='') value = null;
+  const before = (S.emails.find(x=>x.id===id)||{})[field];
   try{
     const { data, error } = await sb.from('emails').update({ [field]: value, updated_at:new Date().toISOString() }).eq('id', id).select().single();
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
     if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
+    if(!skipUndo && JSON.stringify(before) !== JSON.stringify(value)){
+      pushUndo({ label:'order/email '+field, undo:()=>updateEmailField(id, field, before, true, true), redo:()=>updateEmailField(id, field, value, true, true) });
+    }
     if(!quiet) toast('Saved');
   }catch(e){ toast('Save failed: '+e.message, true); }
 }
@@ -3875,7 +3920,7 @@ async function logActivity(ticketId, fieldChanged, oldValue, newValue){
   }catch(e){ /* non-critical, don't block the actual update on log failure */ }
 }
 
-async function updateTicketField(id, field, value){
+async function updateTicketField(id, field, value, skipUndo){
   try{
     const before = S.tickets.find(x=>x.id===id);
     const oldValue = before ? before[field] : undefined;
@@ -3888,6 +3933,10 @@ async function updateTicketField(id, field, value){
     S.activeTicket = data;
     if(TRACKED_ACTIVITY_FIELDS.includes(field) && oldValue !== value){
       await logActivity(id, field, oldValue, value);
+    }
+    if(!skipUndo && JSON.stringify(oldValue) !== JSON.stringify(value)){
+      const num = (before && before.ticket_number) || '';
+      pushUndo({ label:'ticket #'+num+' '+field, undo:()=>updateTicketField(id, field, oldValue, true), redo:()=>updateTicketField(id, field, value, true) });
     }
     toast('Ticket updated');
     renderNav();
