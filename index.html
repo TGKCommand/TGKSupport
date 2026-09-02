@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.46';
+const TGK_SUPPORT_VERSION = 'v1.48';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3087,6 +3087,7 @@ function renderEmailsList(){
       </div>
       ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
+      ${f.view==='archived' ? `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(220,38,38,.3)" onclick="emptyArchive()"><span class="ic ic-trash"></span>Empty Archive</button>` : ''}
       ${orders ? `<button class="btn btn-primary btn-sm" onclick="createManualOrder()"><span class="ic ic-plus"></span>New Order</button>` : ''}
     </div>
     <div id="emailsListBody">${emailTable(emailFiltered())}</div>
@@ -3412,7 +3413,15 @@ function renderOrderBuilder(e){
   return `
   <div class="linked-box" id="orderBuilder">
     <div class="panel-title" style="border:none;margin:0 0 8px">Shopify Order</div>
-    ${created ? `<div style="margin-bottom:10px"><span class="pill pill-green">Draft ${escapeHtml(String(e.shopify_draft_id))}</span> ${e.shopify_draft_url?`<a href="${e.shopify_draft_url}" target="_blank" rel="noopener" style="color:var(--teal);margin-left:6px">View / send invoice \u2197</a>`:''}</div>` : ''}
+    ${created ? `<div style="margin-bottom:10px">
+      <span class="pill pill-green">Draft ${escapeHtml(String(e.shopify_draft_id))}</span> ${e.shopify_draft_url?`<a href="${e.shopify_draft_url}" target="_blank" rel="noopener" style="color:var(--teal);margin-left:6px">View in Shopify \u2197</a>`:''}
+      ${e.shopify_order_id ? `<div style="margin-top:6px"><span class="pill pill-teal">Order ${escapeHtml(String(e.shopify_order_id))} created</span></div>` : `
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" onclick="sendShopifyInvoice('${e.id}')"><span class="ic ic-mail"></span>Send invoice</button>
+        <button class="btn btn-sm btn-teal" onclick="completeShopifyDraft('${e.id}',false)">Mark paid & complete</button>
+        <button class="btn btn-sm" onclick="completeShopifyDraft('${e.id}',true)" title="Complete now, payment pending (net terms)">Complete (net terms)</button>
+      </div>`}
+    </div>` : ''}
     <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:72px;font-weight:600">Qty</th><th style="width:28px"></th></tr></thead><tbody>
       ${lines.map((l,i)=>`<tr>
         <td style="padding:2px 4px 2px 0;position:relative">
@@ -3483,7 +3492,7 @@ async function createShopifyDraft(id){
     const result = await resp.json();
     if(!resp.ok) throw new Error(result.error||'Shopify draft failed');
     const i=S.emails.findIndex(x=>x.id===id);
-    if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
+    if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_gid=result.draft_gid; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
     renderEmailPanel(S.activeEmail);
     toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
   }catch(err){
@@ -3492,6 +3501,37 @@ async function createShopifyDraft(id){
   }
 }
 window.createShopifyDraft=createShopifyDraft;
+
+async function draftAction(id, action, extra){
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return null;
+  if(!e.shopify_draft_gid){ toast('Recreate the draft first (older drafts are missing their Shopify reference).', true); return null; }
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
+    body: JSON.stringify({ action, email_id:id, draft_gid:e.shopify_draft_gid, ...(extra||{}) })
+  });
+  const r = await resp.json();
+  if(!resp.ok) throw new Error(r.error||'Shopify action failed');
+  return r;
+}
+async function sendShopifyInvoice(id){
+  try{ const r = await draftAction(id, 'invoice'); if(r) toast('Invoice sent to the customer'); }
+  catch(err){ toast('Invoice failed: '+err.message, true); }
+}
+window.sendShopifyInvoice = sendShopifyInvoice;
+async function completeShopifyDraft(id, paymentPending){
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
+  if(!confirm(paymentPending?'Complete this draft into an order with payment PENDING (net terms)?':'Mark this draft PAID and complete it into a real order?')) return;
+  try{
+    const r = await draftAction(id, 'complete', { payment_pending: !!paymentPending });
+    if(!r) return;
+    const i=S.emails.findIndex(x=>x.id===id);
+    if(i!==-1){ S.emails[i].shopify_order_id=r.order_id; S.activeEmail=S.emails[i]; }
+    renderEmailPanel(S.activeEmail);
+    toast('Order created'+(r.order_id?(' '+r.order_id):''));
+  }catch(err){ toast('Complete failed: '+err.message, true); }
+}
+window.completeShopifyDraft = completeShopifyDraft;
 
 function renderEmailPanel(e){
   const msgs = S.emailMessages[e.id] || [];
@@ -3502,7 +3542,8 @@ function renderEmailPanel(e){
       ${e.status!=='archived'
         ? `<button class="tk-close" title="Mark unread" onclick="markEmailUnread('${e.id}')"><span class="ic ic-mail"></span></button>
            <button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
-        : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>`}
+        : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>
+           <button class="tk-close" title="Delete permanently" style="color:var(--red)" onclick="deleteEmail('${e.id}')"><span class="ic ic-trash"></span></button>`}
       <button class="tk-close" onclick="closePanel()"><span class="ic ic-x"></span></button>
     </div>
     ${renderTicketTracker(e)}
@@ -3633,6 +3674,39 @@ async function unarchiveEmail(id){
   }catch(e){ toast('Restore failed: '+e.message, true); }
 }
 window.unarchiveEmail = unarchiveEmail;
+
+async function deleteEmail(id){
+  const e=(S.emails||[]).find(x=>x.id===id);
+  const ref = e ? emailRef(e) : 'this item';
+  if(!confirm('Permanently delete ' + ref + '? This erases the conversation and all its messages, and cannot be undone.')) return;
+  try{
+    const { error } = await sb.from('emails').delete().eq('id', id);
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails.splice(i,1);
+    if(S.emailMessages) delete S.emailMessages[id];
+    toast('Permanently deleted');
+    closePanel(); renderNav();
+    if(S.page==='emails' || S.page==='orders') renderEmailsList();
+  }catch(err){ toast('Delete failed: '+err.message, true); }
+}
+window.deleteEmail = deleteEmail;
+
+async function emptyArchive(){
+  const mb = currentMailbox();
+  const archived = (S.emails||[]).filter(e=>emailInMailbox(e, mb) && e.status==='archived');
+  if(!archived.length){ toast('Archive is already empty'); return; }
+  if(!confirm('Permanently delete all ' + archived.length + ' archived ' + (mb==='orders'?'order(s)':'email(s)') + '? This cannot be undone.')) return;
+  try{
+    const ids = archived.map(e=>e.id);
+    const { error } = await sb.from('emails').delete().in('id', ids);
+    if(error) throw error;
+    S.emails = S.emails.filter(e=>!ids.includes(e.id));
+    ids.forEach(id=>{ if(S.emailMessages) delete S.emailMessages[id]; });
+    toast('Permanently deleted ' + ids.length + ' item' + (ids.length!==1?'s':''));
+    renderNav(); renderEmailsList();
+  }catch(err){ toast('Delete failed: '+err.message, true); }
+}
+window.emptyArchive = emptyArchive;
 
 async function convertEmailToTicket(id){
   const e = (S.emails||[]).find(x=>x.id===id);
