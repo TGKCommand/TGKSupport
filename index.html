@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.37';
+const TGK_SUPPORT_VERSION = 'v1.38';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3115,6 +3115,24 @@ function renderEmailThread(msgs){
   `).join('');
 }
 
+async function markEmailUnread(id){
+  const e = (S.emails||[]).find(x=>x.id===id);
+  if(!e) return;
+  try{
+    const patch = { has_unread:true, unread_count: Math.max(e.unread_count||0, 1), updated_at:new Date().toISOString() };
+    // Return it to the unread state, but never un-archive.
+    if(e.status!=='archived') patch.status = 'unread';
+    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
+    if(error) throw error;
+    const i = S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i] = data;
+    toast('Marked unread');
+    renderNav();
+    closePanel();
+    if(S.page==='emails' || S.page==='orders') renderEmailsList();
+  }catch(err){ toast('Failed to mark unread: ' + err.message, true); }
+}
+window.markEmailUnread = markEmailUnread;
+
 function renderEmailPanel(e){
   const msgs = S.emailMessages[e.id] || [];
   const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
@@ -3122,7 +3140,8 @@ function renderEmailPanel(e){
     <div class="tk-head">
       <div class="tk-head-title">${emailRef(e)} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
       ${e.status!=='archived'
-        ? `<button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
+        ? `<button class="tk-close" title="Mark unread" onclick="markEmailUnread('${e.id}')"><span class="ic ic-mail"></span></button>
+           <button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
         : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>`}
       <button class="tk-close" onclick="closePanel()"><span class="ic ic-x"></span></button>
     </div>
