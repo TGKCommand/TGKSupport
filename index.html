@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.55';
+const TGK_SUPPORT_VERSION = 'v1.56';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1734,6 +1734,19 @@ function escapeHtml(s){
   if(s==null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// Escapes text (XSS-safe), turns URLs into clickable links, then newlines into <br>.
+// Used for displaying inbound message bodies (e.g. a dealer's PO link).
+function linkifyBody(s){
+  const esc = escapeHtml(s==null?'':s);
+  const linked = esc.replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/g, (m)=>{
+    let url = m, trail='';
+    const tm = url.match(/[.,;:!?)\]]+$/);
+    if(tm){ trail = tm[0]; url = url.slice(0, -trail.length); }
+    const href = url.startsWith('www.') ? ('http://'+url) : url;
+    return '<a href="'+href+'" target="_blank" rel="noopener noreferrer" style="color:var(--teal);text-decoration:underline">'+url+'</a>'+trail;
+  });
+  return linked.replace(/\n/g,'<br>');
+}
 function timeAgo(dstr){
   if(!dstr) return '—';
   const diff = Date.now() - new Date(dstr).getTime();
@@ -2764,7 +2777,7 @@ function renderTicketPanel(t){
       </div>
       ${t.description ? (isWholesaleApp(t.description) ? renderWholesaleApp(t) : `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
-        <div id="tdesc_${t.id}">${escapeHtml(t.description).replace(/\n/g,'<br>')}</div>
+        <div id="tdesc_${t.id}">${linkifyBody(t.description)}</div>
         ${renderAttachments(t.attachments)}
         ${xlBtn('tdesc_'+t.id)}
       </div>`) : ''}
@@ -3072,7 +3085,7 @@ function renderThread(msgs, notesOnly){
   return list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div id="tmsg_${m.id}">${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
+      <div id="tmsg_${m.id}">${linkifyBody(m.body)}</div>
       ${renderAttachments(m.attachments)}
       ${!m.is_internal_note && m.sender_type==='customer' ? xlBtn('tmsg_'+m.id) : ''}
     </div>
@@ -3274,7 +3287,7 @@ function renderEmailThread(msgs){
   return msgs.map(m=>`
     <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div id="emsg_${m.id}">${escapeHtml(m.body||'').replace(/\n/g,'<br>')}</div>
+      <div id="emsg_${m.id}">${linkifyBody(m.body||'')}</div>
       ${renderAttachments(m.attachments)}
       ${m.direction!=='outbound' ? xlBtn('emsg_'+m.id) : ''}
     </div>
