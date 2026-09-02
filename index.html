@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.48';
+const TGK_SUPPORT_VERSION = 'v1.49';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3238,7 +3238,7 @@ window.markEmailUnread = markEmailUnread;
 function dealerWholesalePct(id){ if(!id) return null; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d && d.discount_pct!=null ? Math.round(d.discount_pct*1000)/10 : null; }
 function orderLinesFor(e){
   if(window._orderLinesFor !== e.id){
-    window._orderLines = Array.isArray(e.order_line_items) ? e.order_line_items.map(l=>({sku:l.sku||'',qty:l.qty||1,desc:l.desc||''})) : [];
+    window._orderLines = Array.isArray(e.order_line_items) ? e.order_line_items.map(l=>({sku:l.sku||'',qty:l.qty||1,desc:l.desc||'',price:(l.price!=null?l.price:'')})) : [];
     window._orderLinesFor = e.id;
   }
   if(!window._orderLines.length) window._orderLines = [{sku:'',qty:1}];
@@ -3348,8 +3348,9 @@ window.partTypeahead = partTypeahead;
 function pickPart(i, ri){
   const r = (window._partResults[i]||[])[ri]; if(!r) return;
   const lines = window._orderLines||[];
-  if(lines[i]){ lines[i].sku = partSku(r); lines[i].desc = partDesc(r); }
+  if(lines[i]){ lines[i].sku = partSku(r); lines[i].desc = partDesc(r); const p=partPrice(r); if(p!=null) lines[i].price = p; }
   const box = document.getElementById('orderLineResults_'+i); if(box){ box.style.display='none'; box.innerHTML=''; }
+  clearOrderTotals();
   rerenderOrderBuilder();
 }
 window.pickPart = pickPart;
@@ -3357,7 +3358,7 @@ window.pickPart = pickPart;
 function clearOrderTotals(){ if(window._orderTotals && S.activeEmail){ delete window._orderTotals[S.activeEmail.id]; } }
 function orderDraftPayload(id){
   const e=(S.emails||[]).find(x=>x.id===id); if(!e) return null;
-  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
+  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
   let shipping=null;
   if(e.is_dropship){ shipping={ name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' }; }
   return {
@@ -3422,7 +3423,7 @@ function renderOrderBuilder(e){
         <button class="btn btn-sm" onclick="completeShopifyDraft('${e.id}',true)" title="Complete now, payment pending (net terms)">Complete (net terms)</button>
       </div>`}
     </div>` : ''}
-    <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:72px;font-weight:600">Qty</th><th style="width:28px"></th></tr></thead><tbody>
+    <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:56px;font-weight:600">Qty</th><th style="width:88px;font-weight:600">Unit $</th><th style="width:28px"></th></tr></thead><tbody>
       ${lines.map((l,i)=>`<tr>
         <td style="padding:2px 4px 2px 0;position:relative">
           <input class="form-input" style="padding:6px" id="orderLineSku_${i}" value="${escapeHtml(l.sku||'')}" placeholder="Part # / SKU" autocomplete="off"
@@ -3432,6 +3433,7 @@ function renderOrderBuilder(e){
           ${l.desc?`<div style="font-size:var(--t-xs);color:var(--text3);margin-top:2px">${escapeHtml(l.desc)}</div>`:''}
         </td>
         <td style="padding:2px;vertical-align:top"><input class="form-input" type="number" min="1" style="padding:6px" value="${l.qty||1}" onchange="updateOrderLine(${i},'qty',this.value)"></td>
+        <td style="padding:2px;vertical-align:top"><input class="form-input" type="number" min="0" step="0.01" style="padding:6px" value="${l.price!=null&&l.price!==''?l.price:''}" placeholder="Shopify" title="Leave blank to use the live Shopify price; enter a price to sell at your own price" onchange="updateOrderLine(${i},'price',this.value)"></td>
         <td style="padding:2px;text-align:center;vertical-align:top">${lines.length>1?`<button class="btn btn-sm" title="Remove" onclick="removeOrderLine(${i})"><span class="ic ic-x"></span></button>`:''}</td>
       </tr>`).join('')}
     </tbody></table>
@@ -3440,7 +3442,7 @@ function renderOrderBuilder(e){
       <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value,true); clearOrderTotals()"></div>
       <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
     </div>
-    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Prices are pulled from Shopify when the draft is created. The dealer % is applied as the discount; the billing code is a label for your ERP tracking and does not change the amount.</div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Leave <strong>Unit $</strong> blank to use the live Shopify price, or enter your own price to sell a part at a custom rate (works for any part number). The dealer % applies to the whole order; the billing code is an ERP-tracking label and does not change the amount.</div>
     ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
       <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
@@ -3457,7 +3459,7 @@ window.addOrderLine=addOrderLine; window.removeOrderLine=removeOrderLine; window
 
 async function saveOrderLines(id){
   try{
-    const lines = (window._orderLines||[]).filter(l=>l.sku && l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), desc:l.desc||''}));
+    const lines = (window._orderLines||[]).filter(l=>l.sku && l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), desc:l.desc||'', price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null}));
     const { data, error } = await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id).select().single();
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data; if(S.activeEmail&&S.activeEmail.id===id) S.activeEmail=data;
@@ -3468,7 +3470,7 @@ window.saveOrderLines=saveOrderLines;
 
 async function createShopifyDraft(id){
   const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
+  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
   if(!lines.length){ toast('Add at least one line item', true); return; }
   const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
   let shipping = null;
