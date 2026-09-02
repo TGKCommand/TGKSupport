@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.56';
+const TGK_SUPPORT_VERSION = 'v1.58';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -708,7 +708,7 @@ async function loadAll(){
       fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
-      sb.from('dealers').select('id,name,email,discount_pct').then(r=>r.data||[]),
+      sb.from('dealers').select('id,name,email,discount_pct,po_code_prefix').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
@@ -1735,15 +1735,19 @@ function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 // Escapes text (XSS-safe), turns URLs into clickable links, then newlines into <br>.
-// Used for displaying inbound message bodies (e.g. a dealer's PO link).
+// Handles bare URLs and the plain-text email convention of wrapping them in
+// angle brackets, e.g. <http://example.com/very/long/link>.
 function linkifyBody(s){
-  const esc = escapeHtml(s==null?'':s);
+  let esc = escapeHtml(s==null?'':s);
+  // Unwrap angle-bracketed URLs: &lt;http...&gt; -> http... (escaped form).
+  esc = esc.replace(/&lt;(https?:\/\/[^\s]+?)&gt;/gi, '$1');
   const linked = esc.replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/g, (m)=>{
     let url = m, trail='';
-    const tm = url.match(/[.,;:!?)\]]+$/);
+    const tm = url.match(/(&gt;|&lt;|[.,;:!?)\]>]+)$/);
     if(tm){ trail = tm[0]; url = url.slice(0, -trail.length); }
+    if(!url) return m;
     const href = url.startsWith('www.') ? ('http://'+url) : url;
-    return '<a href="'+href+'" target="_blank" rel="noopener noreferrer" style="color:var(--teal);text-decoration:underline">'+url+'</a>'+trail;
+    return '<a href="'+href+'" target="_blank" rel="noopener noreferrer" style="color:var(--teal);text-decoration:underline;word-break:break-all">'+url+'</a>'+trail;
   });
   return linked.replace(/\n/g,'<br>');
 }
@@ -3326,6 +3330,8 @@ function orderLinesFor(e){
   return window._orderLines;
 }
 function deriveDealerPrefix(dealerId){
+  const d=(S.dealers||[]).find(x=>String(x.id)===String(dealerId));
+  if(d && (d.po_code_prefix||'').trim()) return String(d.po_code_prefix).replace(/[^a-zA-Z0-9]/g,'').toUpperCase();
   const nm = dealerName(dealerId) || '';
   const first = nm.trim().split(/\s+/)[0] || '';
   return first.replace(/[^a-zA-Z0-9]/g,'').toUpperCase().slice(0,4);
@@ -3448,7 +3454,9 @@ function orderDraftPayload(id){
     line_items: lines,
     discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
     discount_code: e.order_discount_code||null,
-    shipping: shipping
+    shipping: shipping,
+    shipping_method: e.shipping_method||null,
+    shipping_cost: (e.shipping_cost!=null && String(e.shipping_cost).trim()!=='') ? Number(e.shipping_cost) : null
   };
 }
 function renderTotalsStrip(t){
@@ -3523,6 +3531,16 @@ function renderOrderBuilder(e){
       <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value,true); clearOrderTotals()"></div>
       <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
     </div>
+    <div class="form-row cols-2" style="margin-top:6px">
+      <div class="form-group"><label class="form-label">Shipping method</label>
+        <input class="form-input" list="shipMethodsList" value="${escapeHtml(e.shipping_method||'')}" placeholder="e.g. Ground" onchange="updateEmailField('${e.id}','shipping_method',this.value,true); clearOrderTotals()">
+        <datalist id="shipMethodsList"><option value="Ground"></option><option value="2-Day"></option><option value="Overnight"></option><option value="Freight / LTL"></option><option value="Free Shipping"></option><option value="Local Pickup"></option></datalist>
+      </div>
+      <div class="form-group"><label class="form-label">Shipping cost ($)</label>
+        <input class="form-input" type="number" min="0" step="0.01" value="${e.shipping_cost!=null&&e.shipping_cost!==''?e.shipping_cost:''}" placeholder="0.00" onchange="updateEmailField('${e.id}','shipping_cost',this.value,true); clearOrderTotals()">
+      </div>
+    </div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 8px">A shipping method is required for the order to import into ShipStation. For a dealer order without customer checkout, also set a ship-to address above (Drop-ship / customer order).</div>
     <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Leave <strong>Unit $</strong> blank to use the live Shopify price, or enter your own price to sell a part at a custom rate (works for any part number). The dealer % applies to the whole order; the billing code is an ERP-tracking label and does not change the amount.</div>
     ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
