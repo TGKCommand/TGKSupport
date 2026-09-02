@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.45';
+const TGK_SUPPORT_VERSION = 'v1.46';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2718,8 +2718,9 @@ function renderTicketPanel(t){
       </div>
       ${t.description ? (isWholesaleApp(t.description) ? renderWholesaleApp(t) : `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
-        ${escapeHtml(t.description).replace(/\n/g,'<br>')}
+        <div id="tdesc_${t.id}">${escapeHtml(t.description).replace(/\n/g,'<br>')}</div>
         ${renderAttachments(t.attachments)}
+        ${xlBtn('tdesc_'+t.id)}
       </div>`) : ''}
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Status</label>
@@ -2970,14 +2971,48 @@ function renderAttachments(attachments){
   </div>`;
 }
 
+/* Lightweight translator: sends any block of text to the anthropic-proxy and
+   shows the English translation inline. Reused by ticket messages, email
+   messages, and the original submission. */
+async function aiTranslate(text, targetLang){
+  const prompt = 'Translate the following text into ' + (targetLang||'English') + '. Auto-detect the source language. Output ONLY the translation itself with no preamble, notes, or quotation marks.\n\n---\n' + text;
+  const resp = await fetch(`${SUPABASE_URL}/functions/v1/anthropic-proxy`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}` },
+    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1500, messages:[{ role:'user', content: prompt }] })
+  });
+  const data = await resp.json();
+  if(data && data.error) throw new Error(data.error.message || (data.error.type==='proxy_not_configured' ? 'AI proxy not configured (add ANTHROPIC_API_KEY to the anthropic-proxy edge function secrets).' : 'AI error'));
+  const out = (data && data.content && data.content[0] && data.content[0].text) ? data.content[0].text : '';
+  return out.trim() || '(no translation returned)';
+}
+async function translateEl(bodyId){
+  const el = document.getElementById(bodyId); if(!el) return;
+  const existing = document.getElementById(bodyId+'_xl');
+  if(existing){ existing.remove(); return; } // toggle off
+  const text = (el.innerText||'').trim(); if(!text) return;
+  const holder = document.createElement('div');
+  holder.id = bodyId+'_xl';
+  holder.style.cssText = 'margin-top:6px;padding:8px 10px;border-left:2px solid var(--teal);background:var(--teal-dim);border-radius:var(--r-sm);font-size:var(--t-sm)';
+  holder.innerHTML = '<span style="color:var(--text3)">Translating\u2026</span>';
+  el.parentNode.insertBefore(holder, el.nextSibling);
+  try{
+    const t = await aiTranslate(text, 'English');
+    holder.innerHTML = '<div style="font-size:var(--t-xs);color:var(--teal);font-weight:700;letter-spacing:.06em;margin-bottom:3px">TRANSLATION (EN)</div>' + escapeHtml(t).replace(/\n/g,'<br>');
+  }catch(e){ holder.innerHTML = '<span style="color:var(--red)">Translation failed: ' + escapeHtml(e.message) + '</span>'; }
+}
+window.translateEl = translateEl;
+function xlBtn(bodyId){ return `<button class="btn btn-sm" style="margin-top:6px" onclick="translateEl('${bodyId}')">Translate</button>`; }
+
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
   return list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div>${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
+      <div id="tmsg_${m.id}">${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
       ${renderAttachments(m.attachments)}
+      ${!m.is_internal_note && m.sender_type==='customer' ? xlBtn('tmsg_'+m.id) : ''}
     </div>
   `).join('');
 }
@@ -3170,8 +3205,9 @@ function renderEmailThread(msgs){
   return msgs.map(m=>`
     <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div>${escapeHtml(m.body||'').replace(/\n/g,'<br>')}</div>
+      <div id="emsg_${m.id}">${escapeHtml(m.body||'').replace(/\n/g,'<br>')}</div>
       ${renderAttachments(m.attachments)}
+      ${m.direction!=='outbound' ? xlBtn('emsg_'+m.id) : ''}
     </div>
   `).join('');
 }
