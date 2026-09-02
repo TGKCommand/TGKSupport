@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.62';
+const TGK_SUPPORT_VERSION = 'v1.63';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3593,10 +3593,14 @@ function renderOrderBuilder(e){
     <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 8px">A shipping method is required for the order to import into ShipStation. For a dealer order without customer checkout, also set a ship-to address above (Drop-ship / customer order).</div>
     <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Leave <strong>Unit $</strong> blank to use the live Shopify price, or enter your own price to sell a part at a custom rate (works for any part number). The dealer % applies to the whole order; the billing code is an ERP-tracking label and does not change the amount.</div>
     ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
       <button class="btn btn-sm btn-teal" id="previewBtn" onclick="previewOrderTotals('${e.id}')">Preview total</button>
-      <button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">${created?'Recreate Draft':'Create Draft in Shopify'}</button>
+      ${created
+        ? `<button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">Recreate Draft</button>`
+        : `<button class="btn btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">Save draft</button>
+           <button class="btn btn-sm btn-teal" onclick="createAndInvoice('${e.id}')">Create &amp; Send Invoice</button>
+           <button class="btn btn-primary btn-sm" onclick="createAndMarkPaid('${e.id}')">Create &amp; Mark Paid</button>`}
     </div>
   </div>`;
 }
@@ -3646,9 +3650,11 @@ async function createShopifyDraft(id){
     if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_gid=result.draft_gid; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
     renderEmailPanel(S.activeEmail);
     toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
+    return result;
   }catch(err){
     toast('Draft failed: '+err.message, true);
     if(btn){ btn.disabled=false; btn.textContent='Create Draft in Shopify'; }
+    return null;
   }
 }
 window.createShopifyDraft=createShopifyDraft;
@@ -3670,19 +3676,47 @@ async function sendShopifyInvoice(id){
   catch(err){ toast('Invoice failed: '+err.message, true); }
 }
 window.sendShopifyInvoice = sendShopifyInvoice;
-async function completeShopifyDraft(id, paymentPending){
+async function completeShopifyDraft(id, paymentPending, skipConfirm){
   const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  if(!confirm(paymentPending?'Complete this draft into an order with payment PENDING (net terms)?':'Mark this draft PAID and complete it into a real order?')) return;
+  if(!skipConfirm && !confirm(paymentPending?'Complete this draft into an order with payment PENDING (net terms)?':'Mark this draft PAID and complete it into a real order?')) return;
   try{
     const r = await draftAction(id, 'complete', { payment_pending: !!paymentPending });
     if(!r) return;
     const i=S.emails.findIndex(x=>x.id===id);
     if(i!==-1){ S.emails[i].shopify_order_id=r.order_id; S.activeEmail=S.emails[i]; }
     renderEmailPanel(S.activeEmail);
+    if(S.activeEmail && S.activeEmail.shopify_order_id) refreshOrderFulfillment(id);
     toast('Order created'+(r.order_id?(' '+r.order_id):''));
   }catch(err){ toast('Complete failed: '+err.message, true); }
 }
 window.completeShopifyDraft = completeShopifyDraft;
+
+// Dealer flow: create the draft, then complete it as PAID in one step.
+async function createAndMarkPaid(id){
+  if(window._orderChainBusy) return;
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
+  const hasShip = !!(e.is_dropship && (e.ship_address1 || e.ship_city));
+  if(!hasShip && !confirm('This order has no ship-to address, so it may not import into ShipStation. Create and mark paid anyway?\n\nTip: enable "Drop-ship / customer order" above to add an address.')) return;
+  window._orderChainBusy = true;
+  try{
+    const r = await createShopifyDraft(id);
+    if(!r) return;
+    await completeShopifyDraft(id, false, true);
+  } finally { window._orderChainBusy = false; }
+}
+window.createAndMarkPaid = createAndMarkPaid;
+
+// Customer flow: create the draft, then send the Shopify invoice for them to pay.
+async function createAndInvoice(id){
+  if(window._orderChainBusy) return;
+  window._orderChainBusy = true;
+  try{
+    const r = await createShopifyDraft(id);
+    if(!r) return;
+    await sendShopifyInvoice(id);
+  } finally { window._orderChainBusy = false; }
+}
+window.createAndInvoice = createAndInvoice;
 
 function renderEmailPanel(e){
   const msgs = S.emailMessages[e.id] || [];
