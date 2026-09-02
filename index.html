@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.44';
+const TGK_SUPPORT_VERSION = 'v1.45';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3317,6 +3317,58 @@ function pickPart(i, ri){
 }
 window.pickPart = pickPart;
 
+function clearOrderTotals(){ if(window._orderTotals && S.activeEmail){ delete window._orderTotals[S.activeEmail.id]; } }
+function orderDraftPayload(id){
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return null;
+  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
+  let shipping=null;
+  if(e.is_dropship){ shipping={ name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' }; }
+  return {
+    email_id:id,
+    dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
+    line_items: lines,
+    discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
+    discount_code: e.order_discount_code||null,
+    shipping: shipping
+  };
+}
+function renderTotalsStrip(t){
+  if(!t) return '';
+  const cur = t.currency||'USD';
+  const fmt = (v)=> v==null?'\u2014':('$'+Number(v).toFixed(2));
+  const row=(l,v,bold)=>`<div style="display:flex;justify-content:space-between;font-size:var(--t-sm);margin:1px 0;${bold?'font-weight:700;color:var(--text)':'color:var(--text2)'}"><span>${l}</span><span style="font-family:var(--mono)">${escapeHtml(fmt(v))}</span></div>`;
+  return `<div class="linked-box" style="background:var(--bg2);margin-top:8px">
+    ${row('Subtotal', t.subtotal)}
+    ${(t.discount && Number(t.discount)>0) ? row('Discount', '-'+Number(t.discount).toFixed(2).slice(0)) : ''}
+    ${(t.tax && Number(t.tax)>0) ? row('Tax', t.tax) : ''}
+    ${row('Total ('+cur+')', t.total, true)}
+    <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Live from Shopify \u00b7 preview only, nothing created yet</div>
+  </div>`;
+}
+async function previewOrderTotals(id){
+  const payload = orderDraftPayload(id);
+  if(!payload) return;
+  if(!payload.line_items.length){ toast('Add at least one line item to preview', true); return; }
+  const btn=document.getElementById('previewBtn'); if(btn){ btn.disabled=true; btn.textContent='Calculating...'; }
+  try{
+    payload.calculate = true;
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify(payload)
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error||'Calculate failed');
+    window._orderTotals = window._orderTotals || {};
+    window._orderTotals[id] = result;
+    rerenderOrderBuilder();
+  }catch(err){
+    toast('Preview failed: '+err.message, true);
+    const b=document.getElementById('previewBtn'); if(b){ b.disabled=false; b.textContent='Preview total'; }
+  }
+}
+window.previewOrderTotals = previewOrderTotals;
+
 function renderOrderBuilder(e){
   const lines = orderLinesFor(e);
   const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
@@ -3340,20 +3392,22 @@ function renderOrderBuilder(e){
     </tbody></table>
     <button class="btn btn-sm" onclick="addOrderLine()" style="margin-top:6px"><span class="ic ic-plus"></span>Add line</button>
     <div class="form-row cols-2" style="margin-top:10px">
-      <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value)"></div>
+      <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value,true); clearOrderTotals()"></div>
       <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
     </div>
     <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Prices are pulled from Shopify when the draft is created. The dealer % is applied as the discount; the billing code is a label for your ERP tracking and does not change the amount.</div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
+    ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
       <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
+      <button class="btn btn-sm btn-teal" id="previewBtn" onclick="previewOrderTotals('${e.id}')">Preview total</button>
       <button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">${created?'Recreate Draft':'Create Draft in Shopify'}</button>
     </div>
   </div>`;
 }
 function rerenderOrderBuilder(){ const el=document.getElementById('orderBuilder'); if(el && S.activeEmail) el.outerHTML = renderOrderBuilder(S.activeEmail); }
-function addOrderLine(){ orderLinesFor(S.activeEmail).push({sku:'',qty:1,desc:''}); rerenderOrderBuilder(); }
-function removeOrderLine(i){ const l=orderLinesFor(S.activeEmail); l.splice(i,1); rerenderOrderBuilder(); }
-function updateOrderLine(i,field,val){ const l=orderLinesFor(S.activeEmail)[i]; if(!l) return; l[field] = field==='qty' ? Math.max(1,parseInt(val)||1) : val; }
+function addOrderLine(){ clearOrderTotals(); orderLinesFor(S.activeEmail).push({sku:'',qty:1,desc:''}); rerenderOrderBuilder(); }
+function removeOrderLine(i){ clearOrderTotals(); const l=orderLinesFor(S.activeEmail); l.splice(i,1); rerenderOrderBuilder(); }
+function updateOrderLine(i,field,val){ clearOrderTotals(); const l=orderLinesFor(S.activeEmail)[i]; if(!l) return; l[field] = field==='qty' ? Math.max(1,parseInt(val)||1) : val; }
 window.addOrderLine=addOrderLine; window.removeOrderLine=removeOrderLine; window.updateOrderLine=updateOrderLine;
 
 async function saveOrderLines(id){
