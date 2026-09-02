@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.43';
+const TGK_SUPPORT_VERSION = 'v1.44';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3024,14 +3024,14 @@ function emailRef(e){
   const n = (e.display_number!=null ? e.display_number : e.email_number) || 0;
   return (e.mailbox==='orders' ? 'ORD-' : 'E-') + String(n).padStart(4,'0');
 }
-async function updateEmailField(id, field, value){
+async function updateEmailField(id, field, value, quiet){
   if(value==='') value = null;
   try{
     const { data, error } = await sb.from('emails').update({ [field]: value, updated_at:new Date().toISOString() }).eq('id', id).select().single();
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
     if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
-    toast('Saved');
+    if(!quiet) toast('Saved');
   }catch(e){ toast('Save failed: '+e.message, true); }
 }
 window.updateEmailField = updateEmailField;
@@ -3207,6 +3207,72 @@ function orderLinesFor(e){
   if(!window._orderLines.length) window._orderLines = [{sku:'',qty:1}];
   return window._orderLines;
 }
+function deriveDealerPrefix(dealerId){
+  const nm = dealerName(dealerId) || '';
+  const first = nm.trim().split(/\s+/)[0] || '';
+  return first.replace(/[^a-zA-Z0-9]/g,'').toUpperCase().slice(0,4);
+}
+function suggestOrderCode(e){
+  const px = deriveDealerPrefix(e.dealer_id);
+  const po = (e.po_number||'').trim();
+  if(!px || !po) return '';
+  return px + '-' + po;
+}
+async function setOrderPO(id, val){
+  const e=(S.emails||[]).find(x=>x.id===id);
+  const patch = { po_number: (val||'').trim() || null, updated_at:new Date().toISOString() };
+  // Auto-suggest the billing code from dealer prefix + PO, only if the code is empty.
+  if(e && !(e.order_discount_code||'').trim()){
+    const sug = suggestOrderCode({ ...e, po_number: val });
+    if(sug) patch.order_discount_code = sug;
+  }
+  try{
+    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
+    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderOrderBuilder(); }
+  }catch(err){ toast('Save failed: '+err.message, true); }
+}
+window.setOrderPO = setOrderPO;
+
+function renderShipTo(e){
+  const on = !!e.is_dropship;
+  const q = (id,field,ph)=>`<input class="form-input" value="${escapeHtml(e[field]||(field==='ship_country'?'US':''))}" ${ph?`placeholder="${ph}"`:''} onchange="updateEmailField('${e.id}','${field}',this.value,true)">`;
+  return `<div class="linked-box" id="shipToBox">
+    <label class="checkbox-row" style="cursor:pointer;margin:0">
+      <input type="checkbox" ${on?'checked':''} onchange="toggleDropship('${e.id}',this.checked)">
+      <span style="font-weight:600">Drop-ship / customer order (enter ship-to address)</span>
+    </label>
+    ${on?`<div style="margin-top:10px">
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Ship-to name</label>${q(e.id,'ship_name')}</div>
+        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}</div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Phone</label>${q(e.id,'ship_phone')}</div>
+        <div class="form-group"><label class="form-label">Address 1</label>${q(e.id,'ship_address1')}</div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="form-group"><label class="form-label">Address 2 (optional)</label>${q(e.id,'ship_address2')}</div>
+        <div class="form-group"><label class="form-label">City</label>${q(e.id,'ship_city')}</div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="form-group"><label class="form-label">State / Prov</label>${q(e.id,'ship_province','CA')}</div>
+        <div class="form-group"><label class="form-label">ZIP</label>${q(e.id,'ship_zip')}</div>
+        <div class="form-group"><label class="form-label">Country</label>${q(e.id,'ship_country','US')}</div>
+      </div>
+      <div style="font-size:var(--t-xs);color:var(--text3)">${e.dealer_id?'Bill-to stays the dealer; this address is where it ships.':'No dealer selected \u2014 this person becomes the customer on the order.'}</div>
+    </div>`:''}
+  </div>`;
+}
+function toggleDropship(id, on){
+  updateEmailField(id,'is_dropship',on);
+  const e=(S.emails||[]).find(x=>x.id===id); if(e){ e.is_dropship=on; }
+  if(S.activeEmail && S.activeEmail.id===id) S.activeEmail.is_dropship=on;
+  const b=document.getElementById('shipToBox'); if(b && S.activeEmail) b.outerHTML=renderShipTo(S.activeEmail);
+}
+window.toggleDropship=toggleDropship;
+
 function partSku(r){ return (r.use_new_sku && r.new_sku && String(r.new_sku).trim()) ? String(r.new_sku).trim() : (r.pn||''); }
 function partDesc(r){ return r.description || r.name || r.title || r.part_name || r.product_title || r.desc || ''; }
 function partPrice(r){ const v = (r.msrp!=null?r.msrp:(r.price!=null?r.price:(r.retail_price!=null?r.retail_price:r.unit_price))); return v!=null ? v : null; }
@@ -3275,9 +3341,9 @@ function renderOrderBuilder(e){
     <button class="btn btn-sm" onclick="addOrderLine()" style="margin-top:6px"><span class="ic ic-plus"></span>Add line</button>
     <div class="form-row cols-2" style="margin-top:10px">
       <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value)"></div>
-      <div class="form-group"><label class="form-label">Discount code (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="Shopify code" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
+      <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
     </div>
-    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Prices are pulled from Shopify when the draft is created. The dealer % is applied as an order discount.</div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Prices are pulled from Shopify when the draft is created. The dealer % is applied as the discount; the billing code is a label for your ERP tracking and does not change the amount.</div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
       <button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">${created?'Recreate Draft':'Create Draft in Shopify'}</button>
@@ -3306,6 +3372,10 @@ async function createShopifyDraft(id){
   const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
   if(!lines.length){ toast('Add at least one line item', true); return; }
   const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
+  let shipping = null;
+  if(e.is_dropship){
+    shipping = { name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' };
+  }
   try{
     await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id);
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
@@ -3316,7 +3386,8 @@ async function createShopifyDraft(id){
         dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
         line_items: lines,
         discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
-        discount_code: e.order_discount_code||null
+        discount_code: e.order_discount_code||null,
+        shipping: shipping
       })
     });
     const result = await resp.json();
@@ -3372,7 +3443,7 @@ function renderEmailPanel(e){
           </div>
           <div class="form-group">
             <label class="form-label">PO Number (optional)</label>
-            <input class="form-input" value="${escapeHtml(e.po_number||'')}" placeholder="Dealer PO #" onchange="updateEmailField('${e.id}','po_number',this.value)">
+            <input class="form-input" value="${escapeHtml(e.po_number||'')}" placeholder="Dealer PO #" onchange="setOrderPO('${e.id}',this.value)">
           </div>
         </div>
         ${e.dealer_id ? `<div style="margin-top:8px;font-size:var(--t-xs);color:var(--text3)">${dealerWholesalePct(e.dealer_id)!=null?('Standard dealer rate: <strong>'+dealerWholesalePct(e.dealer_id)+'%</strong> (from ERP) \u2014 auto-fills the discount below, still editable per order'):('No standard rate set for this dealer in the ERP \u2014 set the discount manually below')}</div>` : ''}
@@ -3383,6 +3454,7 @@ function renderEmailPanel(e){
           ? `<button class="btn btn-sm" onclick="setOrderComplete('${e.id}',false)"><span class="ic ic-refresh"></span>Reopen</button>`
           : `<button class="btn btn-sm btn-teal" onclick="setOrderComplete('${e.id}',true)"><span class="ic ic-check"></span>Mark Complete</button>`}
       </div>` : ''}
+      ${e.mailbox==='orders' ? renderShipTo(e) : ''}
       ${e.mailbox==='orders' ? renderOrderBuilder(e) : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
