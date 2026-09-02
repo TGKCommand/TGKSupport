@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.39';
+const TGK_SUPPORT_VERSION = 'v1.41';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -706,7 +706,7 @@ async function loadAll(){
       fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
-      sb.from('dealers').select('id,name,email').then(r=>r.data||[]),
+      sb.from('dealers').select('id,name,email,wholesale_pct').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
@@ -3052,6 +3052,7 @@ function renderEmailsList(){
       </div>
       ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
+      ${orders ? `<button class="btn btn-primary btn-sm" onclick="createManualOrder()"><span class="ic ic-plus"></span>New Order</button>` : ''}
     </div>
     <div id="emailsListBody">${emailTable(emailFiltered())}</div>
   `;
@@ -3078,6 +3079,42 @@ function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); 
 window.renderEmailsBody = renderEmailsBody;
 
 function dealerName(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.name||d.email||'') : ''; }
+function dealerEmail(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.email||'') : ''; }
+async function setOrderDealer(id, dealerId){
+  try{
+    const e=(S.emails||[]).find(x=>x.id===id);
+    const patch = { dealer_id: dealerId||null, updated_at:new Date().toISOString() };
+    // Manual order with no contact yet -> adopt the dealer's email so the draft
+    // attaches to their Shopify customer and replies have a recipient.
+    if(dealerId && (!e || !e.customer_email)){
+      const dEmail = dealerEmail(dealerId);
+      if(dEmail) patch.customer_email = dEmail;
+    }
+    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
+    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderOrderBuilder(); }
+    toast('Saved');
+  }catch(e){ toast('Save failed: '+e.message, true); }
+}
+window.setOrderDealer = setOrderDealer;
+
+async function createManualOrder(){
+  try{
+    const orders = (S.emails||[]).filter(e=>e.mailbox==='orders');
+    const nextNum = orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
+    const { data, error } = await sb.from('emails').insert({
+      mailbox:'orders', subject:'Manual order', status:'read', has_unread:false, unread_count:0,
+      display_number: nextNum, last_message_at: new Date().toISOString()
+    }).select().single();
+    if(error) throw error;
+    S.emails.unshift(data);
+    renderNav();
+    if(S.page==='orders') renderEmailsList();
+    openEmail(data.id);
+  }catch(e){ toast('Could not create order: '+e.message, true); }
+}
+window.createManualOrder = createManualOrder;
 function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=>x.email===email); return (m&&(m.display_name||m.email))||email; }
 function emailListOrderMeta(e){
   const parts=[];
@@ -3112,6 +3149,7 @@ async function openEmail(id){
   S.activeEmail = e;
   S.activeTicket = null;
   pendingMsgAttachments = [];
+  window._orderLinesFor = null;
   await loadEmailMessages(id);
   renderEmailPanel(e);
   document.getElementById('tk-overlay').classList.add('open');
@@ -3156,6 +3194,94 @@ async function markEmailUnread(id){
 }
 window.markEmailUnread = markEmailUnread;
 
+/* ---- Shopify order builder (orders tab) --------------------------------
+   Lets staff turn a dealer PO email into a Shopify draft order. Pricing is
+   pulled live from Shopify by the create-draft-order function -- staff enter
+   SKU + qty only. The dealer's wholesale % applies as an order discount. */
+function dealerWholesalePct(id){ if(!id) return null; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d && d.wholesale_pct!=null ? d.wholesale_pct : null; }
+function orderLinesFor(e){
+  if(window._orderLinesFor !== e.id){
+    window._orderLines = Array.isArray(e.order_line_items) ? e.order_line_items.map(l=>({sku:l.sku||'',qty:l.qty||1})) : [];
+    window._orderLinesFor = e.id;
+  }
+  if(!window._orderLines.length) window._orderLines = [{sku:'',qty:1}];
+  return window._orderLines;
+}
+function renderOrderBuilder(e){
+  const lines = orderLinesFor(e);
+  const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
+  const created = e.shopify_draft_id;
+  return `
+  <div class="linked-box" id="orderBuilder">
+    <div class="panel-title" style="border:none;margin:0 0 8px">Shopify Order</div>
+    ${created ? `<div style="margin-bottom:10px"><span class="pill pill-green">Draft ${escapeHtml(String(e.shopify_draft_id))}</span> ${e.shopify_draft_url?`<a href="${e.shopify_draft_url}" target="_blank" rel="noopener" style="color:var(--teal);margin-left:6px">View / send invoice \u2197</a>`:''}</div>` : ''}
+    <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:72px;font-weight:600">Qty</th><th style="width:28px"></th></tr></thead><tbody>
+      ${lines.map((l,i)=>`<tr>
+        <td style="padding:2px 4px 2px 0"><input class="form-input" style="padding:6px" value="${escapeHtml(l.sku||'')}" placeholder="Part # / SKU" onchange="updateOrderLine(${i},'sku',this.value)"></td>
+        <td style="padding:2px"><input class="form-input" type="number" min="1" style="padding:6px" value="${l.qty||1}" onchange="updateOrderLine(${i},'qty',this.value)"></td>
+        <td style="padding:2px;text-align:center">${lines.length>1?`<button class="btn btn-sm" title="Remove" onclick="removeOrderLine(${i})"><span class="ic ic-x"></span></button>`:''}</td>
+      </tr>`).join('')}
+    </tbody></table>
+    <button class="btn btn-sm" onclick="addOrderLine()" style="margin-top:6px"><span class="ic ic-plus"></span>Add line</button>
+    <div class="form-row cols-2" style="margin-top:10px">
+      <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value)"></div>
+      <div class="form-group"><label class="form-label">Discount code (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="Shopify code" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
+    </div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Prices are pulled from Shopify when the draft is created. The dealer % is applied as an order discount.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
+      <button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">${created?'Recreate Draft':'Create Draft in Shopify'}</button>
+    </div>
+  </div>`;
+}
+function rerenderOrderBuilder(){ const el=document.getElementById('orderBuilder'); if(el && S.activeEmail) el.outerHTML = renderOrderBuilder(S.activeEmail); }
+function addOrderLine(){ orderLinesFor(S.activeEmail).push({sku:'',qty:1}); rerenderOrderBuilder(); }
+function removeOrderLine(i){ const l=orderLinesFor(S.activeEmail); l.splice(i,1); rerenderOrderBuilder(); }
+function updateOrderLine(i,field,val){ const l=orderLinesFor(S.activeEmail)[i]; if(!l) return; l[field] = field==='qty' ? Math.max(1,parseInt(val)||1) : val; }
+window.addOrderLine=addOrderLine; window.removeOrderLine=removeOrderLine; window.updateOrderLine=updateOrderLine;
+
+async function saveOrderLines(id){
+  try{
+    const lines = (window._orderLines||[]).filter(l=>l.sku && l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
+    const { data, error } = await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id).select().single();
+    if(error) throw error;
+    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data; if(S.activeEmail&&S.activeEmail.id===id) S.activeEmail=data;
+    toast('Order lines saved');
+  }catch(e){ toast('Save failed: '+e.message, true); }
+}
+window.saveOrderLines=saveOrderLines;
+
+async function createShopifyDraft(id){
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
+  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1)}));
+  if(!lines.length){ toast('Add at least one line item', true); return; }
+  const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
+  try{
+    await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id);
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({
+        email_id:id,
+        dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
+        line_items: lines,
+        discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
+        discount_code: e.order_discount_code||null
+      })
+    });
+    const result = await resp.json();
+    if(!resp.ok) throw new Error(result.error||'Shopify draft failed');
+    const i=S.emails.findIndex(x=>x.id===id);
+    if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
+    renderEmailPanel(S.activeEmail);
+    toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
+  }catch(err){
+    toast('Draft failed: '+err.message, true);
+    if(btn){ btn.disabled=false; btn.textContent='Create Draft in Shopify'; }
+  }
+}
+window.createShopifyDraft=createShopifyDraft;
+
 function renderEmailPanel(e){
   const msgs = S.emailMessages[e.id] || [];
   const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
@@ -3171,7 +3297,7 @@ function renderEmailPanel(e){
     ${renderTicketTracker(e)}
     <div class="tk-body">
       <div class="linked-box" style="background:var(--bg2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <span><span class="ic ic-user"></span><strong>${escapeHtml(e.customer_email||'unknown sender')}</strong></span>
+        <span><span class="ic ic-user"></span><strong>${escapeHtml(e.customer_email || (e.mailbox==='orders'?'Manual order \u2014 assign a dealer':'unknown sender'))}</strong></span>
         ${linkedTicket
           ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
           : `<button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button>`}
@@ -3189,7 +3315,7 @@ function renderEmailPanel(e){
         <div class="form-row cols-2">
           <div class="form-group">
             <label class="form-label">Dealer</label>
-            <select class="form-input" onchange="updateEmailField('${e.id}','dealer_id',this.value)">
+            <select class="form-input" onchange="setOrderDealer('${e.id}',this.value)">
               <option value="">\u2014 Unassigned \u2014</option>
               ${(S.dealers||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(d=>`<option value="${d.id}" ${String(e.dealer_id)===String(d.id)?'selected':''}>${escapeHtml(d.name||d.email||'Dealer')}</option>`).join('')}
             </select>
@@ -3206,6 +3332,7 @@ function renderEmailPanel(e){
           ? `<button class="btn btn-sm" onclick="setOrderComplete('${e.id}',false)"><span class="ic ic-refresh"></span>Reopen</button>`
           : `<button class="btn btn-sm btn-teal" onclick="setOrderComplete('${e.id}',true)"><span class="ic ic-check"></span>Mark Complete</button>`}
       </div>` : ''}
+      ${e.mailbox==='orders' ? renderOrderBuilder(e) : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
       <div id="replyComposer" style="margin-top:12px">
