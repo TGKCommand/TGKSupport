@@ -441,7 +441,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.53';
+const TGK_SUPPORT_VERSION = 'v1.54';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3157,6 +3157,8 @@ async function setOrderDealer(id, dealerId){
 window.setOrderDealer = setOrderDealer;
 
 async function createManualOrder(){
+  if(window._orderCreateBusy) return;
+  window._orderCreateBusy = true;
   try{
     const orders = (S.emails||[]).filter(e=>e.mailbox==='orders');
     const nextNum = orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
@@ -3170,6 +3172,7 @@ async function createManualOrder(){
     if(S.page==='orders') renderEmailsList();
     openEmail(data.id);
   }catch(e){ toast('Could not create order: '+e.message, true); }
+  finally{ window._orderCreateBusy = false; }
 }
 window.createManualOrder = createManualOrder;
 function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=>x.email===email); return (m&&(m.display_name||m.email))||email; }
@@ -3785,6 +3788,9 @@ async function convertTicketToOrder(ticketId){
   const t=S.tickets.find(x=>x.id===ticketId); if(!t) return;
   if(t.converted_order_id){ toast('This ticket was already converted to an order', true); return; }
   if(!confirm('Create an order from ticket #'+t.ticket_number+'? The conversation copies onto the order and communication continues there.')) return;
+  if(window._orderCreateBusy) return;
+  window._orderCreateBusy = true;
+  let createdOrderId = null;
   try{
     const msgs = (S.messages[ticketId] && S.messages[ticketId].length) ? S.messages[ticketId] : await loadMessages(ticketId);
     const num = _nextOrderDisplayNumber();
@@ -3801,6 +3807,7 @@ async function convertTicketToOrder(ticketId){
       ship_zip: addr.postal_code || null, ship_country: addr.country || 'US'
     }).select().single();
     if(error) throw error;
+    createdOrderId = order.id;
     const rows=[];
     if(t.description) rows.push({ email_id:order.id, direction:'inbound', sender_name: t.customer_name||t.customer_email||'Customer', from_email: t.customer_email||null, body: t.description, attachments: (t.attachments||[]), created_at: t.created_at });
     (msgs||[]).filter(m=>!m.is_internal_note).forEach(m=>{
@@ -3814,7 +3821,10 @@ async function convertTicketToOrder(ticketId){
     toast('Created order ORD-'+String(num).padStart(4,'0'));
     closePanel(); renderNav();
     goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
-  }catch(err){ toast('Convert failed: '+err.message, true); }
+  }catch(err){
+    if(createdOrderId){ try{ await sb.from('emails').delete().eq('id', createdOrderId); }catch(_){} const i=S.emails.findIndex(x=>x.id===createdOrderId); if(i!==-1) S.emails.splice(i,1); }
+    toast('Convert failed: '+err.message, true);
+  }finally{ window._orderCreateBusy = false; }
 }
 window.convertTicketToOrder = convertTicketToOrder;
 
@@ -3822,6 +3832,9 @@ async function convertEmailToOrder(emailId){
   const e=(S.emails||[]).find(x=>x.id===emailId); if(!e) return;
   if(e.converted_order_id){ toast('This email was already converted to an order', true); return; }
   if(!confirm('Create an order from '+emailRef(e)+'? The conversation copies onto the order and communication continues there.')) return;
+  if(window._orderCreateBusy) return;
+  window._orderCreateBusy = true;
+  let createdOrderId = null;
   try{
     const msgs = (S.emailMessages[emailId] && S.emailMessages[emailId].length) ? S.emailMessages[emailId] : await loadEmailMessages(emailId);
     const num = _nextOrderDisplayNumber();
@@ -3832,6 +3845,7 @@ async function convertEmailToOrder(emailId){
       source_email_id: emailId, ship_name: e.ship_name || null, ship_email: e.customer_email || null
     }).select().single();
     if(error) throw error;
+    createdOrderId = order.id;
     const rows=(msgs||[]).map(m=>({ email_id:order.id, direction:m.direction, sender_name:m.sender_name, from_email:m.from_email, to_email:m.to_email, body:m.body||'', attachments:(m.attachments||[]), created_at:m.created_at }));
     if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
     await sb.from('emails').update({ status:'archived', converted_order_id: order.id, has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', emailId);
@@ -3840,7 +3854,10 @@ async function convertEmailToOrder(emailId){
     toast('Created order '+emailRef(order));
     closePanel(); renderNav();
     goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
-  }catch(err){ toast('Convert failed: '+err.message, true); }
+  }catch(err){
+    if(createdOrderId){ try{ await sb.from('emails').delete().eq('id', createdOrderId); }catch(_){} const i=S.emails.findIndex(x=>x.id===createdOrderId); if(i!==-1) S.emails.splice(i,1); }
+    toast('Convert failed: '+err.message, true);
+  }finally{ window._orderCreateBusy = false; }
 }
 window.convertEmailToOrder = convertEmailToOrder;
 
