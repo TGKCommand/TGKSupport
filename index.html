@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.61';
+const TGK_SUPPORT_VERSION = 'v1.62';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3278,6 +3278,7 @@ async function openEmail(id){
   document.getElementById('tk-overlay').classList.add('open');
   document.getElementById('tk-panel').classList.add('open');
   scrollThreadToBottom();
+  if(e.mailbox==='orders' && e.shopify_order_id) refreshOrderFulfillment(e.id);
   // Stamp view + mark read. Panel already rendered with the prior viewer.
   try{
     const patch = { last_viewed_by:(S.user&&S.user.email)||null, last_viewed_at:new Date().toISOString() };
@@ -3498,6 +3499,52 @@ async function previewOrderTotals(id){
 }
 window.previewOrderTotals = previewOrderTotals;
 
+function summarizeFulfillment(statuses){
+  const set = new Set(statuses.map(s=>String(s||'').trim().toLowerCase()).filter(Boolean));
+  if(!set.size) return { label:'Awaiting fulfillment', color:'pill-muted' };
+  const arr=[...set];
+  const shippedLike = s=>['shipped','fulfilled','complete','completed','delivered'].includes(s);
+  if(arr.every(s=>s==='cancelled')) return { label:'Cancelled', color:'pill-muted' };
+  if(set.has('refunded')) return { label:'Refunded', color:'pill-orange' };
+  if(arr.every(s=>shippedLike(s)||s==='cancelled')) return { label:'Shipped', color:'pill-green' };
+  if(arr.some(s=>shippedLike(s))) return { label:'Partially shipped', color:'pill-teal' };
+  if(set.has('on hold')) return { label:'On hold', color:'pill-orange' };
+  if(set.has('partial')) return { label:'Partial', color:'pill-teal' };
+  if(set.has('packed')) return { label:'Packed', color:'pill-teal' };
+  if(set.has('pre-order') || set.has('pre order')) return { label:'Pre-order', color:'pill-orange' };
+  if(set.has('open')) return { label:'Open (in fulfillment)', color:'pill-teal' };
+  return { label: statuses.find(Boolean) || 'Processing', color:'pill-teal' };
+}
+async function refreshOrderFulfillment(id){
+  const e=(S.emails||[]).find(x=>x.id===id);
+  if(!e || !e.shopify_order_id) return;
+  try{
+    const { data, error } = await sb.from('sales').select('*').eq('order_number', e.shopify_order_id);
+    if(error) throw error;
+    const cur = document.getElementById('orderFulfillmentBox');
+    if(!cur) return;
+    const rows = data||[];
+    if(!rows.length){ cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Not yet synced to the ERP (fulfillment status appears once the order syncs).</span>'; return; }
+    const statuses = rows.map(r=>r.fulfillment_status).filter(Boolean);
+    const sum = summarizeFulfillment(statuses);
+    const tracking = [...new Set(rows.map(r=>r.tracking_number||r.tracking||'').filter(Boolean))];
+    const nShipped = statuses.filter(s=>['shipped','fulfilled','complete','completed','delivered'].includes(String(s).toLowerCase())).length;
+    const mix = (nShipped>0 && nShipped<statuses.length) ? ' ('+nShipped+'/'+statuses.length+' items)' : '';
+    let html = '<span style="color:var(--text3);font-size:var(--t-xs);margin-right:6px">ERP status:</span><span class="pill '+sum.color+'">'+escapeHtml(sum.label)+escapeHtml(mix)+'</span>';
+    if(tracking.length){
+      html += ' '+tracking.map(t=>{
+        return /^https?:\/\//i.test(t) ? '<a href="'+escapeHtml(t)+'" target="_blank" rel="noopener" style="color:var(--teal);font-size:var(--t-xs)">Track \u2197</a>' : '<span class="pill pill-muted" title="Tracking">'+escapeHtml(t)+'</span>';
+      }).join(' ');
+    }
+    html += ' <button class="btn btn-sm" style="padding:2px 8px;margin-left:6px" onclick="refreshOrderFulfillment(\''+id+'\')">Refresh</button>';
+    cur.innerHTML = html;
+  }catch(err){
+    const cur=document.getElementById('orderFulfillmentBox');
+    if(cur) cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Could not read ERP fulfillment.</span>';
+  }
+}
+window.refreshOrderFulfillment = refreshOrderFulfillment;
+
 function renderOrderBuilder(e){
   const lines = orderLinesFor(e);
   const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
@@ -3507,7 +3554,8 @@ function renderOrderBuilder(e){
     <div class="panel-title" style="border:none;margin:0 0 8px">Shopify Order</div>
     ${created ? `<div style="margin-bottom:10px">
       <span class="pill pill-green">Draft ${escapeHtml(String(e.shopify_draft_id))}</span> ${e.shopify_draft_url?`<a href="${e.shopify_draft_url}" target="_blank" rel="noopener" style="color:var(--teal);margin-left:6px">View in Shopify \u2197</a>`:''}
-      ${e.shopify_order_id ? `<div style="margin-top:6px"><span class="pill pill-teal">Order ${escapeHtml(String(e.shopify_order_id))} created</span></div>` : `
+      ${e.shopify_order_id ? `<div style="margin-top:6px"><span class="pill pill-teal">Order ${escapeHtml(String(e.shopify_order_id))} created</span></div>
+      <div id="orderFulfillmentBox" style="margin-top:6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span style="color:var(--text3);font-size:var(--t-xs)">Checking ERP fulfillment\u2026</span></div>` : `
       <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
         <button class="btn btn-sm" onclick="sendShopifyInvoice('${e.id}')"><span class="ic ic-mail"></span>Send invoice</button>
         <button class="btn btn-sm btn-teal" onclick="completeShopifyDraft('${e.id}',false)">Mark paid & complete</button>
