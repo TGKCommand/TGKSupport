@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.63';
+const TGK_SUPPORT_VERSION = 'v1.64';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1149,7 +1149,7 @@ function renderDashboard(){
     <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Dealer / From</th><th>PO</th><th>Assignee</th><th>Received</th></tr></thead><tbody>
       ${activeOrdersList.slice(0,8).map(e=>`<tr class="rowlink" onclick="openEmail('${e.id}')">
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}</td>
-        <td class="main-col">${escapeHtml(dealerName(e.dealer_id)||(e.ship_name||'').trim()||e.customer_email||'\u2014')}</td>
+        <td class="main-col">${escapeHtml(dealerName(e.dealer_id)||(e.ship_name||'').trim()||e.customer_email||'\u2014')}${e.shopify_order_id?' <span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>':(e.shopify_draft_id?' <span class="pill pill-teal" title="Draft sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>':'')}</td>
         <td class="pn">${e.po_number?escapeHtml(e.po_number):'\u2014'}</td>
         <td>${e.assigned_to?escapeHtml(assigneeName(e.assigned_to)):'<span style="color:var(--text3)">\u2014</span>'}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
