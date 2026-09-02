@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.60';
+const TGK_SUPPORT_VERSION = 'v1.61';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3246,7 +3246,7 @@ function emailListOrderMeta(e){
   if(e.po_number) parts.push('<span class="pill pill-muted">PO '+escapeHtml(e.po_number)+'</span>');
   if(e.assigned_to) parts.push('<span class="pill">'+escapeHtml(assigneeName(e.assigned_to))+'</span>');
   if(!parts.length) return '';
-  return '<div style="margin-top:4px;font-weight:400;display:flex;gap:4px;flex-wrap:wrap">'+parts.join('')+'</div>';
+  return ' <span style="display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:middle;font-weight:400">'+parts.join('')+'</span>';
 }
 
 function emailTable(list){
