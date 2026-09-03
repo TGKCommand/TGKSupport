@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.68';
+const TGK_SUPPORT_VERSION = 'v1.69';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3125,6 +3125,27 @@ async function toggleThreadTranslation(btn){
 }
 window.toggleThreadTranslation = toggleThreadTranslation;
 
+// Strips a customer reply's quoted history (the "On ... wrote:" block + Gmail/
+// Apple quote containers) at render time, so already-stored messages read clean
+// too. Conservative: never touches a forwarded message.
+function stripReplyQuoteHtml(html){
+  let h = String(html||'');
+  if(/forwarded message/i.test(h)) return h;
+  h = h.replace(/<div[^>]*class="?[^">]*gmail_quote[\s\S]*$/i, '');
+  h = h.replace(/<div[^>]*class="?[^">]*gmail_attr[\s\S]*$/i, '');
+  h = h.replace(/(?:<[^>]+>\s*)*On\b[\s\S]{0,400}?\bwrote:[\s\S]*$/i, '');
+  h = h.replace(/<blockquote[^>]*(type="?cite|gmail_quote)[\s\S]*$/i, '');
+  h = h.replace(/-{2,}\s*Original Message\s*-{2,}[\s\S]*$/i, '');
+  const t = h.trim();
+  return t.replace(/<[^>]+>/g,'').replace(/\s+/g,'').length >= 2 ? t : html;
+}
+function stripReplyQuoteText(text){
+  let t = String(text||'');
+  if(/forwarded message/i.test(t)) return t;
+  const cut = t.search(/\n?\s*On\b.{0,300}?\bwrote:/i);
+  if(cut>0) t = t.slice(0, cut);
+  return t.trim() || String(text||'');
+}
 // Renders a message body: real (sanitized) HTML in a sandboxed iframe so it
 // looks like a true email and the sender's CSS can't bleed into the app; falls
 // back to linkified plain text for older/plain-text messages.
@@ -3137,7 +3158,10 @@ window.sizeEmailFrame = function(f){
   try{ const d=f.contentDocument||f.contentWindow.document; f.style.height=((d.body?d.body.scrollHeight:0)+18)+'px'; }
   catch(e){ f.style.height='320px'; }
 };
-function msgBody(m){ return (m && m.body_html && String(m.body_html).trim()) ? emailFrame(m.body_html) : linkifyBody(m ? (m.body||'') : ''); }
+function msgBody(m){
+  if(m && m.body_html && String(m.body_html).trim()) return emailFrame(stripReplyQuoteHtml(m.body_html));
+  return linkifyBody(stripReplyQuoteText(m ? (m.body||'') : ''));
+}
 
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
