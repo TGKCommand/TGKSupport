@@ -198,8 +198,6 @@ select.form-input{cursor:pointer}
 #tk-panel .tk-body{max-width:100%}
 .tk-head{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);gap:10px;flex-shrink:0;background:var(--bg2)}
 .tk-head-title{font-size:var(--t-lg);font-weight:700;color:var(--text);flex:1}
-.tk-tracker{font-size:var(--t-xs);color:var(--text3);padding:4px 18px;display:flex;gap:9px;flex-wrap:wrap;align-items:center;background:var(--bg2);border-bottom:1px solid var(--border);flex-shrink:0;opacity:.75;letter-spacing:.01em}
-.tk-tracker .tk-tracker-dot{opacity:.45}
 .tk-close{background:none;border:none;font-size:var(--t-xl);color:var(--text3);cursor:pointer;padding:2px 6px;border-radius:var(--r-sm)}
 .tk-close:hover{background:var(--bg4);color:var(--text)}
 .tk-body{flex:1;overflow-y:auto;padding:16px 18px}
@@ -389,6 +387,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
       <div class="sidebar-logo">
         <img src="data:image/avif;base64,AAAAHGZ0eXBhdmlmAAAAAG1pZjFhdmlmbWlhZgAAA1ptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAAAAAAA5waXRtAAAAAAABAAAARmlsb2MAAAAAREAAAwABAAAAAAN+AAEAAAAAAAAMuAACAAAAABA2AAEAAAAAAAACnwADAAAAABLVAAEAAAAAAAAAvgAAAE1paW5mAAAAAAADAAAAFWluZmUCAAAAAAEAAGF2MDEAAAAAFWluZmUCAAAAAAIAAGF2MDEAAAAAFWluZmUCAAABAAMAAEV4aWYAAAACZGlwcnAAAAI+aXBjbwAAAAxhdjFDgQAMAAAAAbRjb2xycklDQwAAAahsY21zAhAAAG1udHJSR0IgWFlaIAfcAAEAGQADACkAOWFjc3BBUFBMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD21gABAAAAANMtbGNtcwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACWRlc2MAAADwAAAAX2NwcnQAAAFMAAAADHd0cHQAAAFYAAAAFHJYWVoAAAFsAAAAFGdYWVoAAAGAAAAAFGJYWVoAAAGUAAAAFHJUUkMAAAEMAAAAQGdUUkMAAAEMAAAAQGJUUkMAAAEMAAAAQGRlc2MAAAAAAAAABWMyY2kAAAAAAAAAAAAAAABjdXJ2AAAAAAAAABoAAADLAckDYwWSCGsL9hA/FVEbNCHxKZAyGDuSRgVRd13ta3B6BYmxmnysab9908PpMP//dGV4dAAAAABDQzAAWFlaIAAAAAAAAPbWAAEAAAAA0y1YWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts8AAAAUaXNwZQAAAAAAAAEsAAAALwAAABBwaXhpAAAAAAMICAgAAAAMYXYxQ4EAHAAAAAAOcGl4aQAAAAABCAAAADhhdXhDAAAAAHVybjptcGVnOm1wZWdCOmNpY3A6c3lzdGVtczphdXhpbGlhcnk6YWxwaGEAAAAAHmlwbWEAAAAAAAAAAgABBIECAwQAAgSFAwaHAAAAKGlyZWYAAAAAAAAADmF1eGwAAgABAAEAAAAOY2RzYwADAAEAAQAAEB1tZGF0EgAKCRghZXcyQENBoTKoGREgAIIQogLdc1UtqTQgDbdcp/L/RwG6HaX51wTTOtqEIfQ5k70B0Wsh6jva3LM9/HoAHfyJieeWah1VxRne/aYzu4ntTTskVKMxh29a2pCaHP5xqCOzETE+BYKyxDRDjTjZklLhXIXH/cFbQcXHmi0Ao1Le01N/Blws3OiK2Kc8BozZDLD4AF01dV37RS0fEjk1K73ENcBxyIcm5elqvbYUMtHcsZZZCI9+50xDDxD7yqVSULbQTONSeOH/2FWbXRxvidwqpUPL9F34sUXyYpf3wA0TLRkbtPnSg48vI62U3yVAG/zSz0nEKHof3IQWAW5wK027TxleO7YHgrDrlEu+rw5SL8OJIbeL7wyvjrPPm7dkJAu6v6bfC7dxLOj59Vt52uetulgs+yz67tpUVqI0XPLQtrahE6tiAwzmVjDfok0FeJenuJVyPEzoIrveS8a8gNDaE+ypkEgKI+7k/qVdiB6qH36Z8rrTEpu9nNDsSraB/4xBuVXmCEf43ztmJGmxw8aA/GJax7uBZm8G+Aw8KJpxUB85VFcurjI9djdPD1C3jM0Oqx0dxzMtRWdvVcLhiuJJTXquxMQpmMObV+qlGWzGtP7kDRmTzTc+n5lwoacYUXeb/FFEV4ddp5nwfiyDQoCEdgO2UxHDzTd+2sQFwYPmBX2LyxbF3gwVVLFBDFpUzVRXrG+au5PtwMV5R+qz3mH+VqU2JEeXhQASNuG2fN3D8HDE0xMNFcxOjG9mevZrO3ZiejXMaIoptT5E73GQPAA6ylMFECp+krNVRUVVXeEDOawKWLcJrOCJYqLh7dMwH8lQPVvv/cV7jfZz/IKFqWS+E4G/Pu8HCwKG8cECtfBvIyKykrHe+hY/WCanXyoZ/iC1aZ0riGNwXiM673sZMMwqg7mLI8bbf5pgJtkunIGdqGIBT4JLU7Wy8bi6Qb01iD1di6mCgUxqjI5pH+dj73N4/zT+1n4tnvAQKT3c+fi4J0pzuAFOcEyPnO8qJBcHG7QblBa7dCWU1U3cTxfuxy/DUtOKAy9BAZ3QdSU3l9+a7JpVPaJnnGJfB60jwZU09A4tFxmDm1q49yz8PMpQj+z60cmaXTyJXjiQ+upV0HwuARr4xhlcXoy3RxQspNIu+TZ/PHaA2cQTA9s5zCM7Zx7mHAe9lytfFdm6+9ZOLLUj1I/geo/xckhr3mnjrMmo912amCWo9m6biUqwt7WZu/WLMg+vbHDwnCFZvE3dhp5sahsugRUhVB7kdqMN8MG6gB94fpr2Ko4LykyO8KQeqrx9ZtC5F8q6Fp9FV9HvnMI+3/BoSk8ii5A8N5b1jpIY3BU/vTBBELWgZ4K4N8tdsa/hxhAq0zMa0HmuOjyDVI09vAD2pTEopPzQpeDJnroiZmy0DQeFviIfS7+zzCFOI5ReFupHkkHTyYeNe5mXeTidAtyum2DTR3Pzx/vpj+VAKKJZlSbpn3euH8AeLwekowOtyY7mevFds7p2xkcqx/ezWcG4RdU+5g+cgyFHbRHMEb5yIUwEQc7HnAVtQZKKCaQTeuVq+gRrf0gY//T+kVXmpOgdOCKcaljDGKSlLC13Ye7AQ6hhWaX+FggHDD5xPSJ4bbNXwuePJWSFMpKPtmScJtyhdltaNcB5ECJJckhFeiZouZK+v78/WUEuYr5hoUZaRyZdCMcs2fPt8thh9pgy/eRp9rQXKq+debZIrGTQ14H2l9tK9uB5SOoqpAhHXMF8VfFW95A042XSZKeSm7rSRSFeR/ATT2uxdt+cj4MJc9DGq2AAN8OMI34p8pVgkEKP2ZRzrTZYDv6brbhua9KdubncW3F2RmFIAejhtFAzHhzPDVzfleVM5DVBbJnsELpOTi82h5yMVC/Zm8h9Ay1IDM88QhMSYpOEPH1jBdpezXUMkYjCReX/uLbP63VMfHexwEPO48MPJ5q8T1+AJV2gUMcdG2rqIyk8aMvwuQtOfFmR4NmQ3I/Nc16B/Tm2Z/97bIzArivK/TU8b/Vtj3jLP3Vk0rFnV2NMq6H0QF554oeF+A9UmbhM4PCDx3JA6aBt4mrlIaMuLneOhfhyOaeAhUc0K2A2ILW0C15QDunpyzZceYAc/qQJqs932kdpYHyUQHl4jS6SEqNy/cQRUXFQVEd1KIeih+N008+HijHyjKtjMbGqejgMnFUbGpPBgwswfHLJvHMiDfcmJWGYCvEZspDvzGV+hul5dopsXeciyvaomKiRzHRw0P6z/p3pT5gFgHyABMkBVUHPPgmCJSeHQ8Q4s6TzT+/NJeXSUR1HVcmo0DL6NtKBtvjCyA+to9hpqWmqpdBuLMeGjrzum7cV4R4epFL/3K4z7bZGfV1RdDCtxDiQhnSCm58G4Pd3MR/8nlNBV3SYMmNUhMM4lphf8XMmWklgZOAruJG+o6E9tSRvpec1KpsySr28CyYBa/hxntU0V1bHYkkwpcptazhBdNM+HGrobF++zTmZ/N8EcmR05PKEDoiF7I0bKkrceP3FnSdNzrk80JqEQcQFgbhs4Z+RBRV+MNZqQICrlm5YitSp9zEKd97RgCdi4wrWCskH9jKfMZewAqocLL3tKIX1bwYQKtPgIFAs64RKiijPjesoldLLOHe43gS3O4NXgioWlzyDgIp311eOErmLmmakzHxtQK98IIUubucqRdNiNopL61DeVb8A4O82cnFZ1qkdxc5K9XHKpX0HdVB3U8vKj+U8Wrm2vB7af6WtICMMm18qtGPrNGas0yduTJavVrSZx2yZXCLY3cKgXXJWhNIYfdq1HLFcSkiNNNorG8ACFQjhz4wYQ6CW4g4+LUZdzuDtiHo0F/vqfzBcVVeF6/wOhrSXGjyrtZ/eKCpdY7MpamBeWLZ7ZDvCQCEXWL7lS+XwhZlztWWM3jvQOMXerg0NAS/5auKv8IJoHycB05wVf7frZYP7iZGDkgTEqmgMoSpEItF9RMptz05qh14llUc3AQaLo3xi44+1HYm3tXGJ4tiyBiC0szQTGfRdQPzDJefszDhO0vXoEtkKCFUSt4hsp1q5p9hnQiDUeFk5vdj/XCME9/b9H70ZuxJUiNqNKFN+GitEFqH/fLx9+7jQlQbT8Am0pY9ryFZOhzB0k7dceAEpX4omrChdhm15PFCVycDucuNCMQWBY4Jn/4h6U+c4u42GirtlzzpYvqrxL2cUSBJzW6Jv17uq5EeSsu8vYCwestiu8TsZ9N2UrG2qLCPtjGt8QBae+EwtrEzfkZ1+oiy12W5RBmC1U0SPikQ5UmitXYSOqcqmCI0AtjpCq7IUEr+rfmy88htt/01xmsllCwj74v/PeIN1YF6t0EB6rpswh9WcsJPlldMs9Rlv55U/Wxe5qe77aCHfz/r9jQWOSEGkp0dFPxKw12t7sighC8CZFWb4IIRuKLz7evOHSWb1T63Q7xgy0lwR/z3NP6rfu5Ny4yn2RqLjNuGDSlxNcp4xilzImLyhJNKfA/1E6hwAlhvjaotWdTYnvWRzZDMCTwbWEPRdbLO/SBB3PTvGFJI7paZMXb0br0ISczYOOXg7HLiC+1eIflitg+pjXQTM1TStsjF0Od4r5pT1gtPYwBF06LcqxJhIZdLUsvr/pZG9kSP5SWcezkFndGkYSIbpOqKSXSesrmpoDsvZF/nC2bmY0zXh7ubMEMz/24Sfz9/YAV/DhSsesrRUIFkRSCCPGkV5Ytgetqgkq3zdUVGg0dUyFLOeYV7l3eG8O1O18yg+uL7RrjU+iKBhb5pmXRzztAIIQmXDiHWl8ECK11cK9NvH6Bd7eX2OqVW/d+UTkqnoO8XXoJ8UA7Vy07au6WfBaH+XL76W8r5TK43/2mkyn0DOiZvMkAAHNGT4aZsDhlHkhOfKzvELS32GX3fmwGvDQqMxpPcke3HBgyQQenWjhGIMBoXHUWDz2bpauIvnHqLKq6rx1uNJmbgaKVv5xHL4s3PkNBjriP+9lWTb3MA95rczZivlJt3Ycptqj9fDxyVVa/gwfjQzh1wxW5DLGaH4UbBqICL9LciUO9JdTzku4pVkKEs0rXol0jJc6SlsRZG2Xyrs6SAepmvo38/BWLkaPMprBH99XWzoHGGVGUxjuDLnNq+bMNuwVDB5GHlvYjMLnUBrs88bFKx+O0wbblJ3UthmVOo/8H5/V32dcAwafSruVuyx/C/rQ/A99V7SYlYr+nWPDnSfwpxCpMS3qAezsbnb7xClMogYbxj3QP2XJBA7YKsXaJIgfF5rVfK2VkafDsIaXSPWn9abUxQzjuYIyL3jK0YwhwxZFEYQ4VBC/2Zb7QMurrMsdsBzfrQ8C3d9aug/oBIACgYYIWV3MqgykgURIAAAiN2amOLvslbGtTreHdfWYaAmjHnlzqe+nUl3WRVwT3J7FVTBEh9+KieE3l90BCLO+PO9H/SMaHrx94yKHEmvRjA62XsLoOxuW+2xcItz9xYzdKW3nEwic76+A0ZLfdgM6LGDtZkkYF9RtdoaZCDIVHJZL0oWRWtEz/+mF317cIwhqNEI75d6SM6ay2FXyPX1zQtP7XA/eNTY6rRIPbpTrbOkZUeGe/m540naC4NdMrgh+6mIFn1RrlZ+kCoRbTNvybDKHHOLqst1JxI3awHjSDrm+0WWm0EKMrfSA76L4eM9St9KnDMBO4M9p8O/GnUvdji5UXGT3PntHJyYC3pBscgFpQpcG83lBz+54bKUqVjnEAY7hPHqeBg0P2Igri82azHdsF0rWHLOD4Gy4mBH42qYLy72zXGiwFUJ99tmbEvTiRIuVLApITelU5MMn8+9qXZZEcAeFsBukXAWjv40WJ8L8oM5961T8D6qCJKMWs+jdGuDrGKpKWbxFC2eZ8IAbaIm+sBCLEUcbWtqZVr6v5E0uAU3B14WuPY/4vWwEwVy3xwzQkv6t3VhgBUMnryQCT8djY1iIXv1EU3oFiy1YpxDr53DpxlBw+e2oC7mSYQ9J22/6Sy/nFhwUIuq/UaQT7KhaR+hOxBq8bL8fBc3Yk5gtuzc2Mzd3Vcbln0bz2oH1s1ueozHe1U7c5bj+x1I92yVBfGqCis6mlkotq0v6L5Rr4clrRzi+SvQtKyknMEv8n49pTO3FA7cyDrm9tF62w6+ZsdMuVnz6NSiFnNxbf9Ie8pjviXuHR8cdIt/GBKGC8X+KNBey0XG6aQ6XQ61M8QIkrbmwYZJC6dZMjuF29Ku8Zs0nplJyQaZeUSAAAAABkV4aWYAAElJKgAIAAAABgASAQMAAQAAAAEAAAAaAQUAAQAAAFYAAAAbAQUAAQAAAF4AAAAoAQMAAQAAAAIAAAATAgMAAQAAAAEAAABphwQAAQAAAGYAAAAAAAAA35MEAOgDAADfkwQA6AMAAAYAAJAHAAQAAAAwMjEwAZEHAAQAAAABAgMAAKAHAAQAAAAwMTAwAaADAAEAAAD//wAAAqAEAAEAAAAsAQAAA6AEAAEAAAAvAAAAAAAAAA==" alt="TGK Motorsport" style="width:130px;height:auto;object-fit:contain;display:block">
       </div>
+      <div class="sidebar-section">Overview</div>
       <div id="navList"></div>
     </div>
     <div class="sidebar-footer">
@@ -418,8 +417,6 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
       </button>
       <div class="topbar-title" id="pageTitle">Dashboard</div>
       <div class="topbar-actions">
-        <button class="btn" id="undoBtn" onclick="doUndo()" title="Undo (Ctrl+Z)" disabled>Undo</button>
-        <button class="btn" id="redoBtn" onclick="doRedo()" title="Redo (Ctrl+Shift+Z)" disabled>Redo</button>
         <button class="btn btn-primary" onclick="openNewTicket()">+ New Ticket</button>
       </div>
     </div>
@@ -443,7 +440,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.65';
+const TGK_SUPPORT_VERSION = 'v1.27';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -471,10 +468,6 @@ const S = {
   settingsTable: 'unknown',
   settingsTab: 'categories',
   activeTicket: null,
-  emails: [],
-  emailMessages: {},
-  activeEmail: null,
-  emailFilters: { view: 'open', q: '' },
   filters: { status: '__active__', priority: '', source: '', category: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
   lastActivity: Date.now()
 };
@@ -488,12 +481,6 @@ function desktopNotify(title, body, ticketId){
   if(!('Notification' in window) || Notification.permission !== 'granted') return;
   // Skip if the tab is already focused and visible — the in-app toast covers that case
   if(document.hasFocus() && !document.hidden) return;
-  // OS notifications render title/body as PLAIN TEXT only, so any HTML we use for
-  // in-app toasts (icon <span>s, etc.) would show up as literal markup. Strip tags
-  // and collapse whitespace here so every caller is covered.
-  const plain = (s)=> String(s==null?'':s).replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim();
-  title = plain(title);
-  body = plain(body);
   try{
     const n = new Notification(title, { body, icon: undefined, tag: ticketId || undefined });
     n.onclick = () => {
@@ -671,8 +658,28 @@ async function afterLogin(user){
    ============================================================ */
 window.addEventListener('message', async (event) => {
   if (event.origin !== 'https://command.tgkmotorsport.com') return; // [SSO] only accept the token from the Command Center's own origin
-  if (!event.data || event.data.source !== 'TGK_CC' || event.data.type !== 'AUTH_TOKEN') return;
+  var d = event.data;
+
+  if (d && d.source === 'TGK_CC' && d.type === 'SIGN_OUT') {
+    // doLogout() already reloads the page, which is the safe, guaranteed-clean way to drop
+    // back to a logged-out state here - no separate confirmation needed, the Command Center's
+    // own sign-out already asked.
+    try{ await doLogout(); }catch(e){ console.error('remote sign-out failed:', e); }
+    return;
+  }
+
+  if (!d || d.source !== 'TGK_CC' || d.type !== 'AUTH_TOKEN') return;
   try{
+    // If someone is already signed in here as a DIFFERENT email than the one just handed over,
+    // that means the Command Center switched identity while this module was still open. There
+    // is no proven "cleanly reload state for a new user" path here the way the ERP has - only
+    // "load for the first time" (afterLogin) and "full reload" (doLogout) - so a genuine
+    // identity change uses the one guaranteed-safe option: reload, matching exactly what
+    // signing out already does.
+    if (S.user && S.user.email && d.email && S.user.email.toLowerCase() !== String(d.email).toLowerCase()) {
+      location.reload();
+      return;
+    }
     const { error } = await sb.auth.setSession({
       access_token: event.data.access_token,
       refresh_token: event.data.refresh_token || ''
@@ -704,26 +711,21 @@ async function fetchAll(queryFn, pageSize=1000){
 
 async function loadAll(){
   try{
-    const results = await Promise.allSettled([
+    const [tickets, warranty, shipErrors, dealers, team, templates] = await Promise.all([
       fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
-      sb.from('dealers').select('id,name,email,discount_pct,po_code_prefix').then(r=>r.data||[]),
+      sb.from('dealers').select('id,name,email').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
     ]);
-    const val = (i, def)=> results[i].status==='fulfilled' ? results[i].value : def;
-    // A single failing table no longer blanks the whole app -- keep whatever loaded.
-    S.tickets   = val(0, S.tickets||[]);
-    S.warranty  = val(1, S.warranty||[]);
-    S.shipErrors= val(2, S.shipErrors||[]);
-    S.dealers   = val(3, S.dealers||[]);
-    S.team      = val(4, S.team||[]);
-    S.templates = val(5, S.templates||[]);
-    const failed = results.filter(r=>r.status==='rejected').length;
-    if(failed) toast('Some data failed to load ('+failed+' of '+results.length+'). Showing what loaded.', true);
-    await loadEmails();
+    S.tickets = tickets;
+    S.warranty = warranty;
+    S.shipErrors = shipErrors;
+    S.dealers = dealers;
+    S.team = team;
+    S.templates = templates;
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
@@ -742,7 +744,7 @@ async function loadMessages(ticketId){
 function subscribeRealtime(){
   sb.channel('support-tickets')
     .on('postgres_changes', { event:'*', schema:'public', table:'tickets' }, payload=>{
-      if(isUserActivelyWorking() && S.activeTicket) return;
+      if(isUserActivelyWorking() && S.page==='ticket_detail') return;
       handleTicketRealtime(payload);
     })
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'ticket_messages' }, payload=>{
@@ -763,34 +765,6 @@ function subscribeRealtime(){
             (m.sender_name||'Customer') + ': ' + (m.body||'').slice(0,120),
             m.ticket_id
           );
-        }
-      }
-    })
-    .on('postgres_changes', { event:'*', schema:'public', table:'emails' }, payload=>{
-      const idx = S.emails.findIndex(x=>x.id === (payload.new?.id || payload.old?.id));
-      if(payload.eventType==='INSERT'){
-        if(idx===-1){
-          S.emails.unshift(payload.new);
-          const isOrder = payload.new.mailbox==='orders';
-          toast('<span class="ic ic-mail"></span>New ' + (isOrder?'order':'email') + ' from ' + (payload.new.customer_email||'someone'));
-          desktopNotify('<span class="ic ic-mail"></span>New ' + (isOrder?'Order':'Email'), (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
-        }
-      } else if(payload.eventType==='UPDATE'){
-        if(idx!==-1) S.emails[idx] = payload.new;
-      } else if(payload.eventType==='DELETE'){
-        if(idx!==-1) S.emails.splice(idx,1);
-      }
-      renderNav();
-      if(S.page==='emails' || S.page==='orders') renderEmailsList();
-    })
-    .on('postgres_changes', { event:'INSERT', schema:'public', table:'email_messages' }, payload=>{
-      const m = payload.new;
-      if(!S.emailMessages[m.email_id]) S.emailMessages[m.email_id] = [];
-      if(!S.emailMessages[m.email_id].some(x=>x.id===m.id)){
-        S.emailMessages[m.email_id].push(m);
-        if(S.activeEmail && S.activeEmail.id===m.email_id){
-          const tb=document.getElementById('threadBox');
-          if(tb){ tb.innerHTML = renderEmailThread(S.emailMessages[m.email_id]); scrollThreadToBottom(); }
         }
       }
     })
@@ -904,63 +878,19 @@ function handleTicketRealtime(payload){
    NAV / ROUTER
    ============================================================ */
 const NAV = [
-  { id:'dashboard', label:'Dashboard', section:'Overview' },
-  { id:'livechat', label:'Live Chat', badgeKey:'livechat', section:'Inbox' },
-  { id:'emails', label:'Emails', badgeKey:'emails', section:'Inbox' },
-  { id:'orders', label:'Orders', badgeKey:'orders', section:'Inbox' },
-  { id:'tickets', label:'Tickets', badgeKey:'tickets', section:'Inbox' },
-  { id:'warranty', label:'Warranty Claims', badgeKey:'warranty', section:'ERP Queues' },
-  { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors', section:'ERP Queues' },
-  { id:'customers', label:'Customer Lookup', section:'Tools' },
-  { id:'reports', label:'Reports', section:'Tools' },
-  { id:'settings', label:'Settings', section:'Tools' },
+  { id:'dashboard', label:'Dashboard' },
+  { id:'livechat', label:'Live Chat', badgeKey:'livechat' },
+  { id:'tickets', label:'Tickets', badgeKey:'tickets' },
+  { id:'customers', label:'Customer Lookup' },
+  { id:'warranty', label:'Warranty Claims', badgeKey:'warranty' },
+  { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors' },
+  { id:'reports', label:'Reports' },
+  { id:'settings', label:'Settings' },
 ];
-
-/* ============================================================
-   UNDO / REDO (universal, for reversible field edits)
-   Covers record field changes routed through updateTicketField /
-   updateEmailField. Does NOT cover irreversible/external actions
-   (sent emails, Shopify draft/invoice/complete, permanent deletes,
-   merges, convert-to-order) -- those are never pushed.
-   ============================================================ */
-const UNDO = { stack: [], redo: [], max: 60 };
-function updateUndoButtons(){
-  const u=document.getElementById('undoBtn'), r=document.getElementById('redoBtn');
-  if(u){ u.disabled = !UNDO.stack.length; u.title = UNDO.stack.length ? ('Undo: '+UNDO.stack[UNDO.stack.length-1].label+' (Ctrl+Z)') : 'Nothing to undo'; }
-  if(r){ r.disabled = !UNDO.redo.length; r.title = UNDO.redo.length ? ('Redo: '+UNDO.redo[UNDO.redo.length-1].label+' (Ctrl+Shift+Z)') : 'Nothing to redo'; }
-}
-function pushUndo(entry){ UNDO.stack.push(entry); if(UNDO.stack.length>UNDO.max) UNDO.stack.shift(); UNDO.redo=[]; updateUndoButtons(); }
-window.pushUndo = pushUndo;
-async function doUndo(){
-  const e = UNDO.stack.pop(); if(!e){ toast('Nothing to undo'); updateUndoButtons(); return; }
-  try{ await e.undo(); UNDO.redo.push(e); toast('Undid: '+e.label); }
-  catch(err){ UNDO.stack.push(e); toast('Undo failed: '+err.message, true); }
-  updateUndoButtons();
-}
-window.doUndo = doUndo;
-async function doRedo(){
-  const e = UNDO.redo.pop(); if(!e){ toast('Nothing to redo'); updateUndoButtons(); return; }
-  try{ await e.redo(); UNDO.stack.push(e); toast('Redid: '+e.label); }
-  catch(err){ UNDO.redo.push(e); toast('Redo failed: '+err.message, true); }
-  updateUndoButtons();
-}
-window.doRedo = doRedo;
-document.addEventListener('keydown', (ev)=>{
-  if(!(ev.ctrlKey || ev.metaKey)) return;
-  const k = (ev.key||'').toLowerCase();
-  const tag = (ev.target && ev.target.tagName || '').toLowerCase();
-  const editable = tag==='input' || tag==='textarea' || (ev.target && ev.target.isContentEditable);
-  if(editable) return; // let the browser's native text undo work inside fields
-  if(k==='z' && !ev.shiftKey){ ev.preventDefault(); doUndo(); }
-  else if((k==='z' && ev.shiftKey) || k==='y'){ ev.preventDefault(); doRedo(); }
-});
 
 function renderNav(){
   const nav = document.getElementById('navList');
-  let lastSection = null;
   nav.innerHTML = NAV.map(n=>{
-    let sectionHeader = '';
-    if(n.section && n.section !== lastSection){ lastSection = n.section; sectionHeader = `<div class="sidebar-section">${escapeHtml(n.section)}</div>`; }
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='livechat'){
@@ -968,23 +898,15 @@ function renderNav(){
       if(activeChats){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${activeChats}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='tickets'){
-      const activeTix = S.tickets.filter(t=>!t.archived && !['resolved','closed'].includes(t.status));
-      const unreadTix = activeTix.filter(t=>t.has_unread).length;
-      if(unreadTix){
-        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${unreadTix} ticket${unreadTix===1?'':'s'} with new messages">${unreadTix}</span>`;
+      const activeTix = S.tickets.filter(t=>!t.archived);
+      const unreadMsgs = activeTix.reduce((sum,t)=> sum + (t.has_unread ? (t.unread_count||1) : 0), 0);
+      if(unreadMsgs){
+        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${unreadMsgs} unread message${unreadMsgs===1?'':'s'}">${unreadMsgs}</span>`;
         alertClass = 'alert-nav';
       } else {
         const openCount = activeTix.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
         if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
       }
-    }
-    if(n.badgeKey==='emails'){
-      const unread = (S.emails||[]).filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
-      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
-    }
-    if(n.badgeKey==='orders'){
-      const unread = (S.emails||[]).filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.has_unread).length;
-      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='warranty'){
       const c = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id)).length;
@@ -994,7 +916,7 @@ function renderNav(){
       const c = S.shipErrors.filter(e=>isActiveClaim(e.status) && !S.tickets.some(t=>t.shipment_error_id===e.id)).length;
       if(c){ badge = `<span class="nav-badge">${c}</span>`; alertClass='alert-nav'; }
     }
-    return sectionHeader + `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
+    return `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
       <span class="nav-dot"></span>${n.label}${badge}
     </button>` + (n.id==='tickets' && S.page==='tickets' ? renderCategorySubnav() : '');
   }).join('');
@@ -1080,8 +1002,6 @@ function renderPage(){
   if(S.page === 'dashboard') return renderDashboard();
   if(S.page === 'livechat') return renderLiveChatList();
   if(S.page === 'tickets') return renderTicketsList();
-  if(S.page === 'emails') return renderEmailsList();
-  if(S.page === 'orders') return renderEmailsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
   if(S.page === 'customers') return renderCustomerLookup();
@@ -1107,19 +1027,9 @@ function renderDashboard(){
   const today = t.filter(x=> new Date(x.created_at).toDateString() === new Date().toDateString()).length;
   const stale = t.filter(isStale).length;
   const resolved = t.filter(x=>x.resolved_at);
-  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '\u2014';
-  const activeChats = S.tickets.filter(x=>x.is_live_chat && !x.archived && !['resolved','closed'].includes(x.status)).length;
-
-  const emails = S.emails||[];
-  const unreadEmails = emails.filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
-  const activeOrdersList = emails.filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.status!=='completed')
-    .sort((a,b)=> new Date(b.last_message_at||b.created_at) - new Date(a.last_message_at||a.created_at));
-  const activeOrders = activeOrdersList.length;
-  const hasOrders = emails.some(e=>e.mailbox==='orders');
-
-  const me = (S.user&&S.user.email)||'';
-  const assignedMe = t.filter(x=>x.assigned_to===me && !['resolved','closed'].includes(x.status)).length
-    + emails.filter(e=>e.assigned_to===me && e.status!=='archived' && e.status!=='completed').length;
+  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
+  const bySource = {};
+  t.forEach(x=> bySource[x.source] = (bySource[x.source]||0)+1);
 
   const el = document.getElementById('content');
   el.innerHTML = `
@@ -1131,35 +1041,17 @@ function renderDashboard(){
       <button class="btn btn-primary" onclick="runDashboardSearch()">Search</button>
     </div>
     <div class="kpi-grid kpi-grid-5">
-      <div class="kpi" style="cursor:pointer" onclick="goPage('tickets')"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
-      <div class="kpi kpi-red" style="cursor:pointer" onclick="goPage('emails')"><div class="kpi-label">Unread Emails</div><div class="kpi-value">${unreadEmails}</div></div>
-      <div class="kpi kpi-teal" style="cursor:pointer" onclick="goPage('orders')"><div class="kpi-label">Active Orders</div><div class="kpi-value">${activeOrders}</div></div>
-      <div class="kpi kpi-red" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters.priority='urgent'; S.filters.status='__active__'; renderTicketsList();},50)"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
-      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters.staleOnly=true; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h)</div><div class="kpi-value">${stale}</div></div>
+      <div class="kpi"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
+      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters={status:'',priority:'',source:'',tag:'',assignedTo:'',q:'',staleOnly:true,showArchived:false}; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h untouched)</div><div class="kpi-value">${stale}</div></div>
+      <div class="kpi kpi-teal"><div class="kpi-label">New Today</div><div class="kpi-value">${today}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
     </div>
-    <div class="panel" style="padding:0;display:flex;flex-wrap:wrap;overflow:hidden">
-      ${[
-        ['New Today', today, '', ''],
-        ['Active Chats', activeChats, activeChats?'var(--teal)':'', "goPage('livechat')"],
-        ['Avg Resolution', avgDays==='\u2014'?'\u2014':(avgDays+'d'), '', ''],
-        ['Assigned to Me', assignedMe, '', "goPage('tickets'); setTimeout(()=>{S.filters.assignedTo='"+me+"'; renderTicketsList();},50)"]
-      ].map((s,idx,arr)=>`<div style="flex:1;min-width:130px;padding:14px 18px;${idx<arr.length-1?'border-right:1px solid var(--border);':''}${s[3]?'cursor:pointer':''}" ${s[3]?`onclick="${s[3]}"`:''}>
-        <div style="font-family:var(--mono);font-size:22px;font-weight:600;line-height:1;color:${s[2]||'var(--text)'}">${s[1]}</div>
-        <div style="font-size:var(--t-xs);color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:6px">${s[0]}</div>
-      </div>`).join('')}
+    <div class="panel">
+      <div class="panel-title">Tickets by Source</div>
+      ${Object.entries(bySource).map(([k,v])=>`<span class="src-tag" style="margin-right:8px">${k}: ${v}</span>`).join('') || '<span style="font-size:var(--t-md);color:var(--text3)">No tickets yet</span>'}
     </div>
-    ${activeOrders ? `
-    <div class="panel-title" style="border:none;margin-top:8px">Active Orders (${activeOrders})</div>
-    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Dealer / From</th><th>PO</th><th>Assignee</th><th>Received</th></tr></thead><tbody>
-      ${activeOrdersList.slice(0,8).map(e=>`<tr class="rowlink" onclick="openEmail('${e.id}')">
-        <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}</td>
-        <td class="main-col">${escapeHtml(dealerName(e.dealer_id)||(e.ship_name||'').trim()||e.customer_email||'\u2014')}${e.shopify_order_id?' <span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>':(e.shopify_draft_id?' <span class="pill pill-teal" title="Draft sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>':'')}</td>
-        <td class="pn">${e.po_number?escapeHtml(e.po_number):'\u2014'}</td>
-        <td>${e.assigned_to?escapeHtml(assigneeName(e.assigned_to)):'<span style="color:var(--text3)">\u2014</span>'}</td>
-        <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
-      </tr>`).join('')}
-    </tbody></table></div>` : ''}
-    <div class="panel-title" style="border:none;margin-top:8px">Recent Tickets</div>
+    <div class="panel-title" style="border:none;margin-top:4px">Recent Tickets</div>
     ${ticketTable(t.slice(0,10))}
   `;
 }
@@ -1634,12 +1526,6 @@ async function deleteTemplate(id){
 function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
-  // A ticket merged into another is intentionally hidden from every queue --
-  // it lives on only for reference via its merged_into_id pointer. Without this
-  // guard the source ticket reappears the moment the status filter is anything
-  // other than "Active" (All Statuses, a category, a search), which reads as
-  // "the merge didn't work" even though it did.
-  list = list.filter(t=>!t.merged_into_id);
   if(!f.showArchived) list = list.filter(t=>!t.archived);
   if(f.status === '__active__') list = list.filter(t=>!['resolved','closed'].includes(t.status));
   else if(f.status) list = list.filter(t=>t.status===f.status);
@@ -1737,23 +1623,6 @@ function friendlyStaffName(){
 function escapeHtml(s){
   if(s==null) return '';
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-// Escapes text (XSS-safe), turns URLs into clickable links, then newlines into <br>.
-// Handles bare URLs and the plain-text email convention of wrapping them in
-// angle brackets, e.g. <http://example.com/very/long/link>.
-function linkifyBody(s){
-  let esc = escapeHtml(s==null?'':s);
-  // Unwrap angle-bracketed URLs: &lt;http...&gt; -> http... (escaped form).
-  esc = esc.replace(/&lt;(https?:\/\/[^\s]+?)&gt;/gi, '$1');
-  const linked = esc.replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/g, (m)=>{
-    let url = m, trail='';
-    const tm = url.match(/(&gt;|&lt;|[.,;:!?)\]>]+)$/);
-    if(tm){ trail = tm[0]; url = url.slice(0, -trail.length); }
-    if(!url) return m;
-    const href = url.startsWith('www.') ? ('http://'+url) : url;
-    return '<a href="'+href+'" target="_blank" rel="noopener noreferrer" style="color:var(--teal);text-decoration:underline;word-break:break-all">'+url+'</a>'+trail;
-  });
-  return linked.replace(/\n/g,'<br>');
 }
 function timeAgo(dstr){
   if(!dstr) return '—';
@@ -2438,21 +2307,17 @@ async function openTicket(id){
     scrollThreadToBottom();
   }
 
-  // Record who viewed it (for the subtle tracker) and clear unread in the same
-  // write. The panel above already rendered with the PRIOR viewer, so we don't
-  // re-render here -- during this session the strip keeps showing who was in the
-  // ticket before you, which is the point.
-  try{
-    const patch = { last_viewed_by: (S.user && S.user.email) || null, last_viewed_at: new Date().toISOString() };
-    if(t.has_unread || t.unread_count > 0){ patch.has_unread = false; patch.unread_count = 0; }
-    const { data: updated, error } = await sb.from('tickets').update(patch).eq('id', id).select().single();
-    if(!error && updated){
-      const idx = S.tickets.findIndex(x=>x.id===id);
-      if(idx!==-1) S.tickets[idx] = updated;
-      S.activeTicket = updated;
-      renderNav();
-    }
-  }catch(e){ /* non-critical */ }
+  if(t.has_unread || t.unread_count > 0){
+    try{
+      const { data: updated, error } = await sb.from('tickets').update({ has_unread: false, unread_count: 0 }).eq('id', id).select().single();
+      if(!error){
+        const idx = S.tickets.findIndex(x=>x.id===id);
+        if(idx!==-1) S.tickets[idx] = updated;
+        S.activeTicket = updated;
+        renderNav();
+      }
+    }catch(e){ /* non-critical */ }
+  }
 }
 window.openTicket = openTicket;
 
@@ -2460,7 +2325,6 @@ function closePanel(){
   document.getElementById('tk-overlay').classList.remove('open');
   document.getElementById('tk-panel').classList.remove('open');
   S.activeTicket = null;
-  S.activeEmail = null;
 }
 window.closePanel = closePanel;
 
@@ -2730,23 +2594,6 @@ function cycleTicketPanelWidth(){
   try{localStorage.setItem('tk_panel_width',next);}catch(_){}
   applyTicketPanelWidth();
 }
-/* Subtle who/when tracker shown as a thin strip under the panel header.
-   Reads last_viewed_* / last_reply_* off the record. Because openTicket renders
-   the panel BEFORE stamping the current viewer, opening a ticket shows you who
-   was in it before you (a colleague), which is the useful signal. Reused shape
-   for emails/orders later -- same column names on those tables. */
-function trackerName(email){
-  if(!email) return 'someone';
-  return email.split('@')[0].replace(/[._]/g,' ').replace(/\b\w/g, c=>c.toUpperCase());
-}
-function renderTicketTracker(t){
-  if(!t) return '';
-  var parts=[];
-  if(t.last_reply_at) parts.push('<span title="Last staff reply">Last reply: '+escapeHtml(trackerName(t.last_reply_by))+' \u00b7 '+timeAgo(t.last_reply_at)+' ago</span>');
-  if(t.last_viewed_at) parts.push('<span title="Last opened by a team member">Last viewed: '+escapeHtml(trackerName(t.last_viewed_by))+' \u00b7 '+timeAgo(t.last_viewed_at)+' ago</span>');
-  if(!parts.length) return '<div class="tk-tracker" id="tkTracker"></div>';
-  return '<div class="tk-tracker" id="tkTracker">'+parts.join('<span class="tk-tracker-dot">\u2022</span>')+'</div>';
-}
 function renderTicketPanel(t){
   const msgs = S.messages[t.id] || [];
   const dealer = S.dealers.find(d=>d.id===t.dealer_id);
@@ -2769,7 +2616,6 @@ function renderTicketPanel(t){
       <button class="tk-close" id="tk-width-btn" title="Cycle panel width (narrow / wide / full)" onclick="cycleTicketPanelWidth()">⤡</button>
       <button class="tk-close" onclick="closePanel()"><span class="ic ic-x"></span></button>
     </div>
-    ${renderTicketTracker(t)}
     <div class="tk-body">
       ${t.archived ? `<div class="linked-box" style="background:var(--bg4);border-color:var(--border2);display:flex;align-items:center;justify-content:space-between;gap:10px">
         <span><span class="ic ic-database"></span>This ticket is archived (${t.archived_at ? timeAgo(t.archived_at)+' ago' : ''}).</span>
@@ -2785,9 +2631,8 @@ function renderTicketPanel(t){
       </div>
       ${t.description ? (isWholesaleApp(t.description) ? renderWholesaleApp(t) : `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
-        <div id="tdesc_${t.id}" class="xl-body">${linkifyBody(t.description)}</div>
+        ${escapeHtml(t.description).replace(/\n/g,'<br>')}
         ${renderAttachments(t.attachments)}
-        ${looksNonEnglish(t.description)?`<button class="btn btn-sm" style="margin-top:8px" onclick="translateEl('tdesc_${t.id}')">Translate to English</button>`:''}
       </div>`) : ''}
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Status</label>
@@ -2827,7 +2672,6 @@ function renderTicketPanel(t){
       </div>
       <div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Phone</label><input class="form-input" value="${escapeHtml(t.customer_phone||'')}" onchange="updateTicketField('${t.id}','customer_phone',this.value)"></div>
       ${(t.customer_email || t.order_number) ? `<button class="btn btn-sm" style="margin-bottom:10px" onclick="goPage('customers'); setTimeout(()=>{document.getElementById('custSearchInput').value='${escapeHtml(t.customer_email||t.order_number||'').replace(/'/g,"\\'")}'; runCustomerSearch(); closePanel();},50)">View Full Customer History</button>` : ''}
-      ${t.converted_order_id ? `<div style="margin-bottom:10px"><span class="pill pill-teal">Converted to an order \u2014 communication continues there</span></div>` : `<button class="btn btn-sm" style="margin-bottom:10px;margin-left:6px" onclick="convertTicketToOrder('${t.id}')"><span class="ic ic-box"></span>Create Order</button>`}
 
       <div class="form-group" style="margin-bottom:12px">
         <label class="form-label">Shipping Address</label>
@@ -2938,12 +2782,9 @@ function renderTicketPanel(t){
           <label class="btn btn-sm" style="cursor:pointer;margin:0"><span class="ic ic-link"></span>Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
         </div>
         <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
-        <div class="checkbox-row" id="emailStatusRow" style="font-size:var(--t-sm)">
-          ${t.is_live_chat
-            ? '<span style="color:var(--text3)"><span class="ic ic-chat"></span>Delivered in the live chat window</span>'
-            : (t.customer_email
-                ? '<span style="color:var(--teal)"><span class="ic ic-mail"></span>Reply will be emailed to '+escapeHtml(t.customer_email)+'</span>'
-                : '<span style="color:var(--orange)"><span class="ic ic-alert"></span>No email on file \u2014 the customer won\'t receive this reply. Add one in the fields above.</span>')}
+        <div class="checkbox-row" id="emailChkRow" style="display:${t.customer_email?'flex':'none'}">
+          <input type="checkbox" id="emailChk" ${t.customer_email && !t.is_live_chat ? 'checked' : ''}>
+          <label for="emailChk">Also email this reply to ${t.customer_email ? escapeHtml(t.customer_email) : 'the customer (no email on file)'}</label>
         </div>
       </div>
     </div>
@@ -2977,7 +2818,7 @@ function switchThreadTab(mode){
     if(composer) composer.setAttribute('data-mode', mode);
     const label = document.getElementById('composerModeLabel');
     const msgBox = document.getElementById('msgBox');
-    const emailRow = document.getElementById('emailStatusRow');
+    const emailRow = document.getElementById('emailChkRow');
     const sendBtn = document.getElementById('sendBtn');
     const t = S.activeTicket;
     if(mode === 'notes'){
@@ -2988,7 +2829,7 @@ function switchThreadTab(mode){
     } else {
       if(label){ label.textContent = 'Replying in Conversation — visible to customer'; label.style.color = 'var(--text3)'; }
       if(msgBox) msgBox.placeholder = 'Type a reply...';
-      if(emailRow) emailRow.style.display = 'flex';
+      if(emailRow) emailRow.style.display = (t && t.customer_email) ? 'flex' : 'none';
       if(sendBtn){ sendBtn.textContent = 'Send'; sendBtn.classList.remove('btn-teal'); sendBtn.classList.add('btn-primary'); }
     }
   }
@@ -3039,1025 +2880,17 @@ function renderAttachments(attachments){
   </div>`;
 }
 
-/* Lightweight translator: sends any block of text to the anthropic-proxy and
-   shows the English translation inline. Reused by ticket messages, email
-   messages, and the original submission. */
-async function aiTranslate(text, targetLang){
-  const prompt = 'Translate the following text into ' + (targetLang||'English') + '. Auto-detect the source language. Output ONLY the translation itself with no preamble, notes, or quotation marks.\n\n---\n' + text;
-  let token = SUPABASE_ANON_KEY;
-  try{ const s = await sb.auth.getSession(); if(s && s.data && s.data.session && s.data.session.access_token) token = s.data.session.access_token; }catch(_){}
-  const call = (tok)=> fetch(`${SUPABASE_URL}/functions/v1/anthropic-proxy`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+tok },
-    body: JSON.stringify({ model:'claude-sonnet-4-6', max_tokens:1500, messages:[{ role:'user', content: prompt }] })
-  });
-  let resp = await call(token);
-  if(resp.status===401){
-    try{ await sb.auth.refreshSession(); const s=await sb.auth.getSession(); const nt=s&&s.data&&s.data.session&&s.data.session.access_token; if(nt){ resp = await call(nt); } }catch(_){}
-  }
-  if(resp.status===503) throw new Error('AI proxy not configured (add ANTHROPIC_API_KEY to the anthropic-proxy edge function secrets).');
-  let data=null; try{ data = await resp.json(); }catch(_){ data=null; }
-  if(!resp.ok){
-    const m = (data && data.error && (data.error.message||data.error.type)) || ('HTTP '+resp.status);
-    throw new Error(typeof m==='string'?m:JSON.stringify(m));
-  }
-  if(data && data.error){
-    const m = data.error.message || data.error.type || (typeof data.error==='string'?data.error:JSON.stringify(data.error));
-    throw new Error(m);
-  }
-  const out = (data && data.content && data.content[0] && data.content[0].text) ? data.content[0].text : '';
-  if(!out) throw new Error('Empty response from AI');
-  return out.trim();
-}
-async function translateEl(bodyId){
-  const el = document.getElementById(bodyId); if(!el) return;
-  const existing = document.getElementById(bodyId+'_xl');
-  if(existing){ existing.remove(); return; } // toggle off
-  const text = (el.innerText||'').trim(); if(!text) return;
-  const holder = document.createElement('div');
-  holder.id = bodyId+'_xl';
-  holder.style.cssText = 'margin-top:6px;padding:8px 10px;border-left:2px solid var(--teal);background:var(--teal-dim);border-radius:var(--r-sm);font-size:var(--t-sm)';
-  holder.innerHTML = '<span style="color:var(--text3)">Translating\u2026</span>';
-  el.parentNode.insertBefore(holder, el.nextSibling);
-  try{
-    const t = await aiTranslate(text, 'English');
-    holder.innerHTML = '<div style="font-size:var(--t-xs);color:var(--teal);font-weight:700;letter-spacing:.06em;margin-bottom:3px">TRANSLATION (EN)</div>' + escapeHtml(t).replace(/\n/g,'<br>');
-  }catch(e){ holder.innerHTML = '<span style="color:var(--red)">Translation failed: ' + escapeHtml(e.message) + '</span>'; }
-}
-window.translateEl = translateEl;
-// Detects text that isn't plain English (accented Latin, Cyrillic, Greek,
-// Arabic, CJK, Hangul, etc.) so the translate control only shows when useful.
-function looksNonEnglish(text){
-  return /[\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/.test(String(text||''));
-}
-function threadTranslateBar(needed){
-  if(!needed) return '';
-  return `<div style="display:flex;justify-content:flex-end;margin:0 0 8px"><button class="btn btn-sm" id="xlToggleBtn" data-on="0" onclick="toggleThreadTranslation(this)" title="Translate this conversation to English">Translate to English</button></div>`;
-}
-async function toggleThreadTranslation(btn){
-  const scope = document.getElementById('threadBox') || document.getElementById('tk-panel');
-  if(!scope) return;
-  const bodies = Array.prototype.slice.call(scope.querySelectorAll('.xl-body'));
-  if(btn.getAttribute('data-on')==='1'){
-    bodies.forEach(el=>{ const x=document.getElementById(el.id+'_xl'); if(x) x.remove(); });
-    btn.setAttribute('data-on','0'); btn.textContent='Translate to English';
-    return;
-  }
-  btn.setAttribute('data-on','1'); btn.disabled=true; btn.textContent='Translating\u2026';
-  for(const el of bodies){
-    if(document.getElementById(el.id+'_xl')) continue;
-    const text=(el.innerText||'').trim(); if(!text) continue;
-    const holder=document.createElement('div');
-    holder.id=el.id+'_xl';
-    holder.style.cssText='margin-top:6px;padding:8px 10px;border-left:2px solid var(--teal);background:var(--teal-dim);border-radius:var(--r-sm);font-size:var(--t-sm)';
-    holder.innerHTML='<span style="color:var(--text3)">Translating\u2026</span>';
-    el.parentNode.insertBefore(holder, el.nextSibling);
-    try{
-      const t=await aiTranslate(text,'English');
-      holder.innerHTML='<div style="font-size:var(--t-xs);color:var(--teal);font-weight:700;letter-spacing:.06em;margin-bottom:3px">TRANSLATION (EN)</div>'+escapeHtml(t).replace(/\n/g,'<br>');
-    }catch(e){ holder.innerHTML='<span style="color:var(--red)">Translation failed: '+escapeHtml(e.message)+'</span>'; }
-  }
-  btn.disabled=false; btn.textContent='Show original';
-}
-window.toggleThreadTranslation = toggleThreadTranslation;
-
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
-  const needed = list.some(m=>looksNonEnglish(m.body));
-  return threadTranslateBar(needed) + list.map(m=>`
+  return list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div id="tmsg_${m.id}" class="xl-body">${linkifyBody(m.body)}</div>
+      <div>${escapeHtml(m.body).replace(/\n/g,'<br>')}</div>
       ${renderAttachments(m.attachments)}
     </div>
   `).join('');
 }
-
-/* ============================================================
-   EMAILS TAB (v1.29)
-   Inbox for support@ conversations that are NOT tied to a live ticket.
-   Reads emails / email_messages. Reply threads out via send-email-reply
-   (stamps [TGK-E####]); Convert to Ticket carries the whole thread into a
-   new ticket. Reuses the ticket slide-over panel and thread styles.
-   ============================================================ */
-async function loadEmails(){
-  try{
-    const rows = await fetchAll((f,t)=> sb.from('emails').select('*').order('last_message_at',{ascending:false}).range(f,t));
-    S.emails = rows || [];
-  }catch(e){ S.emails = S.emails || []; }
-}
-
-async function loadEmailMessages(emailId){
-  const { data, error } = await sb.from('email_messages').select('*').eq('email_id', emailId).order('created_at',{ascending:true});
-  if(error){ toast('Failed to load email', true); return []; }
-  S.emailMessages[emailId] = data;
-  return data;
-}
-
-function currentMailbox(){ return S.page==='orders' ? 'orders' : 'support'; }
-function emailInMailbox(e, mb){ return mb==='orders' ? e.mailbox==='orders' : e.mailbox!=='orders'; }
-function emailFiltered(){
-  const mb = currentMailbox();
-  let list = (S.emails||[]).filter(e=>emailInMailbox(e, mb));
-  const f = S.emailFilters;
-  if(f.view==='archived') list = list.filter(e=>e.status==='archived');
-  else if(f.view==='completed') list = list.filter(e=>e.status==='completed');
-  else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.status!=='completed' && e.has_unread);
-  else list = list.filter(e=>e.status!=='archived' && e.status!=='completed');
-  if(f.q){
-    const q=f.q.toLowerCase();
-    list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q));
-  }
-  return list;
-}
-
-function emailRef(e){
-  const n = (e.display_number!=null ? e.display_number : e.email_number) || 0;
-  return (e.mailbox==='orders' ? 'ORD-' : 'E-') + String(n).padStart(4,'0');
-}
-async function updateEmailField(id, field, value, quiet, skipUndo){
-  if(value==='') value = null;
-  const before = (S.emails.find(x=>x.id===id)||{})[field];
-  try{
-    const { data, error } = await sb.from('emails').update({ [field]: value, updated_at:new Date().toISOString() }).eq('id', id).select().single();
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
-    if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
-    if(!skipUndo && JSON.stringify(before) !== JSON.stringify(value)){
-      pushUndo({ label:'order/email '+field, undo:()=>updateEmailField(id, field, before, true, true), redo:()=>updateEmailField(id, field, value, true, true) });
-    }
-    if(!quiet) toast('Saved');
-  }catch(e){ toast('Save failed: '+e.message, true); }
-}
-window.updateEmailField = updateEmailField;
-
-function renderEmailsList(){
-  const el = document.getElementById('content');
-  const f = S.emailFilters;
-  const orders = currentMailbox()==='orders';
-  const views = orders
-    ? [['open','Active'],['completed','Completed'],['archived','Archived']]
-    : [['open','Inbox'],['unread','Unread'],['archived','Archived']];
-  if(!views.some(v=>v[0]===f.view)) f.view='open';
-  el.innerHTML = `
-    <div class="filter-bar">
-      <div class="search-wrap">
-        <span class="search-icon"><span class="ic ic-search"></span></span>
-        <input type="text" placeholder="Search sender or subject..." value="${escapeHtml(f.q)}" oninput="S.emailFilters.q=this.value; clearTimeout(window._emQT); window._emQT=setTimeout(renderEmailsBody,120)">
-      </div>
-      ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
-      <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
-      ${f.view==='archived' ? `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(220,38,38,.3)" onclick="emptyArchive()"><span class="ic ic-trash"></span>Empty Archive</button>` : ''}
-      ${orders ? `<button class="btn btn-primary btn-sm" onclick="createManualOrder()"><span class="ic ic-plus"></span>New Order</button>` : ''}
-    </div>
-    <div id="emailsListBody">${emailTable(emailFiltered())}</div>
-  `;
-}
-window.renderEmailsList = renderEmailsList;
-
-async function setOrderComplete(id, complete){
-  try{
-    const patch = complete
-      ? { status:'completed', has_unread:false, unread_count:0, completed_at:new Date().toISOString(), updated_at:new Date().toISOString() }
-      : { status:'read', completed_at:null, updated_at:new Date().toISOString() };
-    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
-    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; renderEmailPanel(data); }
-    renderNav();
-    if(S.page==='orders' || S.page==='emails') renderEmailsList();
-    toast(complete ? 'Order marked complete' : 'Order reopened');
-  }catch(e){ toast('Update failed: '+e.message, true); }
-}
-window.setOrderComplete = setOrderComplete;
-
-function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); if(b) b.innerHTML = emailTable(emailFiltered()); }
-window.renderEmailsBody = renderEmailsBody;
-
-function dealerName(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.name||d.email||'') : ''; }
-function dealerEmail(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.email||'') : ''; }
-async function setOrderDealer(id, dealerId){
-  try{
-    const e=(S.emails||[]).find(x=>x.id===id);
-    const patch = { dealer_id: dealerId||null, updated_at:new Date().toISOString() };
-    // Manual order with no contact yet -> adopt the dealer's email so the draft
-    // attaches to their Shopify customer and replies have a recipient.
-    if(dealerId && (!e || !e.customer_email)){
-      const dEmail = dealerEmail(dealerId);
-      if(dEmail) patch.customer_email = dEmail;
-    }
-    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
-    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderOrderBuilder(); }
-    toast('Saved');
-  }catch(e){ toast('Save failed: '+e.message, true); }
-}
-window.setOrderDealer = setOrderDealer;
-
-async function createManualOrder(){
-  if(window._orderCreateBusy) return;
-  window._orderCreateBusy = true;
-  try{
-    const orders = (S.emails||[]).filter(e=>e.mailbox==='orders');
-    const nextNum = orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
-    const { data, error } = await sb.from('emails').insert({
-      mailbox:'orders', subject:'Manual order', status:'read', has_unread:false, unread_count:0,
-      display_number: nextNum, last_message_at: new Date().toISOString()
-    }).select().single();
-    if(error) throw error;
-    S.emails.unshift(data);
-    renderNav();
-    if(S.page==='orders') renderEmailsList();
-    openEmail(data.id);
-  }catch(e){ toast('Could not create order: '+e.message, true); }
-  finally{ window._orderCreateBusy = false; }
-}
-window.createManualOrder = createManualOrder;
-function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=>x.email===email); return (m&&(m.display_name||m.email))||email; }
-function orderDisplayName(e){ return dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || ''; }
-function emailListOrderMeta(e){
-  const parts=[];
-  if(e.shopify_order_id) parts.push('<span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>');
-  else if(e.shopify_draft_id) parts.push('<span class="pill pill-teal" title="Draft '+escapeHtml(String(e.shopify_draft_id))+' sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>');
-  if(e.po_number) parts.push('<span class="pill pill-muted">PO '+escapeHtml(e.po_number)+'</span>');
-  if(e.assigned_to) parts.push('<span class="pill">'+escapeHtml(assigneeName(e.assigned_to))+'</span>');
-  if(!parts.length) return '';
-  return ' <span style="display:inline-flex;gap:4px;flex-wrap:wrap;vertical-align:middle;font-weight:400">'+parts.join('')+'</span>';
-}
-
-function emailTable(list){
-  if(!list.length) return `<div class="tbl-wrap"><div class="empty">${currentMailbox()==='orders'?'No orders yet. Mail to orders@ lands here.':"No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here."}</div></div>`;
-  return `<div class="tbl-wrap"><table><thead><tr><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
-    ${list.map(e=>`
-      <tr class="rowlink" onclick="openEmail('${e.id}')">
-        <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
-        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.mailbox==='orders' ? (orderDisplayName(e)||'\u2014') : (e.customer_email||'\u2014'))}${e.mailbox==='orders' ? emailListOrderMeta(e) : ''}</td>
-        <td>${escapeHtml(e.subject||'(no subject)')}</td>
-        <td>${e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.status==='completed'?'<span class="pill pill-green">Completed</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':(e.mailbox==='orders'?'<span class="pill pill-teal">Active</span>':'<span class="pill pill-green">Read</span>')}</td>
-        <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
-      </tr>`).join('')}
-  </tbody></table></div>`;
-}
-
-async function refreshEmails(){ await loadEmails(); renderNav(); renderEmailsList(); toast('Emails refreshed'); }
-window.refreshEmails = refreshEmails;
-
-async function openEmail(id){
-  const e = (S.emails||[]).find(x=>x.id===id);
-  if(!e){ toast('Email not found', true); return; }
-  S.activeEmail = e;
-  S.activeTicket = null;
-  pendingMsgAttachments = [];
-  window._orderLinesFor = null;
-  await loadEmailMessages(id);
-  renderEmailPanel(e);
-  document.getElementById('tk-overlay').classList.add('open');
-  document.getElementById('tk-panel').classList.add('open');
-  scrollThreadToBottom();
-  if(e.mailbox==='orders' && e.shopify_order_id) refreshOrderFulfillment(e.id);
-  // Stamp view + mark read. Panel already rendered with the prior viewer.
-  try{
-    const patch = { last_viewed_by:(S.user&&S.user.email)||null, last_viewed_at:new Date().toISOString() };
-    if(e.has_unread){ patch.has_unread=false; patch.unread_count=0; if(e.status!=='archived') patch.status='read'; }
-    const { data:updated } = await sb.from('emails').update(patch).eq('id', id).select().single();
-    if(updated){ const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=updated; S.activeEmail=updated; renderNav(); }
-  }catch(_){ /* non-critical */ }
-}
-window.openEmail = openEmail;
-
-function renderEmailThread(msgs){
-  if(!msgs || !msgs.length) return `<div class="empty">No messages yet.</div>`;
-  const needed = msgs.some(m=>looksNonEnglish(m.body));
-  return threadTranslateBar(needed) + msgs.map(m=>`
-    <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
-      <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div id="emsg_${m.id}" class="xl-body">${linkifyBody(m.body||'')}</div>
-      ${renderAttachments(m.attachments)}
-    </div>
-  `).join('');
-}
-
-async function markEmailUnread(id){
-  const e = (S.emails||[]).find(x=>x.id===id);
-  if(!e) return;
-  try{
-    const patch = { has_unread:true, unread_count: Math.max(e.unread_count||0, 1), updated_at:new Date().toISOString() };
-    // Return it to the unread state, but never un-archive.
-    if(e.status!=='archived') patch.status = 'unread';
-    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
-    if(error) throw error;
-    const i = S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i] = data;
-    toast('Marked unread');
-    renderNav();
-    closePanel();
-    if(S.page==='emails' || S.page==='orders') renderEmailsList();
-  }catch(err){ toast('Failed to mark unread: ' + err.message, true); }
-}
-window.markEmailUnread = markEmailUnread;
-
-/* ---- Shopify order builder (orders tab) --------------------------------
-   Lets staff turn a dealer PO email into a Shopify draft order. Pricing is
-   pulled live from Shopify by the create-draft-order function -- staff enter
-   SKU + qty only. The dealer's wholesale % applies as an order discount. */
-function dealerWholesalePct(id){ if(!id) return null; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d && d.discount_pct!=null ? Math.round(d.discount_pct*1000)/10 : null; }
-function orderLinesFor(e){
-  if(window._orderLinesFor !== e.id){
-    window._orderLines = Array.isArray(e.order_line_items) ? e.order_line_items.map(l=>({sku:l.sku||'',qty:l.qty||1,desc:l.desc||'',price:(l.price!=null?l.price:'')})) : [];
-    window._orderLinesFor = e.id;
-  }
-  if(!window._orderLines.length) window._orderLines = [{sku:'',qty:1}];
-  return window._orderLines;
-}
-function deriveDealerPrefix(dealerId){
-  const d=(S.dealers||[]).find(x=>String(x.id)===String(dealerId));
-  if(d && (d.po_code_prefix||'').trim()) return String(d.po_code_prefix).replace(/[^a-zA-Z0-9]/g,'').toUpperCase();
-  const nm = dealerName(dealerId) || '';
-  const first = nm.trim().split(/\s+/)[0] || '';
-  return first.replace(/[^a-zA-Z0-9]/g,'').toUpperCase().slice(0,4);
-}
-function suggestOrderCode(e){
-  const px = deriveDealerPrefix(e.dealer_id);
-  const po = (e.po_number||'').trim();
-  if(!px || !po) return '';
-  return px + '-' + po;
-}
-async function setOrderPO(id, val){
-  const e=(S.emails||[]).find(x=>x.id===id);
-  const patch = { po_number: (val||'').trim() || null, updated_at:new Date().toISOString() };
-  // Auto-suggest the billing code from dealer prefix + PO, only if the code is empty.
-  if(e && !(e.order_discount_code||'').trim()){
-    const sug = suggestOrderCode({ ...e, po_number: val });
-    if(sug) patch.order_discount_code = sug;
-  }
-  try{
-    const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
-    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderOrderBuilder(); }
-  }catch(err){ toast('Save failed: '+err.message, true); }
-}
-window.setOrderPO = setOrderPO;
-
-function renderShipTo(e){
-  const on = !!e.is_dropship;
-  const q = (id,field,ph)=>`<input class="form-input" value="${escapeHtml(e[field]||(field==='ship_country'?'US':''))}" ${ph?`placeholder="${ph}"`:''} onchange="updateEmailField('${e.id}','${field}',this.value,true)">`;
-  return `<div class="linked-box" id="shipToBox">
-    <label class="checkbox-row" style="cursor:pointer;margin:0">
-      <input type="checkbox" ${on?'checked':''} onchange="toggleDropship('${e.id}',this.checked)">
-      <span style="font-weight:600">Drop-ship / customer order (enter ship-to address)</span>
-    </label>
-    ${on?`<div style="margin-top:10px">
-      <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">Ship-to name</label>${q(e.id,'ship_name')}</div>
-        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}</div>
-      </div>
-      <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">Phone</label>${q(e.id,'ship_phone')}</div>
-        <div class="form-group"><label class="form-label">Address 1</label>${q(e.id,'ship_address1')}</div>
-      </div>
-      <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">Address 2 (optional)</label>${q(e.id,'ship_address2')}</div>
-        <div class="form-group"><label class="form-label">City</label>${q(e.id,'ship_city')}</div>
-      </div>
-      <div class="form-row cols-3">
-        <div class="form-group"><label class="form-label">State / Prov</label>${q(e.id,'ship_province','CA')}</div>
-        <div class="form-group"><label class="form-label">ZIP</label>${q(e.id,'ship_zip')}</div>
-        <div class="form-group"><label class="form-label">Country</label>${q(e.id,'ship_country','US')}</div>
-      </div>
-      <div style="font-size:var(--t-xs);color:var(--text3)">${e.dealer_id?'Bill-to stays the dealer; this address is where it ships.':'No dealer selected \u2014 this person becomes the customer on the order.'}</div>
-    </div>`:''}
-  </div>`;
-}
-function toggleDropship(id, on){
-  updateEmailField(id,'is_dropship',on);
-  const e=(S.emails||[]).find(x=>x.id===id); if(e){ e.is_dropship=on; }
-  if(S.activeEmail && S.activeEmail.id===id) S.activeEmail.is_dropship=on;
-  const b=document.getElementById('shipToBox'); if(b && S.activeEmail) b.outerHTML=renderShipTo(S.activeEmail);
-}
-window.toggleDropship=toggleDropship;
-
-function partSku(r){ return (r.use_new_sku && r.new_sku && String(r.new_sku).trim()) ? String(r.new_sku).trim() : (r.pn||''); }
-function partDesc(r){ return r.description || r.name || r.title || r.part_name || r.product_title || r.desc || ''; }
-function partPrice(r){ const v = (r.msrp!=null?r.msrp:(r.price!=null?r.price:(r.retail_price!=null?r.retail_price:r.unit_price))); return v!=null ? v : null; }
-async function searchParts(q){
-  q = (q||'').trim();
-  if(q.length < 2) return [];
-  const safe = q.replace(/[^a-zA-Z0-9 _.\-]/g,'');
-  if(!safe) return [];
-  const pat = '*'+safe+'*';
-  const run = async (table)=>{
-    try{
-      const { data } = await sb.from(table).select('*').or(`pn.ilike.${pat},new_sku.ilike.${pat}`).limit(6);
-      return (data||[]).map(r=>({ ...r, _table:table }));
-    }catch(e){ return []; }
-  };
-  const [a,p] = await Promise.all([run('assemblies'), run('parts')]);
-  return [...a, ...p].slice(0,8);
-}
-window._partResults = {}; window._partTO = {};
-async function partTypeahead(i, q){
-  clearTimeout(window._partTO[i]);
-  const box = document.getElementById('orderLineResults_'+i);
-  window._partTO[i] = setTimeout(async ()=>{
-    const results = await searchParts(q);
-    window._partResults[i] = results;
-    if(!box) return;
-    if(!results.length){ box.style.display='none'; box.innerHTML=''; return; }
-    box.innerHTML = results.map((r,ri)=>`<div onmousedown="pickPart(${i},${ri})" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='rgba(13,148,136,.08)'" onmouseout="this.style.background=''">
-      <div style="font-family:var(--mono);color:var(--text);font-size:var(--t-sm)">${escapeHtml(partSku(r))}${r._table==='assemblies'?' <span class="pill pill-teal" style="font-size:9px">ASM</span>':''}${partPrice(r)!=null?`<span style="float:right;color:var(--text3)">$${escapeHtml(String(partPrice(r)))}</span>`:''}</div>
-      ${partDesc(r)?`<div style="color:var(--text3);font-size:var(--t-xs);margin-top:1px">${escapeHtml(partDesc(r))}</div>`:''}
-    </div>`).join('');
-    box.style.display='block';
-  }, 200);
-}
-window.partTypeahead = partTypeahead;
-function pickPart(i, ri){
-  const r = (window._partResults[i]||[])[ri]; if(!r) return;
-  const lines = window._orderLines||[];
-  if(lines[i]){ lines[i].sku = partSku(r); lines[i].desc = partDesc(r); const p=partPrice(r); if(p!=null) lines[i].price = p; }
-  const box = document.getElementById('orderLineResults_'+i); if(box){ box.style.display='none'; box.innerHTML=''; }
-  clearOrderTotals();
-  rerenderOrderBuilder();
-}
-window.pickPart = pickPart;
-
-function clearOrderTotals(){ if(window._orderTotals && S.activeEmail){ delete window._orderTotals[S.activeEmail.id]; } }
-function orderDraftPayload(id){
-  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return null;
-  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
-  let shipping=null;
-  if(e.is_dropship){ shipping={ name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' }; }
-  return {
-    email_id:id,
-    dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
-    line_items: lines,
-    discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
-    discount_code: e.order_discount_code||null,
-    shipping: shipping,
-    shipping_method: e.shipping_method||null,
-    shipping_cost: (e.shipping_cost!=null && String(e.shipping_cost).trim()!=='') ? Number(e.shipping_cost) : null
-  };
-}
-function renderTotalsStrip(t){
-  if(!t) return '';
-  const cur = t.currency||'USD';
-  const fmt = (v)=> v==null?'\u2014':('$'+Number(v).toFixed(2));
-  const row=(l,v,bold)=>`<div style="display:flex;justify-content:space-between;font-size:var(--t-sm);margin:1px 0;${bold?'font-weight:700;color:var(--text)':'color:var(--text2)'}"><span>${l}</span><span style="font-family:var(--mono)">${escapeHtml(fmt(v))}</span></div>`;
-  return `<div class="linked-box" style="background:var(--bg2);margin-top:8px">
-    ${row('Subtotal', t.subtotal)}
-    ${(t.discount && Number(t.discount)>0) ? row('Discount', '-'+Number(t.discount).toFixed(2).slice(0)) : ''}
-    ${(t.tax && Number(t.tax)>0) ? row('Tax', t.tax) : ''}
-    ${row('Total ('+cur+')', t.total, true)}
-    <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Live from Shopify \u00b7 preview only, nothing created yet</div>
-  </div>`;
-}
-async function previewOrderTotals(id){
-  const payload = orderDraftPayload(id);
-  if(!payload) return;
-  if(!payload.line_items.length){ toast('Add at least one line item to preview', true); return; }
-  const btn=document.getElementById('previewBtn'); if(btn){ btn.disabled=true; btn.textContent='Calculating...'; }
-  try{
-    payload.calculate = true;
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-      body: JSON.stringify(payload)
-    });
-    const result = await resp.json();
-    if(!resp.ok) throw new Error(result.error||'Calculate failed');
-    window._orderTotals = window._orderTotals || {};
-    window._orderTotals[id] = result;
-    rerenderOrderBuilder();
-  }catch(err){
-    toast('Preview failed: '+err.message, true);
-    const b=document.getElementById('previewBtn'); if(b){ b.disabled=false; b.textContent='Preview total'; }
-  }
-}
-window.previewOrderTotals = previewOrderTotals;
-
-function summarizeFulfillment(statuses){
-  const set = new Set(statuses.map(s=>String(s||'').trim().toLowerCase()).filter(Boolean));
-  if(!set.size) return { label:'Awaiting fulfillment', color:'pill-muted' };
-  const arr=[...set];
-  const shippedLike = s=>['shipped','fulfilled','complete','completed','delivered'].includes(s);
-  if(arr.every(s=>s==='cancelled')) return { label:'Cancelled', color:'pill-muted' };
-  if(set.has('refunded')) return { label:'Refunded', color:'pill-orange' };
-  if(arr.every(s=>shippedLike(s)||s==='cancelled')) return { label:'Shipped', color:'pill-green' };
-  if(arr.some(s=>shippedLike(s))) return { label:'Partially shipped', color:'pill-teal' };
-  if(set.has('on hold')) return { label:'On hold', color:'pill-orange' };
-  if(set.has('partial')) return { label:'Partial', color:'pill-teal' };
-  if(set.has('packed')) return { label:'Packed', color:'pill-teal' };
-  if(set.has('pre-order') || set.has('pre order')) return { label:'Pre-order', color:'pill-orange' };
-  if(set.has('open')) return { label:'Open (in fulfillment)', color:'pill-teal' };
-  return { label: statuses.find(Boolean) || 'Processing', color:'pill-teal' };
-}
-async function refreshOrderFulfillment(id){
-  const e=(S.emails||[]).find(x=>x.id===id);
-  if(!e || !e.shopify_order_id) return;
-  try{
-    const { data, error } = await sb.from('sales').select('*').eq('order_number', e.shopify_order_id);
-    if(error) throw error;
-    const cur = document.getElementById('orderFulfillmentBox');
-    if(!cur) return;
-    const rows = data||[];
-    if(!rows.length){ cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Not yet synced to the ERP (fulfillment status appears once the order syncs).</span>'; return; }
-    const statuses = rows.map(r=>r.fulfillment_status).filter(Boolean);
-    const sum = summarizeFulfillment(statuses);
-    const tracking = [...new Set(rows.map(r=>r.tracking_number||r.tracking||'').filter(Boolean))];
-    const nShipped = statuses.filter(s=>['shipped','fulfilled','complete','completed','delivered'].includes(String(s).toLowerCase())).length;
-    const mix = (nShipped>0 && nShipped<statuses.length) ? ' ('+nShipped+'/'+statuses.length+' items)' : '';
-    let html = '<span style="color:var(--text3);font-size:var(--t-xs);margin-right:6px">ERP status:</span><span class="pill '+sum.color+'">'+escapeHtml(sum.label)+escapeHtml(mix)+'</span>';
-    if(tracking.length){
-      html += ' '+tracking.map(t=>{
-        return /^https?:\/\//i.test(t) ? '<a href="'+escapeHtml(t)+'" target="_blank" rel="noopener" style="color:var(--teal);font-size:var(--t-xs)">Track \u2197</a>' : '<span class="pill pill-muted" title="Tracking">'+escapeHtml(t)+'</span>';
-      }).join(' ');
-    }
-    html += ' <button class="btn btn-sm" style="padding:2px 8px;margin-left:6px" onclick="refreshOrderFulfillment(\''+id+'\')">Refresh</button>';
-    cur.innerHTML = html;
-  }catch(err){
-    const cur=document.getElementById('orderFulfillmentBox');
-    if(cur) cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Could not read ERP fulfillment.</span>';
-  }
-}
-window.refreshOrderFulfillment = refreshOrderFulfillment;
-
-function renderOrderBuilder(e){
-  const lines = orderLinesFor(e);
-  const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
-  const created = e.shopify_draft_id;
-  return `
-  <div class="linked-box" id="orderBuilder">
-    <div class="panel-title" style="border:none;margin:0 0 8px">Shopify Order</div>
-    ${created ? `<div style="margin-bottom:10px">
-      <span class="pill pill-green">Draft ${escapeHtml(String(e.shopify_draft_id))}</span> ${e.shopify_draft_url?`<a href="${e.shopify_draft_url}" target="_blank" rel="noopener" style="color:var(--teal);margin-left:6px">View in Shopify \u2197</a>`:''}
-      ${e.shopify_order_id ? `<div style="margin-top:6px"><span class="pill pill-teal">Order ${escapeHtml(String(e.shopify_order_id))} created</span></div>
-      <div id="orderFulfillmentBox" style="margin-top:6px;display:flex;align-items:center;gap:4px;flex-wrap:wrap"><span style="color:var(--text3);font-size:var(--t-xs)">Checking ERP fulfillment\u2026</span></div>` : `
-      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn btn-sm" onclick="sendShopifyInvoice('${e.id}')"><span class="ic ic-mail"></span>Send invoice</button>
-        <button class="btn btn-sm btn-teal" onclick="completeShopifyDraft('${e.id}',false)">Mark paid & complete</button>
-        <button class="btn btn-sm" onclick="completeShopifyDraft('${e.id}',true)" title="Complete now, payment pending (net terms)">Complete (net terms)</button>
-      </div>`}
-    </div>` : ''}
-    <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:56px;font-weight:600">Qty</th><th style="width:88px;font-weight:600">Unit $</th><th style="width:28px"></th></tr></thead><tbody>
-      ${lines.map((l,i)=>`<tr>
-        <td style="padding:2px 4px 2px 0;position:relative">
-          <input class="form-input" style="padding:6px" id="orderLineSku_${i}" value="${escapeHtml(l.sku||'')}" placeholder="Part # / SKU" autocomplete="off"
-            oninput="updateOrderLine(${i},'sku',this.value); partTypeahead(${i}, this.value)"
-            onblur="setTimeout(()=>{var b=document.getElementById('orderLineResults_${i}'); if(b) b.style.display='none';},150)">
-          <div id="orderLineResults_${i}" class="pt-results" style="display:none;position:absolute;z-index:30;left:0;right:0;top:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r-sm);max-height:220px;overflow:auto;box-shadow:0 6px 20px rgba(0,0,0,.25)"></div>
-          ${l.desc?`<div style="font-size:var(--t-xs);color:var(--text3);margin-top:2px">${escapeHtml(l.desc)}</div>`:''}
-        </td>
-        <td style="padding:2px;vertical-align:top"><input class="form-input" type="number" min="1" style="padding:6px" value="${l.qty||1}" onchange="updateOrderLine(${i},'qty',this.value)"></td>
-        <td style="padding:2px;vertical-align:top"><input class="form-input" type="number" min="0" step="0.01" style="padding:6px" value="${l.price!=null&&l.price!==''?l.price:''}" placeholder="Shopify" title="Leave blank to use the live Shopify price; enter a price to sell at your own price" onchange="updateOrderLine(${i},'price',this.value)"></td>
-        <td style="padding:2px;text-align:center;vertical-align:top">${lines.length>1?`<button class="btn btn-sm" title="Remove" onclick="removeOrderLine(${i})"><span class="ic ic-x"></span></button>`:''}</td>
-      </tr>`).join('')}
-    </tbody></table>
-    <button class="btn btn-sm" onclick="addOrderLine()" style="margin-top:6px"><span class="ic ic-plus"></span>Add line</button>
-    <div class="form-row cols-2" style="margin-top:10px">
-      <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value,true); clearOrderTotals()"></div>
-      <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
-    </div>
-    <div class="form-row cols-2" style="margin-top:6px">
-      <div class="form-group"><label class="form-label">Shipping method</label>
-        <input class="form-input" list="shipMethodsList" value="${escapeHtml(e.shipping_method||'')}" placeholder="e.g. Ground" onchange="updateEmailField('${e.id}','shipping_method',this.value,true); clearOrderTotals()">
-        <datalist id="shipMethodsList"><option value="Ground"></option><option value="2-Day"></option><option value="Overnight"></option><option value="Freight / LTL"></option><option value="Free Shipping"></option><option value="Local Pickup"></option></datalist>
-      </div>
-      <div class="form-group"><label class="form-label">Shipping cost ($)</label>
-        <input class="form-input" type="number" min="0" step="0.01" value="${e.shipping_cost!=null&&e.shipping_cost!==''?e.shipping_cost:''}" placeholder="0.00" onchange="updateEmailField('${e.id}','shipping_cost',this.value,true); clearOrderTotals()">
-      </div>
-    </div>
-    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 8px">A shipping method is required for the order to import into ShipStation. For a dealer order without customer checkout, also set a ship-to address above (Drop-ship / customer order).</div>
-    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Leave <strong>Unit $</strong> blank to use the live Shopify price, or enter your own price to sell a part at a custom rate (works for any part number). The dealer % applies to the whole order; the billing code is an ERP-tracking label and does not change the amount.</div>
-    ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
-    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">
-      <button class="btn btn-sm" onclick="saveOrderLines('${e.id}')">Save lines</button>
-      <button class="btn btn-sm btn-teal" id="previewBtn" onclick="previewOrderTotals('${e.id}')">Preview total</button>
-      ${created
-        ? `<button class="btn btn-primary btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">Recreate Draft</button>`
-        : `<button class="btn btn-sm" id="createDraftBtn" onclick="createShopifyDraft('${e.id}')">Save draft</button>
-           <button class="btn btn-sm btn-teal" onclick="createAndInvoice('${e.id}')">Create &amp; Send Invoice</button>
-           <button class="btn btn-primary btn-sm" onclick="createAndMarkPaid('${e.id}')">Create &amp; Mark Paid</button>`}
-    </div>
-  </div>`;
-}
-function rerenderOrderBuilder(){ const el=document.getElementById('orderBuilder'); if(el && S.activeEmail) el.outerHTML = renderOrderBuilder(S.activeEmail); }
-function addOrderLine(){ clearOrderTotals(); orderLinesFor(S.activeEmail).push({sku:'',qty:1,desc:''}); rerenderOrderBuilder(); }
-function removeOrderLine(i){ clearOrderTotals(); const l=orderLinesFor(S.activeEmail); l.splice(i,1); rerenderOrderBuilder(); }
-function updateOrderLine(i,field,val){ clearOrderTotals(); const l=orderLinesFor(S.activeEmail)[i]; if(!l) return; l[field] = field==='qty' ? Math.max(1,parseInt(val)||1) : val; }
-window.addOrderLine=addOrderLine; window.removeOrderLine=removeOrderLine; window.updateOrderLine=updateOrderLine;
-
-async function saveOrderLines(id){
-  try{
-    const lines = (window._orderLines||[]).filter(l=>l.sku && l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), desc:l.desc||'', price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null}));
-    const { data, error } = await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id).select().single();
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data; if(S.activeEmail&&S.activeEmail.id===id) S.activeEmail=data;
-    toast('Order lines saved');
-  }catch(e){ toast('Save failed: '+e.message, true); }
-}
-window.saveOrderLines=saveOrderLines;
-
-async function createShopifyDraft(id){
-  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
-  if(!lines.length){ toast('Add at least one line item', true); return; }
-  const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
-  let shipping = null;
-  if(e.is_dropship){
-    shipping = { name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' };
-  }
-  try{
-    await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id);
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-      body: JSON.stringify({
-        email_id:id,
-        dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
-        line_items: lines,
-        discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
-        discount_code: e.order_discount_code||null,
-        shipping: shipping
-      })
-    });
-    const result = await resp.json();
-    if(!resp.ok) throw new Error(result.error||'Shopify draft failed');
-    const i=S.emails.findIndex(x=>x.id===id);
-    if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_gid=result.draft_gid; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
-    renderEmailPanel(S.activeEmail);
-    toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
-    return result;
-  }catch(err){
-    toast('Draft failed: '+err.message, true);
-    if(btn){ btn.disabled=false; btn.textContent='Create Draft in Shopify'; }
-    return null;
-  }
-}
-window.createShopifyDraft=createShopifyDraft;
-
-async function draftAction(id, action, extra){
-  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return null;
-  if(!e.shopify_draft_gid){ toast('Recreate the draft first (older drafts are missing their Shopify reference).', true); return null; }
-  const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-    body: JSON.stringify({ action, email_id:id, draft_gid:e.shopify_draft_gid, ...(extra||{}) })
-  });
-  const r = await resp.json();
-  if(!resp.ok) throw new Error(r.error||'Shopify action failed');
-  return r;
-}
-async function sendShopifyInvoice(id){
-  try{ const r = await draftAction(id, 'invoice'); if(r) toast('Invoice sent to the customer'); }
-  catch(err){ toast('Invoice failed: '+err.message, true); }
-}
-window.sendShopifyInvoice = sendShopifyInvoice;
-async function completeShopifyDraft(id, paymentPending, skipConfirm){
-  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  if(!skipConfirm && !confirm(paymentPending?'Complete this draft into an order with payment PENDING (net terms)?':'Mark this draft PAID and complete it into a real order?')) return;
-  try{
-    const r = await draftAction(id, 'complete', { payment_pending: !!paymentPending });
-    if(!r) return;
-    const i=S.emails.findIndex(x=>x.id===id);
-    if(i!==-1){ S.emails[i].shopify_order_id=r.order_id; S.activeEmail=S.emails[i]; }
-    renderEmailPanel(S.activeEmail);
-    if(S.activeEmail && S.activeEmail.shopify_order_id) refreshOrderFulfillment(id);
-    toast('Order created'+(r.order_id?(' '+r.order_id):''));
-  }catch(err){ toast('Complete failed: '+err.message, true); }
-}
-window.completeShopifyDraft = completeShopifyDraft;
-
-// Dealer flow: create the draft, then complete it as PAID in one step.
-async function createAndMarkPaid(id){
-  if(window._orderChainBusy) return;
-  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  const hasShip = !!(e.is_dropship && (e.ship_address1 || e.ship_city));
-  if(!hasShip && !confirm('This order has no ship-to address, so it may not import into ShipStation. Create and mark paid anyway?\n\nTip: enable "Drop-ship / customer order" above to add an address.')) return;
-  window._orderChainBusy = true;
-  try{
-    const r = await createShopifyDraft(id);
-    if(!r) return;
-    await completeShopifyDraft(id, false, true);
-  } finally { window._orderChainBusy = false; }
-}
-window.createAndMarkPaid = createAndMarkPaid;
-
-// Customer flow: create the draft, then send the Shopify invoice for them to pay.
-async function createAndInvoice(id){
-  if(window._orderChainBusy) return;
-  window._orderChainBusy = true;
-  try{
-    const r = await createShopifyDraft(id);
-    if(!r) return;
-    await sendShopifyInvoice(id);
-  } finally { window._orderChainBusy = false; }
-}
-window.createAndInvoice = createAndInvoice;
-
-function renderEmailPanel(e){
-  const msgs = S.emailMessages[e.id] || [];
-  const linkedTicket = e.converted_ticket_id ? S.tickets.find(t=>t.id===e.converted_ticket_id) : null;
-  document.getElementById('tk-panel').innerHTML = `
-    <div class="tk-head">
-      <div class="tk-head-title">${emailRef(e)} <span style="font-weight:400;color:var(--text3);font-size:var(--t-sm)">${escapeHtml(e.subject||'')}</span></div>
-      ${e.status!=='archived'
-        ? `<button class="tk-close" title="Mark unread" onclick="markEmailUnread('${e.id}')"><span class="ic ic-mail"></span></button>
-           <button class="tk-close" title="Archive email" style="color:var(--red)" onclick="archiveEmail('${e.id}')"><span class="ic ic-trash"></span></button>`
-        : `<button class="tk-close" title="Restore to inbox" onclick="unarchiveEmail('${e.id}')"><span class="ic ic-refresh"></span></button>
-           <button class="tk-close" title="Delete permanently" style="color:var(--red)" onclick="deleteEmail('${e.id}')"><span class="ic ic-trash"></span></button>`}
-      <button class="tk-close" onclick="closePanel()"><span class="ic ic-x"></span></button>
-    </div>
-    ${renderTicketTracker(e)}
-    <div class="tk-body">
-      <div class="linked-box" style="background:var(--bg2);display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <span><span class="ic ic-user"></span><strong>${escapeHtml(e.customer_email || (e.mailbox==='orders' ? ((e.ship_name||'').trim() || 'Manual order \u2014 assign a dealer') : 'unknown sender'))}</strong></span>
-        ${linkedTicket
-          ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
-          : e.mailbox==='orders'
-            ? (()=>{ const st = e.source_ticket_id ? S.tickets.find(x=>x.id===e.source_ticket_id) : null; const se = e.source_email_id ? S.emails.find(x=>x.id===e.source_email_id) : null; return st ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${st.id}'),60)">From ticket #${st.ticket_number} \u2197</span>` : se ? `<span class="pill pill-teal">From ${emailRef(se)}</span>` : ''; })()
-            : `<span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button><button class="btn btn-sm" onclick="convertEmailToOrder('${e.id}')"><span class="ic ic-box"></span>Create Order</button></span>`}
-      </div>
-      <div class="linked-box">
-        <div class="form-group" style="margin:0">
-          <label class="form-label">Assigned to</label>
-          <select class="form-input" onchange="updateEmailField('${e.id}','assigned_to',this.value)">
-            <option value="">\u2014 Unassigned \u2014</option>
-            ${(S.team||[]).map(m=>`<option value="${m.email}" ${e.assigned_to===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
-          </select>
-        </div>
-      </div>
-      ${e.mailbox==='orders' ? `<div class="linked-box">
-        <div class="form-row cols-2">
-          <div class="form-group">
-            <label class="form-label">Dealer</label>
-            <select class="form-input" onchange="setOrderDealer('${e.id}',this.value)">
-              <option value="">\u2014 Unassigned \u2014</option>
-              ${(S.dealers||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(d=>`<option value="${d.id}" ${String(e.dealer_id)===String(d.id)?'selected':''}>${escapeHtml(d.name||d.email||'Dealer')}</option>`).join('')}
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">PO Number (optional)</label>
-            <input class="form-input" value="${escapeHtml(e.po_number||'')}" placeholder="Dealer PO #" onchange="setOrderPO('${e.id}',this.value)">
-          </div>
-        </div>
-        ${e.dealer_id ? `<div style="margin-top:8px;font-size:var(--t-xs);color:var(--text3)">${dealerWholesalePct(e.dealer_id)!=null?('Standard dealer rate: <strong>'+dealerWholesalePct(e.dealer_id)+'%</strong> (from ERP) \u2014 auto-fills the discount below, still editable per order'):('No standard rate set for this dealer in the ERP \u2014 set the discount manually below')}</div>` : ''}
-      </div>` : ''}
-      ${e.mailbox==='orders' ? `<div class="linked-box" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        <span style="font-size:var(--t-sm);color:var(--text3)">Order status: <strong style="color:${e.status==='completed'?'var(--green)':'var(--teal)'}">${e.status==='completed'?'Completed':'Active'}</strong></span>
-        ${e.status==='completed'
-          ? `<button class="btn btn-sm" onclick="setOrderComplete('${e.id}',false)"><span class="ic ic-refresh"></span>Reopen</button>`
-          : `<button class="btn btn-sm btn-teal" onclick="setOrderComplete('${e.id}',true)"><span class="ic ic-check"></span>Mark Complete</button>`}
-      </div>` : ''}
-      ${e.mailbox==='orders' ? renderShipTo(e) : ''}
-      ${e.mailbox==='orders' ? renderOrderBuilder(e) : ''}
-      <div id="threadBox">${renderEmailThread(msgs)}</div>
-      ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
-      <div id="replyComposer" style="margin-top:12px">
-        <textarea id="msgBox" rows="3" placeholder="Reply to ${escapeHtml(e.customer_email||'the sender')}..." class="form-input" style="resize:vertical"></textarea>
-        <div class="checkbox-row" style="justify-content:flex-start;margin-top:6px">
-          <label class="btn btn-sm" style="cursor:pointer;margin:0"><span class="ic ic-link"></span>Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
-        </div>
-        <div id="msgAttachPreview" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px"></div>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:flex-end">
-          <span style="font-size:var(--t-xs);color:var(--text3);margin-right:auto">Sends from support@ and threads back automatically</span>
-          <button class="btn btn-primary" onclick="sendEmailReply('${e.id}')" id="sendBtn">Send Reply</button>
-        </div>
-      </div>`}
-    </div>
-  `;
-}
-
-async function sendEmailReply(emailId){
-  const box = document.getElementById('msgBox');
-  const body = box.value.trim();
-  if(!body) return;
-  const e = (S.emails||[]).find(x=>x.id===emailId);
-  if(!e){ toast('Email not found', true); return; }
-  if(!e.customer_email){ toast('No sender address on this email', true); return; }
-  const btn = document.getElementById('sendBtn');
-  if(btn){ btn.disabled=true; btn.textContent='Sending...'; }
-  try{
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-email-reply`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-      body: JSON.stringify({
-        email_id: emailId,
-        email_number: e.email_number,
-        display_number: e.display_number,
-        mailbox: e.mailbox,
-        to: e.customer_email,
-        subject: e.subject ? ('Re: '+e.subject) : 'Re: your message to TGK Motorsport',
-        body,
-        attachments: pendingMsgAttachments,
-        staff_name: (typeof friendlyStaffName==='function')?friendlyStaffName():'',
-        staff_email: (S.user&&S.user.email)||null
-      })
-    });
-    const result = await resp.json();
-    if(!resp.ok) throw new Error(result.error||'Send failed');
-    box.value='';
-    pendingMsgAttachments = [];
-    await loadEmailMessages(emailId);
-    const i=S.emails.findIndex(x=>x.id===emailId);
-    if(i!==-1){
-      S.emails[i].last_message_at=new Date().toISOString();
-      S.emails[i].last_reply_by=(S.user&&S.user.email)||null;
-      S.emails[i].last_reply_at=new Date().toISOString();
-      S.emails[i].has_unread=false; S.emails[i].unread_count=0;
-      if(S.emails[i].status!=='archived') S.emails[i].status='read';
-      S.activeEmail=S.emails[i];
-    }
-    renderEmailPanel(S.activeEmail);
-    scrollThreadToBottom();
-    renderNav();
-    toast('Reply sent to '+e.customer_email);
-  }catch(err){
-    toast('Send failed: '+err.message, true);
-    if(btn){ btn.disabled=false; btn.textContent='Send Reply'; }
-  }
-}
-window.sendEmailReply = sendEmailReply;
-
-async function archiveEmail(id){
-  try{
-    const { data } = await sb.from('emails').update({ status:'archived', has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', id).select().single();
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1 && data) S.emails[i]=data;
-    toast('Email archived');
-    closePanel(); renderNav(); renderEmailsList();
-  }catch(e){ toast('Archive failed: '+e.message, true); }
-}
-window.archiveEmail = archiveEmail;
-
-async function unarchiveEmail(id){
-  try{
-    const { data } = await sb.from('emails').update({ status:'read', updated_at:new Date().toISOString() }).eq('id', id).select().single();
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1 && data) S.emails[i]=data;
-    toast('Email restored to inbox'); renderNav();
-    if(data) openEmail(id);
-  }catch(e){ toast('Restore failed: '+e.message, true); }
-}
-window.unarchiveEmail = unarchiveEmail;
-
-async function deleteEmail(id){
-  const e=(S.emails||[]).find(x=>x.id===id);
-  const ref = e ? emailRef(e) : 'this item';
-  if(!confirm('Permanently delete ' + ref + '? This erases the conversation and all its messages, and cannot be undone.')) return;
-  try{
-    const { error } = await sb.from('emails').delete().eq('id', id);
-    if(error) throw error;
-    const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails.splice(i,1);
-    if(S.emailMessages) delete S.emailMessages[id];
-    toast('Permanently deleted');
-    closePanel(); renderNav();
-    if(S.page==='emails' || S.page==='orders') renderEmailsList();
-  }catch(err){ toast('Delete failed: '+err.message, true); }
-}
-window.deleteEmail = deleteEmail;
-
-async function emptyArchive(){
-  const mb = currentMailbox();
-  const archived = (S.emails||[]).filter(e=>emailInMailbox(e, mb) && e.status==='archived');
-  if(!archived.length){ toast('Archive is already empty'); return; }
-  if(!confirm('Permanently delete all ' + archived.length + ' archived ' + (mb==='orders'?'order(s)':'email(s)') + '? This cannot be undone.')) return;
-  try{
-    const ids = archived.map(e=>e.id);
-    const { error } = await sb.from('emails').delete().in('id', ids);
-    if(error) throw error;
-    S.emails = S.emails.filter(e=>!ids.includes(e.id));
-    ids.forEach(id=>{ if(S.emailMessages) delete S.emailMessages[id]; });
-    toast('Permanently deleted ' + ids.length + ' item' + (ids.length!==1?'s':''));
-    renderNav(); renderEmailsList();
-  }catch(err){ toast('Delete failed: '+err.message, true); }
-}
-window.emptyArchive = emptyArchive;
-
-async function convertEmailToTicket(id){
-  const e = (S.emails||[]).find(x=>x.id===id);
-  if(!e){ toast('Email not found', true); return; }
-  if(e.converted_ticket_id){ toast('Already converted to a ticket', true); return; }
-  if(!confirm(`Convert ${emailRef(e)} from ${e.customer_email||'unknown'} into a support ticket? The whole conversation moves into the new ticket and the email is archived.`)) return;
-  try{
-    const msgs = S.emailMessages[e.id] && S.emailMessages[e.id].length ? S.emailMessages[e.id] : await loadEmailMessages(e.id);
-    const { data:ticket, error:tErr } = await sb.from('tickets').insert({
-      source:'email', status:'open', priority:'medium',
-      subject: e.subject || '(no subject)',
-      customer_email: e.customer_email || null,
-      has_unread: false, unread_count: 0
-    }).select().single();
-    if(tErr) throw tErr;
-    if(msgs.length){
-      const rows = msgs.map(m=>({
-        ticket_id: ticket.id,
-        sender_type: m.direction==='outbound' ? 'staff' : 'customer',
-        sender_name: m.sender_name || m.from_email || (m.direction==='outbound'?'TGK Support':(e.customer_email||'Customer')),
-        body: m.body || '',
-        is_internal_note: false,
-        attachments: m.attachments || [],
-        created_at: m.created_at
-      }));
-      const { error:mErr } = await sb.from('ticket_messages').insert(rows);
-      if(mErr) throw mErr;
-    }
-    const { data:updatedEmail } = await sb.from('emails').update({ converted_ticket_id: ticket.id, status:'archived', has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', e.id).select().single();
-    const i=S.emails.findIndex(x=>x.id===e.id); if(i!==-1 && updatedEmail) S.emails[i]=updatedEmail;
-    S.tickets.unshift(ticket);
-    toast('Converted to ticket #'+ticket.ticket_number);
-    closePanel();
-    goPage('tickets');
-    setTimeout(()=>openTicket(ticket.id), 60);
-  }catch(err){
-    toast('Convert failed: '+err.message, true);
-  }
-}
-window.convertEmailToTicket = convertEmailToTicket;
-
-function _nextOrderDisplayNumber(){
-  const orders=(S.emails||[]).filter(e=>e.mailbox==='orders');
-  return orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
-}
-function _matchDealerByEmail(email){
-  if(!email) return null;
-  const d=(S.dealers||[]).find(x=>x.email && String(x.email).toLowerCase()===String(email).toLowerCase());
-  return d ? d.id : null;
-}
-async function convertTicketToOrder(ticketId){
-  const t=S.tickets.find(x=>x.id===ticketId); if(!t) return;
-  if(t.converted_order_id){ toast('This ticket was already converted to an order', true); return; }
-  if(!confirm('Create an order from ticket #'+t.ticket_number+'? The conversation copies onto the order and communication continues there.')) return;
-  if(window._orderCreateBusy) return;
-  window._orderCreateBusy = true;
-  let createdOrderId = null;
-  try{
-    const msgs = (S.messages[ticketId] && S.messages[ticketId].length) ? S.messages[ticketId] : await loadMessages(ticketId);
-    const num = _nextOrderDisplayNumber();
-    const addr = t.shipping_address || {};
-    const hasAddr = !!(addr.street1 || addr.city);
-    const { data: order, error } = await sb.from('emails').insert({
-      mailbox:'orders', subject: t.subject||'Order', status:'read', has_unread:false, unread_count:0,
-      display_number: num, last_message_at:new Date().toISOString(),
-      customer_email: t.customer_email||null, dealer_id: _matchDealerByEmail(t.customer_email),
-      source_ticket_id: ticketId, is_dropship: hasAddr,
-      ship_name: addr.name || t.customer_name || null, ship_email: t.customer_email || null, ship_phone: t.customer_phone || null,
-      ship_address1: addr.street1 || null, ship_address2: addr.street2 || null,
-      ship_city: addr.city || null, ship_province: addr.state || null,
-      ship_zip: addr.postal_code || null, ship_country: addr.country || 'US'
-    }).select().single();
-    if(error) throw error;
-    createdOrderId = order.id;
-    const rows=[];
-    if(t.description) rows.push({ email_id:order.id, direction:'inbound', sender_name: t.customer_name||t.customer_email||'Customer', from_email: t.customer_email||null, body: t.description, attachments: (t.attachments||[]), created_at: t.created_at });
-    (msgs||[]).filter(m=>!m.is_internal_note).forEach(m=>{
-      rows.push({ email_id:order.id, direction: m.sender_type==='staff'?'outbound':'inbound', sender_name: m.sender_name||(m.sender_type==='staff'?'TGK Support':(t.customer_email||'Customer')), body: m.body||'', attachments: (m.attachments||[]), created_at: m.created_at });
-    });
-    if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
-    await sb.from('tickets').update({ status:'resolved', converted_order_id: order.id, resolved_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', ticketId);
-    try{ await sb.from('ticket_messages').insert({ ticket_id:ticketId, sender_type:'system', sender_name:'System', body:'Converted to order ORD-'+String(num).padStart(4,'0')+' by '+((S.user&&S.user.email)||'staff')+'. Communication continues on that order.', is_internal_note:true }); }catch(_){}
-    const ti=S.tickets.findIndex(x=>x.id===ticketId); if(ti!==-1){ S.tickets[ti].status='resolved'; S.tickets[ti].converted_order_id=order.id; }
-    S.emails.unshift(order);
-    toast('Created order ORD-'+String(num).padStart(4,'0'));
-    closePanel(); renderNav();
-    goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
-  }catch(err){
-    if(createdOrderId){ try{ await sb.from('emails').delete().eq('id', createdOrderId); }catch(_){} const i=S.emails.findIndex(x=>x.id===createdOrderId); if(i!==-1) S.emails.splice(i,1); }
-    toast('Convert failed: '+err.message, true);
-  }finally{ window._orderCreateBusy = false; }
-}
-window.convertTicketToOrder = convertTicketToOrder;
-
-async function convertEmailToOrder(emailId){
-  const e=(S.emails||[]).find(x=>x.id===emailId); if(!e) return;
-  if(e.converted_order_id){ toast('This email was already converted to an order', true); return; }
-  if(!confirm('Create an order from '+emailRef(e)+'? The conversation copies onto the order and communication continues there.')) return;
-  if(window._orderCreateBusy) return;
-  window._orderCreateBusy = true;
-  let createdOrderId = null;
-  try{
-    const msgs = (S.emailMessages[emailId] && S.emailMessages[emailId].length) ? S.emailMessages[emailId] : await loadEmailMessages(emailId);
-    const num = _nextOrderDisplayNumber();
-    const { data: order, error } = await sb.from('emails').insert({
-      mailbox:'orders', subject: e.subject||'Order', status:'read', has_unread:false, unread_count:0,
-      display_number: num, last_message_at:new Date().toISOString(),
-      customer_email: e.customer_email||null, dealer_id: e.dealer_id || _matchDealerByEmail(e.customer_email),
-      source_email_id: emailId, ship_name: e.ship_name || null, ship_email: e.customer_email || null
-    }).select().single();
-    if(error) throw error;
-    createdOrderId = order.id;
-    const rows=(msgs||[]).map(m=>({ email_id:order.id, direction:m.direction, sender_name:m.sender_name, from_email:m.from_email, to_email:m.to_email, body:m.body||'', attachments:(m.attachments||[]), created_at:m.created_at }));
-    if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
-    await sb.from('emails').update({ status:'archived', converted_order_id: order.id, has_unread:false, unread_count:0, updated_at:new Date().toISOString() }).eq('id', emailId);
-    const si=S.emails.findIndex(x=>x.id===emailId); if(si!==-1){ S.emails[si].status='archived'; S.emails[si].converted_order_id=order.id; }
-    S.emails.unshift(order);
-    toast('Created order '+emailRef(order));
-    closePanel(); renderNav();
-    goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
-  }catch(err){
-    if(createdOrderId){ try{ await sb.from('emails').delete().eq('id', createdOrderId); }catch(_){} const i=S.emails.findIndex(x=>x.id===createdOrderId); if(i!==-1) S.emails.splice(i,1); }
-    toast('Convert failed: '+err.message, true);
-  }finally{ window._orderCreateBusy = false; }
-}
-window.convertEmailToOrder = convertEmailToOrder;
 
 const TRACKED_ACTIVITY_FIELDS = ['status','priority','assigned_to'];
 
@@ -4073,7 +2906,7 @@ async function logActivity(ticketId, fieldChanged, oldValue, newValue){
   }catch(e){ /* non-critical, don't block the actual update on log failure */ }
 }
 
-async function updateTicketField(id, field, value, skipUndo){
+async function updateTicketField(id, field, value){
   try{
     const before = S.tickets.find(x=>x.id===id);
     const oldValue = before ? before[field] : undefined;
@@ -4086,10 +2919,6 @@ async function updateTicketField(id, field, value, skipUndo){
     S.activeTicket = data;
     if(TRACKED_ACTIVITY_FIELDS.includes(field) && oldValue !== value){
       await logActivity(id, field, oldValue, value);
-    }
-    if(!skipUndo && JSON.stringify(oldValue) !== JSON.stringify(value)){
-      const num = (before && before.ticket_number) || '';
-      pushUndo({ label:'ticket #'+num+' '+field, undo:()=>updateTicketField(id, field, oldValue, true), redo:()=>updateTicketField(id, field, value, true) });
     }
     toast('Ticket updated');
     renderNav();
@@ -4762,36 +3591,29 @@ async function confirmMerge(sourceId, targetId){
   if(!confirm(`Merge ticket #${source.ticket_number} into #${target.ticket_number}? This moves all its messages and closes #${source.ticket_number}.`)) return;
 
   try{
-    // Move all messages from source to target. .select() returns the moved rows
-    // so we can confirm the move actually took -- a 0-row result here (rather
-    // than an error) is the classic silent half-merge and we surface it loudly.
-    const { data: movedRows, error: moveErr } = await sb.from('ticket_messages')
-      .update({ ticket_id: targetId }).eq('ticket_id', sourceId).select('id');
-    if(moveErr) throw new Error('moving messages: ' + moveErr.message);
+    // Move all messages from source to target
+    const { error: moveErr } = await sb.from('ticket_messages').update({ ticket_id: targetId }).eq('ticket_id', sourceId);
+    if(moveErr) throw moveErr;
 
-    // Drop a system note in the target thread noting the merge. Error-checked
-    // now (it was fire-and-forget before) so a rejected insert can't leave a
-    // half-done merge with no trace.
-    const { error: noteErr } = await sb.from('ticket_messages').insert({
+    // Drop a system note in the target thread noting the merge
+    await sb.from('ticket_messages').insert({
       ticket_id: targetId,
       sender_type: 'system',
       sender_name: 'System',
-      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}. ${(movedRows||[]).length} message(s) moved over.`,
+      body: `Ticket #${source.ticket_number} ("${source.subject}") was merged into this ticket by ${S.user.email}.`,
       is_internal_note: true
     });
-    if(noteErr) throw new Error('writing merge note: ' + noteErr.message);
 
     // Close and flag the source ticket
     const { data: updatedSource, error: srcErr } = await sb.from('tickets')
       .update({ status:'closed', merged_into_id: targetId, resolved_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', sourceId).select().single();
-    if(srcErr) throw new Error('closing source ticket: ' + srcErr.message);
-    if(!updatedSource) throw new Error('source ticket update matched 0 rows -- merge_into_id may not have saved');
+    if(srcErr) throw srcErr;
 
     const { data: updatedTarget, error: tgtErr } = await sb.from('tickets')
       .update({ updated_at: new Date().toISOString() })
       .eq('id', targetId).select().single();
-    if(tgtErr) throw new Error('touching target ticket: ' + tgtErr.message);
+    if(tgtErr) throw tgtErr;
 
     const si = S.tickets.findIndex(x=>x.id===sourceId);
     if(si!==-1) S.tickets[si] = updatedSource;
@@ -4848,13 +3670,11 @@ async function sendMessage(ticketId){
   const box = document.getElementById('msgBox');
   const composer = document.getElementById('replyComposer');
   const isNote = composer && composer.getAttribute('data-mode') === 'notes';
+  const emailChkEl = document.getElementById('emailChk');
+  const shouldEmail = !isNote && emailChkEl && emailChkEl.checked;
   const body = box.value.trim();
   if(!body) return;
   const t = S.tickets.find(x=>x.id===ticketId);
-  // A conversation reply always emails the customer automatically -- no opt-in
-  // checkbox to forget. Exceptions: live chat (delivered in the widget) and
-  // internal notes (staff-only).
-  const shouldEmail = !isNote && !!(t && t.customer_email) && !(t && t.is_live_chat);
 
   try{
     const { data, error } = await sb.from('ticket_messages').insert({
@@ -4874,24 +3694,7 @@ async function sendMessage(ticketId){
     if(preview) preview.innerHTML = '';
     document.getElementById('threadBox').innerHTML = renderThread(S.messages[ticketId], showingNotes);
     scrollThreadToBottom();
-    // Bump activity, and on an actual reply (not an internal note) record who
-    // replied for the tracker, then refresh the subtle strip in place.
-    const _replyStamp = { updated_at: new Date().toISOString() };
-    if(!isNote){ _replyStamp.last_reply_by = (S.user && S.user.email) || null; _replyStamp.last_reply_at = new Date().toISOString(); }
-    try{
-      const { data: _tu } = await sb.from('tickets').update(_replyStamp).eq('id', ticketId).select().single();
-      if(_tu){
-        const _i = S.tickets.findIndex(x=>x.id===ticketId);
-        if(_i!==-1) S.tickets[_i] = _tu;
-        if(S.activeTicket && S.activeTicket.id===ticketId) S.activeTicket = _tu;
-        const _tk = document.getElementById('tkTracker');
-        if(_tk && S.activeTicket) _tk.outerHTML = renderTicketTracker(S.activeTicket);
-      }
-    }catch(_){ /* non-critical */ }
-
-    if(!isNote && !(t && t.is_live_chat) && !(t && t.customer_email)){
-      toast("Reply saved, but there's no email on file so the customer won't receive it. Add a customer email to reach them.", true);
-    }
+    await sb.from('tickets').update({ updated_at: new Date().toISOString() }).eq('id', ticketId);
 
     if(shouldEmail && t && t.customer_email){
       toast('Sending email...');
