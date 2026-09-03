@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.65';
+const TGK_SUPPORT_VERSION = 'v1.67';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1743,6 +1743,10 @@ function escapeHtml(s){
 // angle brackets, e.g. <http://example.com/very/long/link>.
 function linkifyBody(s){
   let esc = escapeHtml(s==null?'':s);
+  // Older messages were stored as tag-stripped text, which can leave raw CSS
+  // rules (e.g. ".main-style { font-family: ... }") dumped inline. Strip those.
+  esc = esc.replace(/(@media[^{]*\{[\s\S]*?\}\s*\})/g, '');
+  esc = esc.replace(/[.#]?[\w-]+\s*\{[^{}]*\}/g, '');
   // Unwrap angle-bracketed URLs: &lt;http...&gt; -> http... (escaped form).
   esc = esc.replace(/&lt;(https?:\/\/[^\s]+?)&gt;/gi, '$1');
   const linked = esc.replace(/(https?:\/\/[^\s<]+|www\.[^\s<]+)/g, (m)=>{
@@ -3106,7 +3110,7 @@ async function toggleThreadTranslation(btn){
   btn.setAttribute('data-on','1'); btn.disabled=true; btn.textContent='Translating\u2026';
   for(const el of bodies){
     if(document.getElementById(el.id+'_xl')) continue;
-    const text=(el.innerText||'').trim(); if(!text) continue;
+    const text=(el.getAttribute('data-xltext')||el.innerText||'').trim(); if(!text) continue;
     const holder=document.createElement('div');
     holder.id=el.id+'_xl';
     holder.style.cssText='margin-top:6px;padding:8px 10px;border-left:2px solid var(--teal);background:var(--teal-dim);border-radius:var(--r-sm);font-size:var(--t-sm)';
@@ -3121,6 +3125,20 @@ async function toggleThreadTranslation(btn){
 }
 window.toggleThreadTranslation = toggleThreadTranslation;
 
+// Renders a message body: real (sanitized) HTML in a sandboxed iframe so it
+// looks like a true email and the sender's CSS can't bleed into the app; falls
+// back to linkified plain text for older/plain-text messages.
+function emailFrame(html){
+  const doc = '<!doctype html><html><head><meta charset="utf-8"><base target="_blank"><style>html,body{margin:0}body{padding:8px 10px;font-family:sans-serif;font-size:13px;line-height:1.5;color:#111827;word-break:break-word;overflow-x:hidden}img{max-width:100%;height:auto}a{color:#0d9488}table{max-width:100%!important}*{max-width:100%}</style></head><body>'+String(html||'')+'</body></html>';
+  const esc = doc.replace(/&/g,'&amp;').replace(/"/g,'&quot;');
+  return '<iframe class="email-html" sandbox="allow-same-origin" srcdoc="'+esc+'" style="width:100%;border:0;display:block;min-height:60px" onload="sizeEmailFrame(this)"></iframe>';
+}
+window.sizeEmailFrame = function(f){
+  try{ const d=f.contentDocument||f.contentWindow.document; f.style.height=((d.body?d.body.scrollHeight:0)+18)+'px'; }
+  catch(e){ f.style.height='320px'; }
+};
+function msgBody(m){ return (m && m.body_html && String(m.body_html).trim()) ? emailFrame(m.body_html) : linkifyBody(m ? (m.body||'') : ''); }
+
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
@@ -3128,7 +3146,7 @@ function renderThread(msgs, notesOnly){
   return threadTranslateBar(needed) + list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div id="tmsg_${m.id}" class="xl-body">${linkifyBody(m.body)}</div>
+      <div id="tmsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(m.body||'')}">${msgBody(m)}</div>
       ${renderAttachments(m.attachments)}
     </div>
   `).join('');
@@ -3333,7 +3351,7 @@ function renderEmailThread(msgs){
   return threadTranslateBar(needed) + msgs.map(m=>`
     <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div id="emsg_${m.id}" class="xl-body">${linkifyBody(m.body||'')}</div>
+      <div id="emsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(m.body||'')}">${msgBody(m)}</div>
       ${renderAttachments(m.attachments)}
     </div>
   `).join('');
@@ -3411,7 +3429,7 @@ function renderShipTo(e){
     ${on?`<div style="margin-top:10px">
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Ship-to name</label>${q(e.id,'ship_name')}</div>
-        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}</div>
+        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}<div style="font-size:var(--t-xs);color:var(--text3);margin-top:2px">Leave blank and Shopify sends no receipt to anyone. Only this exact address is ever emailed.</div></div>
       </div>
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Phone</label>${q(e.id,'ship_phone')}</div>
@@ -3747,6 +3765,9 @@ window.createAndMarkPaid = createAndMarkPaid;
 // Customer flow: create the draft, then send the Shopify invoice for them to pay.
 async function createAndInvoice(id){
   if(window._orderChainBusy) return;
+  const e=(S.emails||[]).find(x=>x.id===id);
+  const email = e && e.is_dropship ? (e.ship_email||'').trim() : '';
+  if(!email){ toast('Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.', true); return; }
   window._orderChainBusy = true;
   try{
     const r = await createShopifyDraft(id);
