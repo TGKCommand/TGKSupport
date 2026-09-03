@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.64';
+const TGK_SUPPORT_VERSION = 'v1.65';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -704,7 +704,7 @@ async function fetchAll(queryFn, pageSize=1000){
 
 async function loadAll(){
   try{
-    const [tickets, warranty, shipErrors, dealers, team, templates] = await Promise.all([
+    const results = await Promise.allSettled([
       fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
       fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
@@ -713,12 +713,16 @@ async function loadAll(){
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
     ]);
-    S.tickets = tickets;
-    S.warranty = warranty;
-    S.shipErrors = shipErrors;
-    S.dealers = dealers;
-    S.team = team;
-    S.templates = templates;
+    const val = (i, def)=> results[i].status==='fulfilled' ? results[i].value : def;
+    // A single failing table no longer blanks the whole app -- keep whatever loaded.
+    S.tickets   = val(0, S.tickets||[]);
+    S.warranty  = val(1, S.warranty||[]);
+    S.shipErrors= val(2, S.shipErrors||[]);
+    S.dealers   = val(3, S.dealers||[]);
+    S.team      = val(4, S.team||[]);
+    S.templates = val(5, S.templates||[]);
+    const failed = results.filter(r=>r.status==='rejected').length;
+    if(failed) toast('Some data failed to load ('+failed+' of '+results.length+'). Showing what loaded.', true);
     await loadEmails();
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
@@ -738,7 +742,7 @@ async function loadMessages(ticketId){
 function subscribeRealtime(){
   sb.channel('support-tickets')
     .on('postgres_changes', { event:'*', schema:'public', table:'tickets' }, payload=>{
-      if(isUserActivelyWorking() && S.page==='ticket_detail') return;
+      if(isUserActivelyWorking() && S.activeTicket) return;
       handleTicketRealtime(payload);
     })
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'ticket_messages' }, payload=>{
@@ -2781,9 +2785,9 @@ function renderTicketPanel(t){
       </div>
       ${t.description ? (isWholesaleApp(t.description) ? renderWholesaleApp(t) : `<div class="linked-box" style="background:var(--blue-dim)">
         <div class="lk-title">Original Customer Submission (${label(t.source)})</div>
-        <div id="tdesc_${t.id}">${linkifyBody(t.description)}</div>
+        <div id="tdesc_${t.id}" class="xl-body">${linkifyBody(t.description)}</div>
         ${renderAttachments(t.attachments)}
-        ${xlBtn('tdesc_'+t.id)}
+        ${looksNonEnglish(t.description)?`<button class="btn btn-sm" style="margin-top:8px" onclick="translateEl('tdesc_${t.id}')">Translate to English</button>`:''}
       </div>`) : ''}
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Status</label>
@@ -3081,17 +3085,51 @@ async function translateEl(bodyId){
   }catch(e){ holder.innerHTML = '<span style="color:var(--red)">Translation failed: ' + escapeHtml(e.message) + '</span>'; }
 }
 window.translateEl = translateEl;
-function xlBtn(bodyId){ return `<button class="btn btn-sm" style="margin-top:6px" onclick="translateEl('${bodyId}')">Translate</button>`; }
+// Detects text that isn't plain English (accented Latin, Cyrillic, Greek,
+// Arabic, CJK, Hangul, etc.) so the translate control only shows when useful.
+function looksNonEnglish(text){
+  return /[\u00C0-\u024F\u0370-\u03FF\u0400-\u04FF\u0590-\u06FF\u3040-\u30FF\u3400-\u9FFF\uAC00-\uD7AF]/.test(String(text||''));
+}
+function threadTranslateBar(needed){
+  if(!needed) return '';
+  return `<div style="display:flex;justify-content:flex-end;margin:0 0 8px"><button class="btn btn-sm" id="xlToggleBtn" data-on="0" onclick="toggleThreadTranslation(this)" title="Translate this conversation to English">Translate to English</button></div>`;
+}
+async function toggleThreadTranslation(btn){
+  const scope = document.getElementById('threadBox') || document.getElementById('tk-panel');
+  if(!scope) return;
+  const bodies = Array.prototype.slice.call(scope.querySelectorAll('.xl-body'));
+  if(btn.getAttribute('data-on')==='1'){
+    bodies.forEach(el=>{ const x=document.getElementById(el.id+'_xl'); if(x) x.remove(); });
+    btn.setAttribute('data-on','0'); btn.textContent='Translate to English';
+    return;
+  }
+  btn.setAttribute('data-on','1'); btn.disabled=true; btn.textContent='Translating\u2026';
+  for(const el of bodies){
+    if(document.getElementById(el.id+'_xl')) continue;
+    const text=(el.innerText||'').trim(); if(!text) continue;
+    const holder=document.createElement('div');
+    holder.id=el.id+'_xl';
+    holder.style.cssText='margin-top:6px;padding:8px 10px;border-left:2px solid var(--teal);background:var(--teal-dim);border-radius:var(--r-sm);font-size:var(--t-sm)';
+    holder.innerHTML='<span style="color:var(--text3)">Translating\u2026</span>';
+    el.parentNode.insertBefore(holder, el.nextSibling);
+    try{
+      const t=await aiTranslate(text,'English');
+      holder.innerHTML='<div style="font-size:var(--t-xs);color:var(--teal);font-weight:700;letter-spacing:.06em;margin-bottom:3px">TRANSLATION (EN)</div>'+escapeHtml(t).replace(/\n/g,'<br>');
+    }catch(e){ holder.innerHTML='<span style="color:var(--red)">Translation failed: '+escapeHtml(e.message)+'</span>'; }
+  }
+  btn.disabled=false; btn.textContent='Show original';
+}
+window.toggleThreadTranslation = toggleThreadTranslation;
 
 function renderThread(msgs, notesOnly){
   const list = msgs.filter(m => notesOnly ? m.is_internal_note : !m.is_internal_note);
   if(!list.length) return `<div class="empty">${notesOnly?'No internal notes yet.':'No messages yet.'}</div>`;
-  return list.map(m=>`
+  const needed = list.some(m=>looksNonEnglish(m.body));
+  return threadTranslateBar(needed) + list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div id="tmsg_${m.id}">${linkifyBody(m.body)}</div>
+      <div id="tmsg_${m.id}" class="xl-body">${linkifyBody(m.body)}</div>
       ${renderAttachments(m.attachments)}
-      ${!m.is_internal_note && m.sender_type==='customer' ? xlBtn('tmsg_'+m.id) : ''}
     </div>
   `).join('');
 }
@@ -3291,12 +3329,12 @@ window.openEmail = openEmail;
 
 function renderEmailThread(msgs){
   if(!msgs || !msgs.length) return `<div class="empty">No messages yet.</div>`;
-  return msgs.map(m=>`
+  const needed = msgs.some(m=>looksNonEnglish(m.body));
+  return threadTranslateBar(needed) + msgs.map(m=>`
     <div class="msg ${m.direction==='outbound'?'staff':'customer'}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div id="emsg_${m.id}">${linkifyBody(m.body||'')}</div>
+      <div id="emsg_${m.id}" class="xl-body">${linkifyBody(m.body||'')}</div>
       ${renderAttachments(m.attachments)}
-      ${m.direction!=='outbound' ? xlBtn('emsg_'+m.id) : ''}
     </div>
   `).join('');
 }
