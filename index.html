@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.70';
+const TGK_SUPPORT_VERSION = 'v1.72';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1641,8 +1641,14 @@ function filteredTickets(){
   // "the merge didn't work" even though it did.
   list = list.filter(t=>!t.merged_into_id);
   if(!f.showArchived) list = list.filter(t=>!t.archived);
-  if(f.status === '__active__') list = list.filter(t=>!['resolved','closed'].includes(t.status));
-  else if(f.status) list = list.filter(t=>t.status===f.status);
+  // The default status view only ever shows active work - correct on its own, but it was
+  // ALSO silently applying on top of "Show Archived", meaning that checkbox alone was never
+  // enough to actually see an archived ticket that also happened to be closed (which every
+  // archived live chat now is, since archiving properly ends it first). Checking a box
+  // labeled "Show Archived" should be enough on its own - it shouldn't also require someone
+  // to separately notice and change an unrelated status filter to actually see the result.
+  if(f.status === '__active__' && !f.showArchived) list = list.filter(t=>!['resolved','closed'].includes(t.status));
+  else if(f.status && f.status !== '__active__') list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
   if(f.category === '__none__') list = list.filter(t=>!t.category);
@@ -4256,6 +4262,9 @@ async function performArchiveTicket(id, alsoDeleteLinked){
     // customer's side that's no longer true - without this, they could keep typing into a
     // conversation nobody will ever see again. Same effect endLiveChat already gives a manual
     // click, applied automatically here since archiving already carries its own confirmation.
+    // This also sets status to closed as a side effect, so the universal check just below
+    // finds nothing left to do for a live chat specifically - it only has real work left for
+    // everything else.
     if(t.is_live_chat && !['resolved','closed'].includes(t.status)){
       try{ await _endLiveChatNow(id); }
       catch(e){ console.warn('[archive] could not end live chat before archiving:', e); }
@@ -4272,7 +4281,15 @@ async function performArchiveTicket(id, alsoDeleteLinked){
         S.shipErrors = S.shipErrors.filter(e=>e.id!==t.shipment_error_id);
       }
     }
-    const { data, error } = await sb.from('tickets').update({ archived: true, archived_at: new Date().toISOString() }).eq('id', id).select().single();
+    // Archiving anything should close it too - a ticket sitting archived but still showing
+    // "open" (or "pending", or "waiting on customer") reads as unfinished work that got hidden
+    // rather than work that's actually done, which is confusing either way it's found later.
+    // 'resolved' is left alone deliberately: it is a distinct, more specific outcome than a
+    // generic close, chosen on purpose by whoever handled it - archiving should never quietly
+    // downgrade that back to just "closed" and lose what it actually says happened.
+    const archivePatch = { archived: true, archived_at: new Date().toISOString() };
+    if(!['resolved','closed'].includes(t.status)) archivePatch.status = 'closed';
+    const { data, error } = await sb.from('tickets').update(archivePatch).eq('id', id).select().single();
     if(error) throw error;
     const idx = S.tickets.findIndex(x=>x.id===id);
     if(idx!==-1) S.tickets[idx] = data;
