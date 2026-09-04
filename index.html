@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.74';
+const TGK_SUPPORT_VERSION = 'v1.75';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -905,6 +905,7 @@ function handleTicketRealtime(payload){
    ============================================================ */
 const NAV = [
   { id:'dashboard', label:'Dashboard', section:'Overview' },
+  { id:'needsreply', label:'Needs Reply', badgeKey:'needsreply', section:'Inbox' },
   { id:'livechat', label:'Live Chat', badgeKey:'livechat', section:'Inbox' },
   { id:'emails', label:'Emails', badgeKey:'emails', section:'Inbox' },
   { id:'orders', label:'Orders', badgeKey:'orders', section:'Inbox' },
@@ -977,6 +978,10 @@ function renderNav(){
         const openCount = activeTix.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
         if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
       }
+    }
+    if(n.badgeKey==='needsreply'){
+      const nr = needsReplyItems().length;
+      if(nr){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${nr}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='emails'){
       const unread = (S.emails||[]).filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
@@ -1085,6 +1090,7 @@ function renderPage(){
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
   if(S.page === 'customers') return renderCustomerLookup();
+  if(S.page === 'needsreply') return renderNeedsReply();
   if(S.page === 'reports') return renderReports();
   if(S.page === 'settings') return renderSettings();
 }
@@ -2392,6 +2398,25 @@ function renderReports(){
   t.forEach(x=>{ if(x.order_number) byOrder[x.order_number] = (byOrder[x.order_number]||0)+1; });
   const repeatOrders = Object.entries(byOrder).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
+  // ---- Orders reporting (last 30 days) ----
+  const orders30 = (S.emails||[]).filter(e=>e.mailbox==='orders');
+  const now = Date.now(), WINDOW = 30*86400000;
+  const inWindow = (d)=> d && (now - new Date(d).getTime()) <= WINDOW;
+  const ordersCreated = orders30.filter(e=>inWindow(e.created_at)).length;
+  const ordersCompleted = orders30.filter(e=>e.status==='completed' && inWindow(e.completed_at)).length;
+  const shopifyOrders = orders30.filter(e=>e.shopify_order_id && inWindow(e.created_at)).length;
+  // Avg fulfillment time: created -> completed, for completed orders in window.
+  const fulfilled = orders30.filter(e=>e.completed_at && e.created_at && inWindow(e.completed_at));
+  const avgFulfillDays = fulfilled.length ? (fulfilled.reduce((s,e)=> s + (new Date(e.completed_at)-new Date(e.created_at)),0)/fulfilled.length/86400000).toFixed(1) : '\u2014';
+  const byDealer = {};
+  orders30.filter(e=>inWindow(e.created_at)).forEach(e=>{ const key = dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || 'Unassigned'; byDealer[key]=(byDealer[key]||0)+1; });
+  const dealerVol = Object.entries(byDealer).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const maxDealer = Math.max(1, ...dealerVol.map(d=>d[1]), 1);
+  // Email responsiveness (last 30 days): support emails answered vs waiting.
+  const support30 = (S.emails||[]).filter(e=>e.mailbox!=='orders' && inWindow(e.created_at));
+  const answered = support30.filter(e=>e.last_direction==='outbound' || (e.last_reply_at && inWindow(e.last_reply_at))).length;
+  const awaiting = (S.emails||[]).filter(e=>emailNeedsReply(e)).length;
+
   el.innerHTML = `
     <div class="kpi-grid kpi-grid-4">
       <div class="kpi"><div class="kpi-label">Total Tickets</div><div class="kpi-value">${t.length}</div></div>
@@ -2426,6 +2451,29 @@ function renderReports(){
       ${repeatOrders.length ? `<div class="tbl-wrap"><table><thead><tr><th>Order Number</th><th>Ticket Count</th></tr></thead>
         <tbody>${repeatOrders.map(([ord,c])=>`<tr class="rowlink" onclick="goPage('tickets'); setTimeout(()=>{S.filters.q='${ord}'; renderTicketsList();},50)"><td>#${escapeHtml(ord)}</td><td class="pn">${c}</td></tr>`).join('')}</tbody></table></div>`
         : '<div class="empty">No repeat-issue orders detected.</div>'}
+    </div>
+
+    <div class="panel-title" style="border:none;margin-top:8px">Orders & Fulfillment \u2014 Last 30 Days</div>
+    <div class="kpi-grid kpi-grid-5">
+      <div class="kpi"><div class="kpi-label">Orders Created</div><div class="kpi-value">${ordersCreated}</div></div>
+      <div class="kpi kpi-teal"><div class="kpi-label">Pushed to Shopify</div><div class="kpi-value">${shopifyOrders}</div></div>
+      <div class="kpi kpi-green"><div class="kpi-label">Completed</div><div class="kpi-value">${ordersCompleted}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Avg Fulfillment (days)</div><div class="kpi-value">${avgFulfillDays}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Awaiting Reply</div><div class="kpi-value">${awaiting}</div></div>
+    </div>
+    <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel">
+        <div class="panel-title">Order Volume by Dealer</div>
+        ${dealerVol.length ? dealerVol.map(([name,c])=>barRow(name, c, maxDealer)).join('') : '<div class="empty">No orders in the last 30 days.</div>'}
+      </div>
+      <div class="panel">
+        <div class="panel-title">Email Responsiveness</div>
+        <div style="display:flex;gap:28px;padding:8px 4px">
+          <div><div class="kpi-value" style="font-size:22px">${support30.length}</div><div class="kpi-label">Support emails (30d)</div></div>
+          <div><div class="kpi-value" style="font-size:22px;color:var(--green)">${answered}</div><div class="kpi-label">Answered</div></div>
+          <div><div class="kpi-value" style="font-size:22px;color:var(--orange)">${awaiting}</div><div class="kpi-label">Awaiting reply</div></div>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -3215,10 +3263,21 @@ function emailFiltered(){
   else list = list.filter(e=>e.status!=='archived' && e.status!=='completed');
   if(f.q){
     const q=f.q.toLowerCase();
-    list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q));
+    const bodyHits = window._emailBodyMatches || null;
+    list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q) || (e.po_number||'').toLowerCase().includes(q) || (bodyHits && bodyHits.has(e.id)));
   }
   return list;
 }
+async function runEmailBodySearch(q){
+  q=(q||'').trim();
+  if(q.length < 3){ window._emailBodyMatches=null; renderEmailsBody(); return; }
+  try{
+    const { data } = await sb.from('email_messages').select('email_id').ilike('body', '%'+q+'%').limit(1000);
+    window._emailBodyMatches = new Set((data||[]).map(r=>r.email_id));
+  }catch(_){ window._emailBodyMatches=null; }
+  renderEmailsBody();
+}
+window.runEmailBodySearch = runEmailBodySearch;
 
 function emailRef(e){
   const n = (e.display_number!=null ? e.display_number : e.email_number) || 0;
@@ -3252,7 +3311,7 @@ function renderEmailsList(){
     <div class="filter-bar">
       <div class="search-wrap">
         <span class="search-icon"><span class="ic ic-search"></span></span>
-        <input type="text" placeholder="Search sender or subject..." value="${escapeHtml(f.q)}" oninput="S.emailFilters.q=this.value; clearTimeout(window._emQT); window._emQT=setTimeout(renderEmailsBody,120)">
+        <input type="text" placeholder="Search sender, subject, or message text..." value="${escapeHtml(f.q)}" oninput="S.emailFilters.q=this.value; clearTimeout(window._emQT); window._emQT=setTimeout(()=>runEmailBodySearch(this.value),250)">
       </div>
       ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
@@ -3949,6 +4008,48 @@ function waitingPill(e){
   const disp = h>=48 ? (Math.floor(h/24)+'d') : (h+'h');
   return '<span class="pill pill-orange" title="Customer waiting '+h+'h for a reply">\u23f0 Waiting '+disp+'</span>';
 }
+// Unified list of everything where the customer spoke last and no reply followed.
+function needsReplyItems(){
+  const items=[];
+  (S.tickets||[]).forEach(t=>{ if(ticketNeedsReply(t)) items.push({
+    type:'ticket', id:t.id, ref:'#'+t.ticket_number,
+    who: t.customer_name || t.customer_email || 'Customer',
+    subject: t.subject||'(no subject)',
+    ts: new Date(t.updated_at || t.created_at).getTime()
+  }); });
+  (S.emails||[]).forEach(e=>{ if(emailNeedsReply(e)) items.push({
+    type: e.mailbox==='orders'?'order':'email', id:e.id, ref: emailRef(e),
+    who: (e.mailbox==='orders' ? orderDisplayName(e) : e.customer_email) || 'Customer',
+    subject: e.subject||'(no subject)',
+    ts: new Date(e.last_message_at || e.created_at).getTime()
+  }); });
+  return items.sort((a,b)=>a.ts-b.ts); // oldest waiting first
+}
+function renderNeedsReply(){
+  const el=document.getElementById('content');
+  const items = needsReplyItems();
+  const typePill = { ticket:'<span class="pill pill-muted">Ticket</span>', email:'<span class="pill pill-teal">Email</span>', order:'<span class="pill pill-green">Order</span>' };
+  el.innerHTML = `
+    <div class="panel-title" style="border:none">Needs Reply${items.length?' ('+items.length+')':''}</div>
+    <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">Everything where the customer spoke last and no reply has gone out yet \u2014 across tickets, emails, and orders. Oldest first.</div>
+    ${items.length ? `<div class="tbl-wrap"><table><thead><tr><th>Type</th><th>#</th><th>From</th><th>Subject</th><th>Waiting</th></tr></thead><tbody>
+      ${items.map(it=>{
+        const h=Math.floor((Date.now()-it.ts)/3600000);
+        const wait = h>=48?(Math.floor(h/24)+'d'):(h+'h');
+        const overdue = h>=EMAIL_WAIT_HOURS;
+        const open = it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`;
+        return `<tr class="rowlink" onclick="${open}">
+          <td>${typePill[it.type]}</td>
+          <td class="pn">${escapeHtml(it.ref)}</td>
+          <td class="main-col">${escapeHtml(it.who)}</td>
+          <td>${escapeHtml(it.subject)}</td>
+          <td class="pn"><span style="color:${overdue?'var(--orange)':'var(--text3)'}">${overdue?'\u23f0 ':''}${wait}</span></td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>` : '<div class="tbl-wrap"><div class="empty">Nothing waiting on a reply \u2014 you\'re all caught up. \u2705</div></div>'}
+  `;
+}
+window.renderNeedsReply = renderNeedsReply;
 
 async function sendEmailReply(emailId){
   const box = document.getElementById('msgBox');
