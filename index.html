@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.81';
+const TGK_SUPPORT_VERSION = 'v1.82';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3638,6 +3638,22 @@ window.toggleDropship=toggleDropship;
 function partSku(r){ return (r.use_new_sku && r.new_sku && String(r.new_sku).trim()) ? String(r.new_sku).trim() : (r.pn||''); }
 function partDesc(r){ return r.description || r.name || r.title || r.part_name || r.product_title || r.desc || ''; }
 function partPrice(r){ const v = (r.msrp!=null?r.msrp:(r.price!=null?r.price:(r.retail_price!=null?r.retail_price:r.unit_price))); return v!=null ? v : null; }
+// Best-effort stock read from whatever column the ERP uses; null if none present.
+function partStock(r){
+  const cands = ['total_unpckgd','on_hand','qty_on_hand','stock','stock_qty','available','qty','quantity','in_stock'];
+  for(const c of cands){ if(r[c]!=null && r[c]!=='' && !isNaN(Number(r[c]))) return Number(r[c]); }
+  return null;
+}
+function partStockBadge(r){
+  // Explicit backorder flag wins if present.
+  const bo = (r.backorder ?? r.backordered ?? r.is_backorder ?? r.on_backorder);
+  if(bo===true) return '<span class="pill pill-orange" style="font-size:9px">Backorder</span>';
+  const s = partStock(r);
+  if(s==null) return '';
+  if(s<=0) return '<span class="pill pill-orange" style="font-size:9px">Out / backorder</span>';
+  if(s<=3) return '<span class="pill pill-muted" style="font-size:9px">'+s+' left</span>';
+  return '<span class="pill pill-green" style="font-size:9px">'+s+' in stock</span>';
+}
 async function searchParts(q){
   q = (q||'').trim();
   if(q.length < 2) return [];
@@ -3663,7 +3679,7 @@ async function partTypeahead(i, q){
     if(!box) return;
     if(!results.length){ box.style.display='none'; box.innerHTML=''; return; }
     box.innerHTML = results.map((r,ri)=>`<div onmousedown="pickPart(${i},${ri})" style="padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='rgba(13,148,136,.08)'" onmouseout="this.style.background=''">
-      <div style="font-family:var(--mono);color:var(--text);font-size:var(--t-sm)">${escapeHtml(partSku(r))}${r._table==='assemblies'?' <span class="pill pill-teal" style="font-size:9px">ASM</span>':''}${partPrice(r)!=null?`<span style="float:right;color:var(--text3)">$${escapeHtml(String(partPrice(r)))}</span>`:''}</div>
+      <div style="font-family:var(--mono);color:var(--text);font-size:var(--t-sm)">${escapeHtml(partSku(r))}${r._table==='assemblies'?' <span class="pill pill-teal" style="font-size:9px">ASM</span>':''} ${partStockBadge(r)}${partPrice(r)!=null?`<span style="float:right;color:var(--text3)">$${escapeHtml(String(partPrice(r)))}</span>`:''}</div>
       ${partDesc(r)?`<div style="color:var(--text3);font-size:var(--t-xs);margin-top:1px">${escapeHtml(partDesc(r))}</div>`:''}
     </div>`).join('');
     box.style.display='block';
