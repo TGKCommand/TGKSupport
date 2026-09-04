@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.78';
+const TGK_SUPPORT_VERSION = 'v1.79';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3376,6 +3376,7 @@ async function setOrderComplete(id, complete){
     if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; renderEmailPanel(data); }
     renderNav();
     if(S.page==='orders' || S.page==='emails') renderEmailsList();
+    logOrderAudit(id, complete?'Marked complete':'Reopened',''); if(document.getElementById('orderAuditBox')) renderOrderAudit(id);
     toast(complete ? 'Order marked complete' : 'Order reopened');
   }catch(e){ toast('Update failed: '+e.message, true); }
 }
@@ -3505,6 +3506,7 @@ async function openEmail(id){
   document.getElementById('tk-panel').classList.add('open');
   scrollThreadToBottom();
   if(e.mailbox==='orders' && e.shopify_order_id) refreshOrderFulfillment(e.id);
+  if(e.mailbox==='orders') renderOrderAudit(e.id);
   // Stamp view + mark read. Panel already rendered with the prior viewer.
   try{
     const patch = { last_viewed_by:(S.user&&S.user.email)||null, last_viewed_at:new Date().toISOString() };
@@ -3778,6 +3780,24 @@ async function refreshOrderFulfillment(id){
 }
 window.refreshOrderFulfillment = refreshOrderFulfillment;
 
+// ---- Order audit trail ----
+async function logOrderAudit(emailId, action, detail){
+  try{ await sb.from('order_audit').insert({ email_id: emailId, action, detail: detail||null, user_email: (S.user&&S.user.email)||null }); }catch(_){}
+}
+async function renderOrderAudit(emailId){
+  const box=document.getElementById('orderAuditBox'); if(!box) return;
+  try{
+    const { data } = await sb.from('order_audit').select('*').eq('email_id', emailId).order('created_at',{ascending:false}).limit(30);
+    const rows=data||[];
+    if(!rows.length){ box.innerHTML='<span style="color:var(--text3);font-size:var(--t-xs)">No activity logged yet.</span>'; return; }
+    box.innerHTML = rows.map(r=>`<div style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:var(--t-xs);border-bottom:1px solid var(--border)">
+      <span><strong>${escapeHtml(r.action)}</strong>${r.detail?' \u2014 '+escapeHtml(r.detail):''} <span style="color:var(--text3)">by ${escapeHtml(trackerName(r.user_email))}</span></span>
+      <span style="color:var(--text3);white-space:nowrap">${timeAgo(r.created_at)}</span>
+    </div>`).join('');
+  }catch(_){ box.innerHTML='<span style="color:var(--text3);font-size:var(--t-xs)">Could not load activity.</span>'; }
+}
+window.renderOrderAudit = renderOrderAudit;
+
 function renderDealerHistory(e){
   const others = (S.emails||[]).filter(x=>x.mailbox==='orders' && x.dealer_id && String(x.dealer_id)===String(e.dealer_id) && x.id!==e.id)
     .sort((a,b)=> new Date(b.last_message_at||b.created_at) - new Date(a.last_message_at||a.created_at));
@@ -3897,6 +3917,7 @@ async function createShopifyDraft(id){
     const i=S.emails.findIndex(x=>x.id===id);
     if(i!==-1){ S.emails[i].shopify_draft_id=result.draft_id; S.emails[i].shopify_draft_gid=result.draft_gid; S.emails[i].shopify_draft_url=result.invoice_url; S.emails[i].order_line_items=lines; S.activeEmail=S.emails[i]; }
     renderEmailPanel(S.activeEmail);
+    logOrderAudit(id,'Draft created', result.draft_id||''); renderOrderAudit(id);
     toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
     return result;
   }catch(err){
@@ -3920,7 +3941,7 @@ async function draftAction(id, action, extra){
   return r;
 }
 async function sendShopifyInvoice(id){
-  try{ const r = await draftAction(id, 'invoice'); if(r) toast('Invoice sent to the customer'); }
+  try{ const r = await draftAction(id, 'invoice'); if(r){ logOrderAudit(id,'Invoice sent',''); renderOrderAudit(id); toast('Invoice sent to the customer'); } }
   catch(err){ toast('Invoice failed: '+err.message, true); }
 }
 window.sendShopifyInvoice = sendShopifyInvoice;
@@ -3934,6 +3955,7 @@ async function completeShopifyDraft(id, paymentPending, skipConfirm){
     if(i!==-1){ S.emails[i].shopify_order_id=r.order_id; S.activeEmail=S.emails[i]; }
     renderEmailPanel(S.activeEmail);
     if(S.activeEmail && S.activeEmail.shopify_order_id) refreshOrderFulfillment(id);
+    logOrderAudit(id, paymentPending?'Completed (net terms)':'Marked paid & completed', r.order_id||''); renderOrderAudit(id);
     toast('Order created'+(r.order_id?(' '+r.order_id):''));
   }catch(err){ toast('Complete failed: '+err.message, true); }
 }
@@ -4027,6 +4049,7 @@ function renderEmailPanel(e){
       ${e.mailbox==='orders' ? renderShipTo(e) : ''}
       ${e.mailbox==='orders' && e.dealer_id ? renderDealerHistory(e) : ''}
       ${e.mailbox==='orders' ? renderOrderBuilder(e) : ''}
+      ${e.mailbox==='orders' ? `<details class="linked-box" style="padding:8px 12px"><summary style="cursor:pointer;font-size:var(--t-xs);color:var(--text3);text-transform:uppercase;letter-spacing:.06em">Order activity</summary><div id="orderAuditBox" style="margin-top:8px"><span style="color:var(--text3);font-size:var(--t-xs)">Loading...</span></div></details>` : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
       <div id="replyComposer" style="margin-top:12px">
@@ -4379,6 +4402,7 @@ async function convertTicketToOrder(ticketId){
     try{ await sb.from('ticket_messages').insert({ ticket_id:ticketId, sender_type:'system', sender_name:'System', body:'Converted to order ORD-'+String(num).padStart(4,'0')+' by '+((S.user&&S.user.email)||'staff')+'. Communication continues on that order.', is_internal_note:true }); }catch(_){}
     const ti=S.tickets.findIndex(x=>x.id===ticketId); if(ti!==-1){ S.tickets[ti].status='resolved'; S.tickets[ti].converted_order_id=order.id; }
     S.emails.unshift(order);
+    logOrderAudit(order.id,'Created from ticket','#'+t.ticket_number);
     toast('Created order ORD-'+String(num).padStart(4,'0'));
     closePanel(); renderNav();
     goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
