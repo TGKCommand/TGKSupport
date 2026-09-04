@@ -443,7 +443,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.73';
+const TGK_SUPPORT_VERSION = 'v1.74';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3327,6 +3327,7 @@ function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=
 function orderDisplayName(e){ return dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || ''; }
 function emailListOrderMeta(e){
   const parts=[];
+  const w=waitingPill(e); if(w) parts.push(w);
   if(e.shopify_order_id) parts.push('<span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>');
   else if(e.shopify_draft_id) parts.push('<span class="pill pill-teal" title="Draft '+escapeHtml(String(e.shopify_draft_id))+' sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>');
   if(e.po_number) parts.push('<span class="pill pill-muted">PO '+escapeHtml(e.po_number)+'</span>');
@@ -3341,7 +3342,7 @@ function emailTable(list){
     ${list.map(e=>`
       <tr class="rowlink" onclick="openEmail('${e.id}')">
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
-        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.mailbox==='orders' ? (orderDisplayName(e)||'\u2014') : (e.customer_email||'\u2014'))}${e.mailbox==='orders' ? emailListOrderMeta(e) : ''}</td>
+        <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.mailbox==='orders' ? (orderDisplayName(e)||'\u2014') : (e.customer_email||'\u2014'))}${e.mailbox==='orders' ? emailListOrderMeta(e) : (waitingPill(e)?' '+waitingPill(e):'')}</td>
         <td>${escapeHtml(e.subject||'(no subject)')}</td>
         <td>${e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.status==='completed'?'<span class="pill pill-green">Completed</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':(e.mailbox==='orders'?'<span class="pill pill-teal">Active</span>':'<span class="pill pill-green">Read</span>')}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
@@ -3868,6 +3869,9 @@ function renderEmailPanel(e){
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
       <div id="replyComposer" style="margin-top:12px">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+          <select class="form-input" style="width:auto;max-width:280px" onchange="applyEmailTemplate('${e.id}', this.value); this.value=''">${emailTemplatePickerOptions()}</select>
+        </div>
         <textarea id="msgBox" rows="3" placeholder="Reply to ${escapeHtml(e.customer_email||'the sender')}..." class="form-input" style="resize:vertical"></textarea>
         <div class="checkbox-row" style="justify-content:flex-start;margin-top:6px">
           <label class="btn btn-sm" style="cursor:pointer;margin:0"><span class="ic ic-link"></span>Attach<input type="file" id="msgFileInput" multiple accept="image/*,.pdf" style="display:none" onchange="handleMsgFileSelect(this)"></label>
@@ -3880,6 +3884,70 @@ function renderEmailPanel(e){
       </div>`}
     </div>
   `;
+}
+
+// ---- Templates for email/order replies (reuse ticket_templates) ----
+function emailTemplatePickerOptions(){
+  var all = (S.templates||[]);
+  if(!all.length) return '<option value="">No templates yet</option>';
+  var html = '<option value="">Insert template...</option>';
+  html += all.slice().sort(function(a,b){return (a.title||'').localeCompare(b.title||'');}).map(function(x){ return '<option value="'+x.id+'">'+escapeHtml(x.title)+'</option>'; }).join('');
+  return html;
+}
+function fillEmailTokens(body, e){
+  var agent = (S.user && S.user.email) ? (friendlyStaffName()||S.user.email) : '';
+  var name = (e && (e.ship_name || dealerName(e.dealer_id) || e.customer_email)) || '';
+  var map = {
+    order_number: (e && (e.shopify_order_id || e.shopify_draft_id)) || '',
+    customer_name: name,
+    first_name: name ? String(name).trim().split(/\s+/)[0] : '',
+    customer_email: (e && e.customer_email) || '',
+    dealer: (e && dealerName(e.dealer_id)) || '',
+    po: (e && e.po_number) || '',
+    ref: (e && emailRef(e)) || '',
+    agent: agent
+  };
+  return String(body||'').replace(/\{\{\s*([a-z_]+)\s*\}\}/gi, function(m0, key){ var k=key.toLowerCase(); return (k in map)?map[k]:m0; });
+}
+function applyEmailTemplate(emailId, templateId){
+  if(!templateId) return;
+  var e = (S.emails||[]).find(function(x){return x.id===emailId;});
+  var tmpl = (S.templates||[]).find(function(x){return x.id===templateId;});
+  if(!tmpl) return;
+  var box = document.getElementById('msgBox'); if(!box) return;
+  var text = fillEmailTokens(tmpl.body, e);
+  box.value = box.value.trim() ? (box.value.replace(/\s+$/,'') + '\n\n' + text) : text;
+  box.focus();
+  try{ box.selectionStart = box.selectionEnd = box.value.length; }catch(_){}
+}
+window.applyEmailTemplate = applyEmailTemplate;
+
+// ---- "Needs reply" + aging engine (shared by aging flags and Needs Reply view) ----
+// A conversation needs a reply when the customer spoke last. last_direction is
+// set 'inbound' by the inbound webhook and 'outbound' when staff reply; older
+// rows without it fall back to has_unread.
+function emailNeedsReply(e){
+  if(!e || e.status==='archived' || e.status==='completed' || e.converted_ticket_id || e.converted_order_id) return false;
+  if(e.last_direction==='inbound') return true;
+  if(e.last_direction==='outbound') return false;
+  return !!e.has_unread;
+}
+function ticketNeedsReply(t){
+  if(!t || t.archived || t.merged_into_id || ['resolved','closed','waiting_customer'].includes(t.status)) return false;
+  if(t.last_direction==='inbound') return true;
+  if(t.last_direction==='outbound') return false;
+  return !!t.has_unread && ['open','pending'].includes(t.status);
+}
+const EMAIL_WAIT_HOURS = 12;
+function emailWaitingHours(e){
+  if(!emailNeedsReply(e)) return 0;
+  return Math.floor((Date.now() - new Date(e.last_message_at||e.created_at).getTime())/3600000);
+}
+function waitingPill(e){
+  const h = emailWaitingHours(e);
+  if(h < EMAIL_WAIT_HOURS) return '';
+  const disp = h>=48 ? (Math.floor(h/24)+'d') : (h+'h');
+  return '<span class="pill pill-orange" title="Customer waiting '+h+'h for a reply">\u23f0 Waiting '+disp+'</span>';
 }
 
 async function sendEmailReply(emailId){
@@ -3918,9 +3986,15 @@ async function sendEmailReply(emailId){
       S.emails[i].last_message_at=new Date().toISOString();
       S.emails[i].last_reply_by=(S.user&&S.user.email)||null;
       S.emails[i].last_reply_at=new Date().toISOString();
+      S.emails[i].last_direction='outbound';
       S.emails[i].has_unread=false; S.emails[i].unread_count=0;
       if(S.emails[i].status!=='archived') S.emails[i].status='read';
+      // Assign-on-reply: claim an unassigned conversation for whoever replied.
+      const me=(S.user&&S.user.email)||null;
+      if(me && !S.emails[i].assigned_to){ S.emails[i].assigned_to=me; }
       S.activeEmail=S.emails[i];
+      try{ await sb.from('emails').update({ last_direction:'outbound', assigned_to:S.emails[i].assigned_to||null }).eq('id', emailId); }catch(_){}
+      if(me && S.emails[i].assigned_to===me) toast('Assigned to you');
     }
     renderEmailPanel(S.activeEmail);
     scrollThreadToBottom();
@@ -4959,7 +5033,13 @@ async function sendMessage(ticketId){
     // Bump activity, and on an actual reply (not an internal note) record who
     // replied for the tracker, then refresh the subtle strip in place.
     const _replyStamp = { updated_at: new Date().toISOString() };
-    if(!isNote){ _replyStamp.last_reply_by = (S.user && S.user.email) || null; _replyStamp.last_reply_at = new Date().toISOString(); }
+    if(!isNote){
+      _replyStamp.last_reply_by = (S.user && S.user.email) || null;
+      _replyStamp.last_reply_at = new Date().toISOString();
+      _replyStamp.last_direction = 'outbound';
+      const _me = (S.user && S.user.email) || null;
+      if(_me && t && !t.assigned_to){ _replyStamp.assigned_to = _me; }
+    }
     try{
       const { data: _tu } = await sb.from('tickets').update(_replyStamp).eq('id', ticketId).select().single();
       if(_tu){
@@ -4969,6 +5049,7 @@ async function sendMessage(ticketId){
         const _tk = document.getElementById('tkTracker');
         if(_tk && S.activeTicket) _tk.outerHTML = renderTicketTracker(S.activeTicket);
       }
+      if(!isNote && _replyStamp.assigned_to) toast('Assigned to you');
     }catch(_){ /* non-critical */ }
 
     if(!isNote && !(t && t.is_live_chat) && !(t && t.customer_email)){
