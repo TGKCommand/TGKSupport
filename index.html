@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.77';
+const TGK_SUPPORT_VERSION = 'v1.78';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1258,6 +1258,7 @@ function renderTicketsList(){
       <button class="btn btn-sm" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
       <button class="btn btn-sm" onclick="openTemplateManager()"> Templates</button>
       <button class="btn btn-sm" onclick="exportTicketsToCSV()"><span class="ic ic-download"></span>Export CSV</button>
+      <select class="form-input" style="width:auto" onchange="handleSavedView(this.value); this.value=''"><option value="">Saved views...</option>${savedViewsOptions()}<option value="__save__">+ Save current view</option></select>
     </div>
     <div id="ticketsListBody">${renderBulkActionBar()}${ticketTable(filteredTickets(), true)}</div>
   `;
@@ -1270,6 +1271,34 @@ function renderTicketsBody(){
   if(!b){ renderTicketsList(); return; }
   b.innerHTML = renderBulkActionBar() + ticketTable(filteredTickets(), true);
 }
+
+// ---- Saved filter views (per-user, stored locally) ----
+function savedViewsKey(){ return 'tgk_saved_views_' + ((S.user&&S.user.email)||'anon'); }
+function getSavedViews(){ try{ return JSON.parse(localStorage.getItem(savedViewsKey())||'[]'); }catch(_){ return []; } }
+function setSavedViews(v){ try{ localStorage.setItem(savedViewsKey(), JSON.stringify(v)); }catch(_){} }
+function savedViewsOptions(){
+  const v=getSavedViews();
+  if(!v.length) return '';
+  return '<optgroup label="My views">'+v.map((x,i)=>'<option value="v:'+i+'">'+escapeHtml(x.name)+'</option>').join('')+'</optgroup>';
+}
+function handleSavedView(val){
+  if(!val) return;
+  if(val==='__save__'){
+    const name = prompt('Name this view (saves the current filters):');
+    if(!name) return;
+    const v=getSavedViews(); v.push({ name:name.trim(), filters:{...S.filters} }); setSavedViews(v);
+    toast('View saved'); renderTicketsList(); return;
+  }
+  const m = val.match(/^v:(\d+)$/); if(!m) return;
+  const v=getSavedViews(); const view=v[parseInt(m[1],10)]; if(!view) return;
+  // Confirm delete with modifier: shift-click isn't available on select; offer via prompt on re-pick.
+  S.filters = { status:'__active__', priority:'', source:'', category:'', tag:'', assignedTo:'', staleOnly:false, showArchived:false, q:'', ...view.filters };
+  renderTicketsList();
+  toast('Applied: '+view.name);
+}
+window.handleSavedView = handleSavedView;
+function deleteSavedView(i){ const v=getSavedViews(); v.splice(i,1); setSavedViews(v); renderTicketsList(); }
+window.deleteSavedView = deleteSavedView;
 
 function renderBulkActionBar(){
   const n = S.selectedTickets.size;
@@ -3749,6 +3778,21 @@ async function refreshOrderFulfillment(id){
 }
 window.refreshOrderFulfillment = refreshOrderFulfillment;
 
+function renderDealerHistory(e){
+  const others = (S.emails||[]).filter(x=>x.mailbox==='orders' && x.dealer_id && String(x.dealer_id)===String(e.dealer_id) && x.id!==e.id)
+    .sort((a,b)=> new Date(b.last_message_at||b.created_at) - new Date(a.last_message_at||a.created_at));
+  if(!others.length) return '';
+  const show = others.slice(0,5);
+  return `<div class="linked-box">
+    <div style="font-size:var(--t-xs);color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">${escapeHtml(dealerName(e.dealer_id))} \u2014 ${others.length} other order${others.length===1?'':'s'}</div>
+    ${show.map(o=>`<div class="rowlink" style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;cursor:pointer;font-size:var(--t-sm)" onclick="openEmail('${o.id}')">
+      <span><strong>${emailRef(o)}</strong> ${escapeHtml((o.subject||'').slice(0,40))}${o.po_number?' \u00b7 PO '+escapeHtml(o.po_number):''}</span>
+      <span style="color:var(--text3);white-space:nowrap">${o.status==='completed'?'Completed':(o.shopify_order_id?'Shopify':'\u2014')} \u00b7 ${timeAgo(o.last_message_at||o.created_at)}</span>
+    </div>`).join('')}
+    ${others.length>5?`<div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">+ ${others.length-5} more</div>`:''}
+  </div>`;
+}
+
 function renderOrderBuilder(e){
   const lines = orderLinesFor(e);
   const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
@@ -3981,6 +4025,7 @@ function renderEmailPanel(e){
           : `<button class="btn btn-sm btn-teal" onclick="setOrderComplete('${e.id}',true)"><span class="ic ic-check"></span>Mark Complete</button>`}
       </div>` : ''}
       ${e.mailbox==='orders' ? renderShipTo(e) : ''}
+      ${e.mailbox==='orders' && e.dealer_id ? renderDealerHistory(e) : ''}
       ${e.mailbox==='orders' ? renderOrderBuilder(e) : ''}
       <div id="threadBox">${renderEmailThread(msgs)}</div>
       ${e.converted_ticket_id ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:12px">This conversation was converted to a ticket. Reply from the ticket instead.</div>` : `
