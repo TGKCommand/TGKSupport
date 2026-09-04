@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.82';
+const TGK_SUPPORT_VERSION = 'v1.83';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -736,6 +736,7 @@ async function loadAll(){
     const failed = results.filter(r=>r.status==='rejected').length;
     if(failed) toast('Some data failed to load ('+failed+' of '+results.length+'). Showing what loaded.', true);
     await loadEmails();
+    await loadOrdersFulfillment();
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
@@ -794,6 +795,12 @@ function subscribeRealtime(){
       }
       renderNav();
       if(S.page==='emails' || S.page==='orders') renderEmailsList();
+    })
+    .on('postgres_changes', { event:'*', schema:'public', table:'sales' }, payload=>{
+      const on = payload.new?.order_number || payload.old?.order_number;
+      if(!on) return;
+      const e = (S.emails||[]).find(x=>x.mailbox==='orders' && x.shopify_order_id===on);
+      if(e) refreshOrderFulfillment(e.id);
     })
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'email_messages' }, payload=>{
       const m = payload.new;
@@ -1169,12 +1176,12 @@ function renderDashboard(){
     </div>
     ${activeOrders ? `
     <div class="panel-title" style="border:none;margin-top:8px">Active Orders (${activeOrders})</div>
-    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Dealer / From</th><th>PO</th><th>Assignee</th><th>Received</th></tr></thead><tbody>
+    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Dealer / From</th><th>Status</th><th>PO</th><th>Received</th></tr></thead><tbody>
       ${activeOrdersList.slice(0,8).map(e=>`<tr class="rowlink" onclick="openEmail('${e.id}')">
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}</td>
         <td class="main-col">${escapeHtml(dealerName(e.dealer_id)||(e.ship_name||'').trim()||e.customer_email||'\u2014')}${e.shopify_order_id?' <span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>':(e.shopify_draft_id?' <span class="pill pill-teal" title="Draft sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>':'')}</td>
+        <td>${e._fulfillment?('<span class="pill '+e._fulfillment.color+'">'+escapeHtml(e._fulfillment.label)+'</span>'):(e.shopify_order_id?'<span style="color:var(--text3)">\u2014</span>':'')}</td>
         <td class="pn">${e.po_number?escapeHtml(e.po_number):'\u2014'}</td>
-        <td>${e.assigned_to?escapeHtml(assigneeName(e.assigned_to)):'<span style="color:var(--text3)">\u2014</span>'}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
       </tr>`).join('')}
     </tbody></table></div>` : ''}
@@ -3448,7 +3455,7 @@ function emailTable(list){
         <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}${e.converted_ticket_id?' <span class="pill pill-teal">ticketed</span>':''}</td>
         <td class="main-col" style="${e.has_unread?'font-weight:700':''}">${escapeHtml(e.mailbox==='orders' ? (orderDisplayName(e)||'\u2014') : (e.customer_email||'\u2014'))}${e.mailbox==='orders' ? emailListOrderMeta(e) : (waitingPill(e)?' '+waitingPill(e):'')}</td>
         <td>${escapeHtml(e.subject||'(no subject)')}</td>
-        <td>${e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.status==='completed'?'<span class="pill pill-green">Completed</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':(e.mailbox==='orders'?'<span class="pill pill-teal">Active</span>':'<span class="pill pill-green">Read</span>')}</td>
+        <td>${e.mailbox==='orders' ? orderStatusPill(e) : (e.status==='archived'?'<span class="pill pill-muted">Archived</span>':e.has_unread?'<span class="pill pill-red">Unread</span>':'<span class="pill pill-green">Read</span>')}</td>
         <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
       </tr>`).join('')}
   </tbody></table></div>`;
@@ -3489,7 +3496,7 @@ function bulkEmailRead(read){ bulkEmailUpdate(read?{ has_unread:false, unread_co
 function bulkEmailAssign(val){ bulkEmailUpdate({ assigned_to: val==='__unassigned__'?null:val }); }
 window.bulkEmailArchive=bulkEmailArchive; window.bulkEmailComplete=bulkEmailComplete; window.bulkEmailRead=bulkEmailRead; window.bulkEmailAssign=bulkEmailAssign;
 
-async function refreshEmails(){ await loadEmails(); renderNav(); renderEmailsList(); toast('Emails refreshed'); }
+async function refreshEmails(){ await loadEmails(); await loadOrdersFulfillment(); renderNav(); renderEmailsList(); toast('Emails refreshed'); }
 window.refreshEmails = refreshEmails;
 
 async function openEmail(id){
@@ -3750,51 +3757,99 @@ async function previewOrderTotals(id){
 }
 window.previewOrderTotals = previewOrderTotals;
 
-function summarizeFulfillment(statuses){
-  const set = new Set(statuses.map(s=>String(s||'').trim().toLowerCase()).filter(Boolean));
-  if(!set.size) return { label:'Awaiting fulfillment', color:'pill-muted' };
-  const arr=[...set];
-  const shippedLike = s=>['shipped','fulfilled','complete','completed','delivered'].includes(s);
-  if(arr.every(s=>s==='cancelled')) return { label:'Cancelled', color:'pill-muted' };
-  if(set.has('refunded')) return { label:'Refunded', color:'pill-orange' };
-  if(arr.every(s=>shippedLike(s)||s==='cancelled')) return { label:'Shipped', color:'pill-green' };
-  if(arr.some(s=>shippedLike(s))) return { label:'Partially shipped', color:'pill-teal' };
-  if(set.has('on hold')) return { label:'On hold', color:'pill-orange' };
-  if(set.has('partial')) return { label:'Partial', color:'pill-teal' };
-  if(set.has('packed')) return { label:'Packed', color:'pill-teal' };
-  if(set.has('pre-order') || set.has('pre order')) return { label:'Pre-order', color:'pill-orange' };
-  if(set.has('open')) return { label:'Open (in fulfillment)', color:'pill-teal' };
-  return { label: statuses.find(Boolean) || 'Processing', color:'pill-teal' };
+function trackingUrl(carrier, num){
+  const c=String(carrier||'').toLowerCase();
+  if(/ups/.test(c)) return 'https://www.ups.com/track?tracknum='+encodeURIComponent(num);
+  if(/usps/.test(c)) return 'https://tools.usps.com/go/TrackConfirmAction?tLabels='+encodeURIComponent(num);
+  if(/fedex/.test(c)) return 'https://www.fedex.com/fedextrack/?trknbr='+encodeURIComponent(num);
+  if(/dhl/.test(c)) return 'https://www.dhl.com/us-en/home/tracking.html?tracking-id='+encodeURIComponent(num);
+  return 'https://www.google.com/search?q='+encodeURIComponent((carrier?carrier+' ':'')+num+' tracking');
 }
+function computeOrderFulfillment(lines){
+  if(!lines || !lines.length) return null;
+  const low = lines.map(l=>String(l.fulfillment_status||'Open').trim().toLowerCase());
+  const shippedLike = s=>['shipped','delivered','fulfilled','complete','completed'].includes(s);
+  const total = low.length;
+  const shippedCount = low.filter(shippedLike).length;
+  const trackMap = new Map();
+  lines.forEach(l=>{ if(l.tracking_number) trackMap.set(l.tracking_number, { carrier:l.carrier||'', number:l.tracking_number }); });
+  const tracking = [...trackMap.values()];
+  let label='Processing', color='pill-teal', allShipped=false;
+  if(low.every(s=>s==='cancelled')){ label='Cancelled'; color='pill-muted'; }
+  else if(low.some(s=>s==='refunded')){ label='Refunded'; color='pill-orange'; }
+  else if(low.every(s=>s==='delivered'||s==='cancelled')){ label='Delivered'; color='pill-green'; allShipped=true; }
+  else if(low.every(s=>shippedLike(s)||s==='cancelled')){ label='Shipped'; color='pill-green'; allShipped=true; }
+  else if(shippedCount>0){ label='Partially shipped'; color='pill-teal'; }
+  else if(low.some(s=>s==='on hold')){ label='On hold'; color='pill-orange'; }
+  else if(low.some(s=>s==='packed')){ label='Packed'; color='pill-teal'; }
+  else if(low.some(s=>s==='open')){ label='Open'; color='pill-teal'; }
+  return { label, color, allShipped, tracking, shippedCount, total };
+}
+async function autoCompleteOrder(id){
+  try{
+    const { data } = await sb.from('emails').update({ status:'completed', has_unread:false, unread_count:0, completed_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', id).select().single();
+    const i=S.emails.findIndex(x=>x.id===id);
+    if(i!==-1 && data){ data._fulfillment = S.emails[i]._fulfillment; S.emails[i]=data; if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data; }
+    try{ logOrderAudit(id,'Auto-completed (shipped)',''); }catch(_){}
+  }catch(_){}
+}
+async function loadOrdersFulfillment(){
+  const orders = (S.emails||[]).filter(e=>e.mailbox==='orders' && e.shopify_order_id && e.status!=='archived');
+  if(!orders.length) return;
+  const nums = [...new Set(orders.map(e=>e.shopify_order_id))];
+  let rows=[];
+  try{
+    for(let i=0;i<nums.length;i+=100){
+      const { data } = await sb.from('sales').select('order_number,pn,qty,fulfillment_status,tracking_number,carrier,shipped_at').in('order_number', nums.slice(i,i+100));
+      if(data) rows=rows.concat(data);
+    }
+  }catch(_){ return; }
+  const byOrder={};
+  rows.forEach(r=>{ (byOrder[r.order_number]=byOrder[r.order_number]||[]).push(r); });
+  const toComplete=[];
+  orders.forEach(e=>{
+    e._fulfillment = computeOrderFulfillment(byOrder[e.shopify_order_id]);
+    if(e._fulfillment && e._fulfillment.allShipped && e.status!=='completed') toComplete.push(e);
+  });
+  for(const e of toComplete){ await autoCompleteOrder(e.id); }
+}
+window.loadOrdersFulfillment = loadOrdersFulfillment;
 async function refreshOrderFulfillment(id){
   const e=(S.emails||[]).find(x=>x.id===id);
   if(!e || !e.shopify_order_id) return;
   try{
-    const { data, error } = await sb.from('sales').select('*').eq('order_number', e.shopify_order_id);
-    if(error) throw error;
-    const cur = document.getElementById('orderFulfillmentBox');
-    if(!cur) return;
-    const rows = data||[];
-    if(!rows.length){ cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Not yet synced to the ERP (fulfillment status appears once the order syncs).</span>'; return; }
-    const statuses = rows.map(r=>r.fulfillment_status).filter(Boolean);
-    const sum = summarizeFulfillment(statuses);
-    const tracking = [...new Set(rows.map(r=>r.tracking_number||r.tracking||'').filter(Boolean))];
-    const nShipped = statuses.filter(s=>['shipped','fulfilled','complete','completed','delivered'].includes(String(s).toLowerCase())).length;
-    const mix = (nShipped>0 && nShipped<statuses.length) ? ' ('+nShipped+'/'+statuses.length+' items)' : '';
-    let html = '<span style="color:var(--text3);font-size:var(--t-xs);margin-right:6px">ERP status:</span><span class="pill '+sum.color+'">'+escapeHtml(sum.label)+escapeHtml(mix)+'</span>';
-    if(tracking.length){
-      html += ' '+tracking.map(t=>{
-        return /^https?:\/\//i.test(t) ? '<a href="'+escapeHtml(t)+'" target="_blank" rel="noopener" style="color:var(--teal);font-size:var(--t-xs)">Track \u2197</a>' : '<span class="pill pill-muted" title="Tracking">'+escapeHtml(t)+'</span>';
-      }).join(' ');
-    }
-    html += ' <button class="btn btn-sm" style="padding:2px 8px;margin-left:6px" onclick="refreshOrderFulfillment(\''+id+'\')">Refresh</button>';
-    cur.innerHTML = html;
-  }catch(err){
-    const cur=document.getElementById('orderFulfillmentBox');
-    if(cur) cur.innerHTML = '<span style="color:var(--text3);font-size:var(--t-xs)">Could not read ERP fulfillment.</span>';
-  }
+    const { data } = await sb.from('sales').select('order_number,pn,qty,fulfillment_status,tracking_number,carrier,shipped_at').eq('order_number', e.shopify_order_id);
+    e._fulfillment = computeOrderFulfillment(data||[]);
+    if(e._fulfillment && e._fulfillment.allShipped && e.status!=='completed' && e.status!=='archived'){ await autoCompleteOrder(id); }
+    renderOrderFulfillmentBox(id);
+    renderNav();
+    if(S.page==='orders'||S.page==='emails') renderEmailsBody();
+    if(S.page==='dashboard') renderDashboard();
+  }catch(_){}
 }
 window.refreshOrderFulfillment = refreshOrderFulfillment;
+function renderOrderFulfillmentBox(id){
+  const cur=document.getElementById('orderFulfillmentBox'); if(!cur) return;
+  const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
+  const f=e._fulfillment;
+  if(!f){ cur.innerHTML='<span style="color:var(--text3);font-size:var(--t-xs)">Not yet synced to the ERP (fulfillment status appears once the order syncs).</span>'; return; }
+  const mix = (f.shippedCount>0 && f.shippedCount<f.total) ? ' ('+f.shippedCount+'/'+f.total+' items)' : '';
+  let html='<span style="color:var(--text3);font-size:var(--t-xs);margin-right:6px">ERP status:</span><span class="pill '+f.color+'">'+escapeHtml(f.label)+escapeHtml(mix)+'</span>';
+  if(f.tracking.length){
+    html += '<div style="margin-top:6px;font-size:var(--t-sm)"><span style="color:var(--text3);font-size:var(--t-xs)">Tracking:</span> '+f.tracking.map(t=>'<a href="'+escapeHtml(trackingUrl(t.carrier,t.number))+'" target="_blank" rel="noopener" style="color:var(--teal);margin-right:8px">'+escapeHtml((t.carrier?t.carrier+' ':'')+t.number)+' \u2197</a>').join('')+'</div>';
+  }
+  html += '<button class="btn btn-sm" style="padding:2px 8px;margin-left:6px" onclick="refreshOrderFulfillment(\''+id+'\')">Refresh</button>';
+  cur.innerHTML=html;
+}
+function orderStatusPill(e){
+  if(e.status==='archived') return '<span class="pill pill-muted">Archived</span>';
+  const f=e._fulfillment;
+  if(f && f.label) return '<span class="pill '+f.color+'">'+escapeHtml(f.label)+'</span>';
+  if(e.status==='completed') return '<span class="pill pill-green">Completed</span>';
+  if(e.has_unread) return '<span class="pill pill-red">New</span>';
+  return '<span class="pill pill-teal">Active</span>';
+}
+window.orderStatusPill = orderStatusPill;
 
 // ---- Order audit trail ----
 async function logOrderAudit(emailId, action, detail){
