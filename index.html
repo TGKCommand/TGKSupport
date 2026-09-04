@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.83';
+const TGK_SUPPORT_VERSION = 'v1.84';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -516,8 +516,35 @@ function toast(msg, isErr){
   el.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(()=> el.classList.remove('show'), 3200);
+  // Route real operation failures (not validation prompts) into the error log.
+  try{ if(isErr){ const plain=String(msg||'').replace(/<[^>]+>/g,''); if(/fail|error|denied|violat|could not|unable/i.test(plain)) logError(plain, 'toast'); } }catch(_){}
 }
 window.toast = toast;
+
+// ---- Error logging: the app records its own failures so bugs surface without
+// a screenshot. Best-effort, deduped, never throws. ----
+window._errSeen = window._errSeen || {};
+async function logError(message, detail){
+  try{
+    const msg = String(message||'').slice(0,600); if(!msg) return;
+    const sig = msg.slice(0,120), now = Date.now();
+    if(window._errSeen[sig] && (now - window._errSeen[sig]) < 60000) return; // dedupe 1 min
+    window._errSeen[sig] = now;
+    if(typeof sb==='undefined' || !sb) return;
+    await sb.from('error_log').insert({
+      user_email: (typeof S!=='undefined' && S.user && S.user.email) || null,
+      page: (typeof S!=='undefined' && S.page) || null,
+      message: msg,
+      detail: detail ? String(detail).slice(0,4000) : null,
+      url: (typeof location!=='undefined' && location.href) || null,
+      user_agent: (typeof navigator!=='undefined' && navigator.userAgent) || null,
+      app_version: (typeof TGK_SUPPORT_VERSION!=='undefined') ? TGK_SUPPORT_VERSION : null
+    });
+  }catch(_){ /* never let logging break the app */ }
+}
+window.logError = logError;
+window.addEventListener('error', (ev)=>{ try{ logError((ev && (ev.message || (ev.error&&ev.error.message))) || 'Uncaught error', ev && ev.error && ev.error.stack); }catch(_){} });
+window.addEventListener('unhandledrejection', (ev)=>{ try{ const r = ev && ev.reason; logError('Unhandled rejection: '+((r&&r.message)||r||''), r&&r.stack); }catch(_){} });
 
 function isUserActivelyWorking(){
   const ae = document.activeElement;
@@ -5700,6 +5727,7 @@ function renderSettings(){
       + settingsTabBtn('templates','Reply Templates')
       + settingsTabBtn('workflow','Workflow')
       + settingsTabBtn('team','Team')
+      + settingsTabBtn('errors','System Errors')
       + settingsTabBtn('sql','SQL Setup')
     + '</div><div id="settings-body"></div>';
 
@@ -5709,6 +5737,7 @@ function renderSettings(){
   else if(tab === 'workflow')   body.innerHTML = renderSettingsWorkflow();
   else if(tab === 'team')       body.innerHTML = renderSettingsTeam();
   else if(tab === 'sql')        body.innerHTML = renderSettingsSql();
+  else if(tab === 'errors'){    body.innerHTML = '<div class="panel"><div class="panel-title" style="display:flex;align-items:center;gap:10px"><span style="flex:1">System Errors (last 100)</span><button class="btn btn-sm" onclick="renderErrorLog()">Refresh</button></div><div id="errlog-body"><span style="color:var(--text3)">Loading...</span></div></div>'; renderErrorLog(); }
   else if(tab === 'templates'){
     body.innerHTML = '<div class="panel">'
       + '<div class="panel-title" style="display:flex;align-items:center;gap:10px">'
@@ -5719,6 +5748,27 @@ function renderSettings(){
   }
 }
 window.renderSettings = renderSettings;
+
+async function renderErrorLog(){
+  const box=document.getElementById('errlog-body'); if(!box) return;
+  try{
+    const { data, error } = await sb.from('error_log').select('*').order('created_at',{ascending:false}).limit(100);
+    if(error) throw error;
+    const rows=data||[];
+    if(!rows.length){ box.innerHTML='<div class="empty">No errors logged \u2014 all clear. \u2705</div>'; return; }
+    box.innerHTML = '<div style="font-size:var(--t-xs);color:var(--text3);margin-bottom:8px">The app logs its own failures here so you can catch bugs without a screenshot. <button class="btn btn-sm" style="margin-left:6px" onclick="clearErrorLog()">Clear all</button></div>'
+      + '<div class="tbl-wrap"><table><thead><tr><th>When</th><th>Page</th><th>User</th><th>Ver</th><th>Message</th></tr></thead><tbody>'
+      + rows.map(r=>`<tr><td class="pn">${timeAgo(r.created_at)}</td><td class="pn">${escapeHtml(r.page||'\u2014')}</td><td class="pn">${escapeHtml(trackerName(r.user_email))}</td><td class="pn">${escapeHtml(r.app_version||'\u2014')}</td><td style="color:var(--red)">${escapeHtml(r.message||'')}${r.detail?`<div style="color:var(--text3);font-size:var(--t-xs);white-space:pre-wrap;margin-top:2px">${escapeHtml(String(r.detail).slice(0,300))}</div>`:''}</td></tr>`).join('')
+      + '</tbody></table></div>';
+  }catch(e){ box.innerHTML='<div class="empty">Could not load the error log'+(e.message?(' ('+escapeHtml(e.message)+')'):'')+'. Run error_log_schema.sql if you haven\'t.</div>'; }
+}
+window.renderErrorLog = renderErrorLog;
+async function clearErrorLog(){
+  if(!confirm('Delete all logged errors?')) return;
+  try{ await sb.from('error_log').delete().neq('id','00000000-0000-0000-0000-000000000000'); renderErrorLog(); toast('Error log cleared'); }
+  catch(e){ toast('Clear failed: '+e.message, true); }
+}
+window.clearErrorLog = clearErrorLog;
 
 /* ---------------- Ticket categories ---------------- */
 function renderSettingsCategories(){
