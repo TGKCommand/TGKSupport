@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.85';
+const TGK_SUPPORT_VERSION = 'v1.86';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -741,33 +741,124 @@ async function fetchAll(queryFn, pageSize=1000){
   return all;
 }
 
+// [PERF] loadAll()/loadEmails() used to pull every row of tickets, warranty_claims,
+// shipment_errors, and emails -- unbounded, full history -- on every single login.
+// As those tables grow year over year that's an ever-slower login with no ceiling.
+//
+// The bound below is deliberately NOT "load recent stuff and hope nothing older
+// matters" -- that would violate accuracy (an old-but-still-open ticket must never
+// silently disappear). Instead, for each table, everything that's still genuinely
+// ACTIVE loads regardless of age, PLUS anything touched in the last RECENT_WINDOW_DAYS
+// (for a reasonable default "Completed"/"Archived" view), PLUS -- for warranty_claims
+// and shipment_errors specifically -- anything a currently-loaded ticket links to,
+// even if that claim itself is old and Resolved/Closed/Denied, because the ticket
+// detail panel (openTicketDetail, etc.) reads that claim's live status/cost directly
+// off S.warranty/S.shipErrors and must never render it as missing.
+// Nothing outside these windows is ever permanently hidden: loadFullHistory() below
+// fetches the true complete table on demand, wired to a button in each list view.
+const RECENT_WINDOW_DAYS = 90;
+function recentCutoffISO(){ return new Date(Date.now() - RECENT_WINDOW_DAYS*24*60*60*1000).toISOString(); }
+function mergeRowsById(...lists){
+  const map = new Map();
+  for(const list of lists){ for(const r of (list||[])) map.set(r.id, r); }
+  return Array.from(map.values());
+}
+// Tracks which tables have had loadFullHistory() run, so the "Load full history"
+// buttons in the list views can hide themselves once there's nothing left to load.
+const HISTORY_LOADED = { tickets:false, warranty:false, shipErrors:false, emails:false };
+
+async function loadBoundedTickets(){
+  const cutoff = recentCutoffISO();
+  const [active, recent] = await Promise.all([
+    // Same condition as the rest of the app's "!t.archived && status not in (resolved,closed)"
+    // check, made null-safe: archived/status can be NULL on older rows, and JS falsy
+    // checks (!t.archived) treat that as "not archived" -- a plain .eq('archived',false)
+    // would wrongly exclude those rows, so both fields use an is-null-or fallback.
+    fetchAll((f,t)=> sb.from('tickets').select('*')
+      .or('archived.is.null,archived.eq.false')
+      .or('status.is.null,status.not.in.(resolved,closed)')
+      .order('created_at',{ascending:false}).range(f,t)),
+    fetchAll((f,t)=> sb.from('tickets').select('*').gte('created_at', cutoff).order('created_at',{ascending:false}).range(f,t))
+  ]);
+  return mergeRowsById(recent, active).sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+}
+
+// Shared loader for warranty_claims and shipment_errors -- see the loadAll() comment
+// above for why "linked to a loaded ticket" is a required third bucket, not optional.
+async function loadBoundedClaims(table, ticketLinkField){
+  const cutoff = recentCutoffISO();
+  const linkedIds = [...new Set((S.tickets||[]).map(t=>t[ticketLinkField]).filter(Boolean))];
+  const queries = [
+    fetchAll((f,t)=> sb.from(table).select('*')
+      .or('status.is.null,status.not.in.(Resolved,Closed,Denied)')
+      .order('created_at',{ascending:false}).range(f,t)),
+    fetchAll((f,t)=> sb.from(table).select('*').gte('created_at', cutoff).order('created_at',{ascending:false}).range(f,t)),
+  ];
+  if(linkedIds.length) queries.push(fetchAll((f,t)=> sb.from(table).select('*').in('id', linkedIds).range(f,t)));
+  const results = await Promise.all(queries);
+  return mergeRowsById(...results).sort((a,b)=> new Date(b.created_at) - new Date(a.created_at));
+}
+
 async function loadAll(){
   try{
-    const results = await Promise.allSettled([
-      fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t)),
-      fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t)),
-      fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t)),
+    // Tickets load first (not in parallel with warranty/shipment_errors) because
+    // loadBoundedClaims needs to know which claims S.tickets actually references
+    // before it can decide what counts as "linked" -- see comment above.
+    const [ticketsR, dealersR, teamR, templatesR, settingsR] = await Promise.allSettled([
+      loadBoundedTickets(),
       sb.from('dealers').select('id,name,email,discount_pct,po_code_prefix').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
     ]);
-    const val = (i, def)=> results[i].status==='fulfilled' ? results[i].value : def;
+    const val = (r, def)=> r.status==='fulfilled' ? r.value : def;
     // A single failing table no longer blanks the whole app -- keep whatever loaded.
-    S.tickets   = val(0, S.tickets||[]);
-    S.warranty  = val(1, S.warranty||[]);
-    S.shipErrors= val(2, S.shipErrors||[]);
-    S.dealers   = val(3, S.dealers||[]);
-    S.team      = val(4, S.team||[]);
-    S.templates = val(5, S.templates||[]);
-    const failed = results.filter(r=>r.status==='rejected').length;
-    if(failed) toast('Some data failed to load ('+failed+' of '+results.length+'). Showing what loaded.', true);
+    S.tickets   = val(ticketsR, S.tickets||[]);
+    S.dealers   = val(dealersR, S.dealers||[]);
+    S.team      = val(teamR, S.team||[]);
+    S.templates = val(templatesR, S.templates||[]);
+
+    const [warrantyR, shipErrR] = await Promise.allSettled([
+      loadBoundedClaims('warranty_claims', 'warranty_claim_id'),
+      loadBoundedClaims('shipment_errors', 'shipment_error_id')
+    ]);
+    S.warranty   = val(warrantyR, S.warranty||[]);
+    S.shipErrors = val(shipErrR, S.shipErrors||[]);
+
+    const failed = [ticketsR, dealersR, teamR, templatesR, settingsR, warrantyR, shipErrR].filter(r=>r.status==='rejected').length;
+    if(failed) toast('Some data failed to load ('+failed+' of 7). Showing what loaded.', true);
     await loadEmails();
     await loadOrdersFulfillment();
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
 }
+
+// On-demand full backfill for one table, wired to a "Load full history" button in
+// the relevant list view (see renderTicketsList/renderEmailsList). Safe to call more
+// than once -- HISTORY_LOADED guards it into a no-op once a table is fully loaded.
+async function loadFullHistory(kind){
+  if(HISTORY_LOADED[kind]) return;
+  toast('Loading full history\u2026 this may take a moment for a large table.');
+  try{
+    if(kind==='tickets'){
+      S.tickets = await fetchAll((f,t)=> sb.from('tickets').select('*').order('created_at',{ascending:false}).range(f,t));
+    } else if(kind==='warranty'){
+      S.warranty = await fetchAll((f,t)=> sb.from('warranty_claims').select('*').order('created_at',{ascending:false}).range(f,t));
+    } else if(kind==='shipErrors'){
+      S.shipErrors = await fetchAll((f,t)=> sb.from('shipment_errors').select('*').order('created_at',{ascending:false}).range(f,t));
+    } else if(kind==='emails'){
+      S.emails = await fetchAll((f,t)=> sb.from('emails').select('*').order('last_message_at',{ascending:false}).range(f,t));
+    } else {
+      return;
+    }
+    HISTORY_LOADED[kind] = true;
+    renderNav();
+    if(typeof renderPage==='function') renderPage();
+    toast('Full history loaded');
+  }catch(e){ toast('Failed to load full history: '+e.message, true); }
+}
+window.loadFullHistory = loadFullHistory;
 
 async function loadMessages(ticketId){
   const { data, error } = await sb.from('ticket_messages').select('*').eq('ticket_id', ticketId).order('created_at',{ascending:true});
@@ -1002,27 +1093,61 @@ document.addEventListener('keydown', (ev)=>{
   else if((k==='z' && ev.shiftKey) || k==='y'){ ev.preventDefault(); doRedo(); }
 });
 
+// [PERF] Badge counts used to be recomputed with 7-8 independent array scans
+// EVERY time renderNav() runs (which is often -- most mutations and every
+// matching realtime event call it). Two of those scans were quadratic: the
+// warranty/shiperrors badges each ran S.tickets.some(...) INSIDE a .filter()
+// over every claim, i.e. O(claims x tickets) work just to draw a sidebar
+// number. As both tables grow this only gets worse.
+//
+// computeNavCounts() does the equivalent work in one pass each over
+// S.tickets and S.emails (collecting ticket->claim link ids into Sets along
+// the way), so the warranty/shiperrors lookups below become O(1) Set.has()
+// calls instead of O(tickets) scans per claim. Every condition below is
+// copied verbatim from the original per-badge filters -- same results,
+// computed once instead of piecemeal, so this is a speed change only, not a
+// behavior change.
+function computeNavCounts(){
+  let activeChats = 0, unreadTix = 0, openTix = 0;
+  const ticketWarrantyIds = new Set(), ticketShipErrorIds = new Set();
+  for(const t of S.tickets){
+    if(t.warranty_claim_id) ticketWarrantyIds.add(t.warranty_claim_id);
+    if(t.shipment_error_id) ticketShipErrorIds.add(t.shipment_error_id);
+    const notDoneNotArchived = !t.archived && !['resolved','closed'].includes(t.status);
+    if(notDoneNotArchived && t.is_live_chat) activeChats++;
+    if(notDoneNotArchived && !t.merged_into_id){
+      if(t.has_unread) unreadTix++;
+      if(['open','pending','waiting_customer'].includes(t.status)) openTix++;
+    }
+  }
+  let unreadEmails = 0, unreadOrders = 0;
+  for(const e of (S.emails||[])){
+    if(e.status==='archived' || !e.has_unread) continue;
+    if(e.mailbox==='orders') unreadOrders++; else unreadEmails++;
+  }
+  const warrantyCount = S.warranty.filter(w=>isActiveClaim(w.status) && !ticketWarrantyIds.has(w.id)).length;
+  const shipErrorsCount = S.shipErrors.filter(e=>isActiveClaim(e.status) && !ticketShipErrorIds.has(e.id)).length;
+  return { activeChats, unreadTix, openTix, unreadEmails, unreadOrders, warrantyCount, shipErrorsCount };
+}
+
 function renderNav(){
   const nav = document.getElementById('navList');
   let lastSection = null;
+  const counts = computeNavCounts();
   nav.innerHTML = NAV.map(n=>{
     let sectionHeader = '';
     if(n.section && n.section !== lastSection){ lastSection = n.section; sectionHeader = `<div class="sidebar-section">${escapeHtml(n.section)}</div>`; }
     let badge = '';
     let alertClass = '';
     if(n.badgeKey==='livechat'){
-      const activeChats = S.tickets.filter(t=>t.is_live_chat && !t.archived && !['resolved','closed'].includes(t.status)).length;
-      if(activeChats){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${activeChats}</span>`; alertClass='alert-nav'; }
+      if(counts.activeChats){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${counts.activeChats}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='tickets'){
-      const activeTix = S.tickets.filter(t=>!t.merged_into_id && !t.archived && !['resolved','closed'].includes(t.status));
-      const unreadTix = activeTix.filter(t=>t.has_unread).length;
-      if(unreadTix){
-        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${unreadTix} ticket${unreadTix===1?'':'s'} with new messages">${unreadTix}</span>`;
+      if(counts.unreadTix){
+        badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${counts.unreadTix} ticket${counts.unreadTix===1?'':'s'} with new messages">${counts.unreadTix}</span>`;
         alertClass = 'alert-nav';
       } else {
-        const openCount = activeTix.filter(t=>['open','pending','waiting_customer'].includes(t.status)).length;
-        if(openCount) badge = `<span class="nav-badge">${openCount}</span>`;
+        if(counts.openTix) badge = `<span class="nav-badge">${counts.openTix}</span>`;
       }
     }
     if(n.badgeKey==='needsreply'){
@@ -1030,20 +1155,16 @@ function renderNav(){
       if(nr){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${nr}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='emails'){
-      const unread = (S.emails||[]).filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
-      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
+      if(counts.unreadEmails){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${counts.unreadEmails}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='orders'){
-      const unread = (S.emails||[]).filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.has_unread).length;
-      if(unread){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${unread}</span>`; alertClass='alert-nav'; }
+      if(counts.unreadOrders){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${counts.unreadOrders}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='warranty'){
-      const c = S.warranty.filter(w=>isActiveClaim(w.status) && !S.tickets.some(t=>t.warranty_claim_id===w.id)).length;
-      if(c){ badge = `<span class="nav-badge">${c}</span>`; alertClass='alert-nav'; }
+      if(counts.warrantyCount){ badge = `<span class="nav-badge">${counts.warrantyCount}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='shiperrors'){
-      const c = S.shipErrors.filter(e=>isActiveClaim(e.status) && !S.tickets.some(t=>t.shipment_error_id===e.id)).length;
-      if(c){ badge = `<span class="nav-badge">${c}</span>`; alertClass='alert-nav'; }
+      if(counts.shipErrorsCount){ badge = `<span class="nav-badge">${counts.shipErrorsCount}</span>`; alertClass='alert-nav'; }
     }
     return sectionHeader + `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
       <span class="nav-dot"></span>${n.label}${badge}
@@ -1292,6 +1413,7 @@ function renderTicketsList(){
       <button class="btn btn-sm" onclick="S.filters={status:'__active__',priority:'',source:'',tag:'',assignedTo:'',staleOnly:false,showArchived:false,q:''}; renderTicketsList()">Clear</button>
       <button class="btn btn-sm" onclick="openTemplateManager()"> Templates</button>
       <button class="btn btn-sm" onclick="exportTicketsToCSV()"><span class="ic ic-download"></span>Export CSV</button>
+      ${HISTORY_LOADED.tickets ? '' : `<button class="btn btn-sm" title="Older resolved/closed tickets beyond ${RECENT_WINDOW_DAYS} days aren't loaded by default -- click to fetch everything" onclick="loadFullHistory('tickets')">Load full history</button>`}
       <select class="form-input" style="width:auto" onchange="handleSavedView(this.value); this.value=''"><option value="">Saved views...</option>${savedViewsOptions()}<option value="__save__">+ Save current view</option></select>
     </div>
     <div id="ticketsListBody">${renderBulkActionBar()}${ticketTable(filteredTickets(), true)}</div>
@@ -3315,8 +3437,16 @@ function renderThread(msgs, notesOnly){
    ============================================================ */
 async function loadEmails(){
   try{
-    const rows = await fetchAll((f,t)=> sb.from('emails').select('*').order('last_message_at',{ascending:false}).range(f,t));
-    S.emails = rows || [];
+    const cutoff = recentCutoffISO();
+    const [active, recent] = await Promise.all([
+      // status can be NULL on older rows -- null-safe the same way loadBoundedTickets does,
+      // matching the app's existing e.status!=='archived' truthy-check semantics.
+      fetchAll((f,t)=> sb.from('emails').select('*')
+        .or('status.is.null,status.not.in.(archived,completed)')
+        .order('last_message_at',{ascending:false}).range(f,t)),
+      fetchAll((f,t)=> sb.from('emails').select('*').gte('last_message_at', cutoff).order('last_message_at',{ascending:false}).range(f,t))
+    ]);
+    S.emails = mergeRowsById(recent, active).sort((a,b)=> new Date(b.last_message_at||b.created_at) - new Date(a.last_message_at||a.created_at));
   }catch(e){ S.emails = S.emails || []; }
 }
 
@@ -3393,6 +3523,7 @@ function renderEmailsList(){
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
       ${f.view==='archived' ? `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(220,38,38,.3)" onclick="emptyArchive()"><span class="ic ic-trash"></span>Empty Archive</button>` : ''}
       ${orders ? `<button class="btn btn-primary btn-sm" onclick="createManualOrder()"><span class="ic ic-plus"></span>New Order</button>` : ''}
+      ${HISTORY_LOADED.emails ? '' : `<button class="btn btn-sm" title="Older completed/archived ${orders?'orders':'emails'} beyond ${RECENT_WINDOW_DAYS} days aren't loaded by default -- click to fetch everything" onclick="loadFullHistory('emails')">Load full history</button>`}
     </div>
     <div id="emailsListBody">${renderEmailBulkBar()}${emailTable(emailFiltered())}</div>
   `;
