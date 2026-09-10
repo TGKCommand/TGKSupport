@@ -3782,7 +3782,7 @@ function renderShipTo(e){
     ${on?`<div style="margin-top:10px">
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Ship-to name</label>${q(e.id,'ship_name')}</div>
-        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}<div style="font-size:var(--t-xs);color:var(--text3);margin-top:2px">Leave blank and Shopify sends no receipt to anyone. Only this exact address is ever emailed.</div></div>
+        <div class="form-group"><label class="form-label">Email</label>${q(e.id,'ship_email')}<div style="font-size:var(--t-xs);color:var(--text3);margin-top:2px">${e.dealer_id?'This address is notified (invoice / confirmation). The dealer is still billed \u2014 leave blank and no one is emailed.':'Leave blank and Shopify sends no receipt to anyone. Only this exact address is ever emailed.'}</div></div>
       </div>
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Phone</label>${q(e.id,'ship_phone')}</div>
@@ -4236,11 +4236,19 @@ window.createAndMarkPaid = createAndMarkPaid;
 async function createAndInvoice(id){
   if(window._orderChainBusy) return;
   const e=(S.emails||[]).find(x=>x.id===id);
-  // Drop-ship invoices the ship-to contact; a plain dealer order invoices the dealer.
-  const email = e && e.is_dropship
-    ? (e.ship_email||'').trim()
-    : ((dealerEmail(e && e.dealer_id) || (e && e.customer_email) || '').trim());
-  if(!email){ toast(e && e.is_dropship ? 'Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.' : 'Pick a dealer (or add a customer email) first \u2014 the invoice needs a recipient.', true); return; }
+  // Bill-to is always the dealer when one is assigned, but who gets EMAILED
+  // depends on drop-ship: a plain dealer order notifies the dealer (they're
+  // the recipient); a drop-ship notifies the end customer's ship-to email
+  // even though the dealer is still billed.
+  const email = (e && e.dealer_id)
+    ? (e.is_dropship ? (e.ship_email||'').trim() : (dealerEmail(e.dealer_id) || '').trim())
+    : ((e && e.is_dropship ? (e.ship_email||'') : (e && e.customer_email) || '').trim());
+  if(!email){
+    const msg = (e && e.dealer_id)
+      ? (e.is_dropship ? 'Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.' : 'This dealer has no email on file in the ERP \u2014 the invoice needs a recipient.')
+      : 'Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.';
+    toast(msg, true); return;
+  }
   window._orderChainBusy = true;
   try{
     const r = await createShopifyDraft(id);
