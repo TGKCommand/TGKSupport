@@ -3565,7 +3565,7 @@ async function setOrderDealer(id, dealerId){
     const { data, error } = await sb.from('emails').update(patch).eq('id', id).select().single();
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
-    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderOrderBuilder(); }
+    if(S.activeEmail && S.activeEmail.id===id){ S.activeEmail=data; rerenderShipTo(); rerenderOrderBuilder(); }
     toast('Saved');
   }catch(e){ toast('Save failed: '+e.message, true); }
 }
@@ -3762,6 +3762,12 @@ async function setOrderPO(id, val){
 }
 window.setOrderPO = setOrderPO;
 
+/* A dealer order with drop-ship OFF ships to the dealer themselves: the dealer
+   is the customer on the order and their Shopify address on file is used for
+   both bill-to and ship-to. The address lives in Shopify, so the edge function
+   resolves it from the dealer's customer record (use_dealer_address). */
+function shipsToDealer(e){ return !!(e && e.dealer_id && !e.is_dropship); }
+
 function renderShipTo(e){
   const on = !!e.is_dropship;
   const q = (id,field,ph)=>`<input class="form-input" value="${escapeHtml(e[field]||(field==='ship_country'?'US':''))}" ${ph?`placeholder="${ph}"`:''} onchange="updateEmailField('${e.id}','${field}',this.value,true)">`;
@@ -3770,6 +3776,9 @@ function renderShipTo(e){
       <input type="checkbox" ${on?'checked':''} onchange="toggleDropship('${e.id}',this.checked)">
       <span style="font-weight:600">Drop-ship / customer order (enter ship-to address)</span>
     </label>
+    ${!on ? (e.dealer_id
+      ? `<div style="margin-top:8px;font-size:var(--t-xs);color:var(--text3)">Ships to <strong>${escapeHtml(dealerName(e.dealer_id))}</strong> \u2014 they are the customer on this order and Shopify's saved address for <span style="font-family:var(--mono)">${escapeHtml(dealerEmail(e.dealer_id)||'their account')}</span> is used for bill-to and ship-to. Tick the box above only when it ships somewhere else.</div>`
+      : `<div style="margin-top:8px;font-size:var(--t-xs);color:var(--orange)">No dealer selected and no ship-to address \u2014 pick a dealer above, or tick the box to enter an address.</div>`) : ''}
     ${on?`<div style="margin-top:10px">
       <div class="form-row cols-2">
         <div class="form-group"><label class="form-label">Ship-to name</label>${q(e.id,'ship_name')}</div>
@@ -3792,11 +3801,14 @@ function renderShipTo(e){
     </div>`:''}
   </div>`;
 }
+function rerenderShipTo(){ const b=document.getElementById('shipToBox'); if(b && S.activeEmail) b.outerHTML=renderShipTo(S.activeEmail); }
 function toggleDropship(id, on){
   updateEmailField(id,'is_dropship',on);
   const e=(S.emails||[]).find(x=>x.id===id); if(e){ e.is_dropship=on; }
   if(S.activeEmail && S.activeEmail.id===id) S.activeEmail.is_dropship=on;
-  const b=document.getElementById('shipToBox'); if(b && S.activeEmail) b.outerHTML=renderShipTo(S.activeEmail);
+  clearOrderTotals();
+  rerenderShipTo();
+  rerenderOrderBuilder();
 }
 window.toggleDropship=toggleDropship;
 
@@ -3870,6 +3882,10 @@ function orderDraftPayload(id){
   return {
     email_id:id,
     dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
+    dealer_id: e.dealer_id || null,
+    // Drop-ship off + a dealer selected => the dealer IS the customer, and their
+    // Shopify address on file is the ship-to. The function resolves it.
+    use_dealer_address: shipsToDealer(e),
     line_items: lines,
     discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
     discount_code: e.order_discount_code||null,
@@ -3888,6 +3904,7 @@ function renderTotalsStrip(t){
     ${(t.discount && Number(t.discount)>0) ? row('Discount', '-'+Number(t.discount).toFixed(2).slice(0)) : ''}
     ${(t.tax && Number(t.tax)>0) ? row('Tax', t.tax) : ''}
     ${row('Total ('+cur+')', t.total, true)}
+    ${t.shipping_address ? `<div style="font-size:var(--t-xs);color:var(--text2);margin-top:6px;border-top:1px solid var(--border);padding-top:5px">Ships to: <strong>${escapeHtml([t.shipping_address.name,t.shipping_address.address1,t.shipping_address.city,t.shipping_address.province,t.shipping_address.zip].filter(Boolean).join(', '))}</strong>${t.shipping_address_source==='dealer'?' <span class="pill pill-teal" style="font-size:9px">Dealer on file</span>':''}</div>` : ''}
     <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Live from Shopify \u00b7 preview only, nothing created yet</div>
   </div>`;
 }
@@ -4088,7 +4105,7 @@ function renderOrderBuilder(e){
         <input class="form-input" id="orderShipCost" type="number" min="0" step="0.01" value="${e.shipping_cost!=null&&e.shipping_cost!==''?e.shipping_cost:''}" placeholder="0.00" onchange="updateEmailField('${e.id}','shipping_cost',this.value,true); clearOrderTotals()">
       </div>
     </div>
-    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 8px">A shipping method is required for the order to import into ShipStation. For a dealer order without customer checkout, also set a ship-to address above (Drop-ship / customer order).</div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 8px">A shipping method is required for the order to import into ShipStation. A dealer order ships to the dealer's Shopify address automatically \u2014 only tick &quot;Drop-ship / customer order&quot; above when it ships somewhere else.</div>
     <div style="font-size:var(--t-xs);color:var(--text3);margin:4px 0 10px">Leave <strong>Unit $</strong> blank to use the live Shopify price, or enter your own price to sell a part at a custom rate (works for any part number). The dealer % applies to the whole order; the billing code is an ERP-tracking label and does not change the amount.</div>
     ${(window._orderTotals && window._orderTotals[e.id]) ? renderTotalsStrip(window._orderTotals[e.id]) : ''}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;flex-wrap:wrap">
@@ -4124,23 +4141,16 @@ async function createShopifyDraft(id){
   const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
   if(!lines.length){ toast('Add at least one line item', true); return; }
   const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
-  let shipping = null;
-  if(e.is_dropship){
-    shipping = { name:e.ship_name||'', email:e.ship_email||'', phone:e.ship_phone||'', address1:e.ship_address1||'', address2:e.ship_address2||'', city:e.ship_city||'', province:e.ship_province||'', zip:e.ship_zip||'', country:e.ship_country||'US' };
-  }
+  // One payload builder for preview and create so the two can never disagree.
+  const payload = orderDraftPayload(id);
+  if(!payload){ if(btn){ btn.disabled=false; btn.textContent='Save draft'; } return null; }
+  payload.line_items = lines;
   try{
     await sb.from('emails').update({ order_line_items: lines, updated_at:new Date().toISOString() }).eq('id', id);
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/create-draft-order`, {
       method:'POST',
       headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-      body: JSON.stringify({
-        email_id:id,
-        dealer_email: dealerEmail(e.dealer_id) || e.customer_email || null,
-        line_items: lines,
-        discount_pct: parseFloat((document.getElementById('orderDiscPct')||{}).value)||0,
-        discount_code: e.order_discount_code||null,
-        shipping: shipping
-      })
+      body: JSON.stringify(payload)
     });
     const result = await resp.json();
     if(!resp.ok) throw new Error(result.error||'Shopify draft failed');
@@ -4210,8 +4220,9 @@ window.cancelShopifyDraft = cancelShopifyDraft;
 async function createAndMarkPaid(id){
   if(window._orderChainBusy) return;
   const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
-  const hasShip = !!(e.is_dropship && (e.ship_address1 || e.ship_city));
-  if(!hasShip && !confirm('This order has no ship-to address, so it may not import into ShipStation. Create and mark paid anyway?\n\nTip: enable "Drop-ship / customer order" above to add an address.')) return;
+  // Either an explicit drop-ship address, or the dealer's own Shopify address.
+  const hasShip = shipsToDealer(e) || !!(e.is_dropship && (e.ship_address1 || e.ship_city));
+  if(!hasShip && !confirm('This order has no dealer and no ship-to address, so it may not import into ShipStation. Create and mark paid anyway?\n\nTip: pick a dealer above, or enable "Drop-ship / customer order" to enter an address.')) return;
   window._orderChainBusy = true;
   try{
     const r = await createShopifyDraft(id);
@@ -4225,8 +4236,11 @@ window.createAndMarkPaid = createAndMarkPaid;
 async function createAndInvoice(id){
   if(window._orderChainBusy) return;
   const e=(S.emails||[]).find(x=>x.id===id);
-  const email = e && e.is_dropship ? (e.ship_email||'').trim() : '';
-  if(!email){ toast('Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.', true); return; }
+  // Drop-ship invoices the ship-to contact; a plain dealer order invoices the dealer.
+  const email = e && e.is_dropship
+    ? (e.ship_email||'').trim()
+    : ((dealerEmail(e && e.dealer_id) || (e && e.customer_email) || '').trim());
+  if(!email){ toast(e && e.is_dropship ? 'Enter a customer email in the ship-to fields first \u2014 the invoice needs a recipient.' : 'Pick a dealer (or add a customer email) first \u2014 the invoice needs a recipient.', true); return; }
   window._orderChainBusy = true;
   try{
     const r = await createShopifyDraft(id);
