@@ -1,5 +1,5 @@
 /* TGK Support Center service worker - Web Push */
-const CACHE='tgk-support-v1';
+const CACHE='tgk-support-v2';
 self.addEventListener('install', ()=> self.skipWaiting());
 self.addEventListener('activate', e=> e.waitUntil(self.clients.claim()));
 
