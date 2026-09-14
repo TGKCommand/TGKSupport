@@ -444,7 +444,7 @@ tbody tr:hover td{background:rgba(13,148,136,.05)}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.88';
+const TGK_SUPPORT_VERSION = 'v1.89';
 const TGK_SUPPORT_BUILD_DATE = '2026-08-06';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -478,6 +478,7 @@ const S = {
   activeEmail: null,
   emailFilters: { view: 'open', q: '' },
   filters: { status: '__active__', priority: '', source: '', category: '', tag: '', assignedTo: '', staleOnly: false, showArchived: false, q: '' },
+  reportFilters: { range: '30', start: '', end: '', status: '', priority: '', source: '', category: '', tag: '', assignedTo: '', dealer: '' },
   lastActivity: Date.now()
 };
 window.S = S;
@@ -2558,18 +2559,217 @@ function barRow(label, count, max, color){
   </div>`;
 }
 
+// ---- Date-range resolution for Reports ----
+// Returns { start: Date|null, end: Date, days: number|null, label: string }
+function reportRangeBounds(){
+  const f = S.reportFilters;
+  const end = new Date();
+  if(f.range === 'custom'){
+    const start = f.start ? new Date(f.start+'T00:00:00') : null;
+    const endD = f.end ? new Date(f.end+'T23:59:59.999') : end;
+    let days = null;
+    if(start) days = Math.max(1, Math.round((endD-start)/86400000));
+    return { start, end: endD, days, label: 'Custom range' };
+  }
+  if(f.range === 'all') return { start: null, end, days: null, label: 'All time' };
+  const days = parseInt(f.range, 10) || 30;
+  const start = new Date(end.getTime() - days*86400000);
+  return { start, end, days, label: 'Last '+days+' days' };
+}
+
+function reportInRange(dateStr, bounds){
+  if(!dateStr) return false;
+  const d = new Date(dateStr);
+  if(bounds.start && d < bounds.start) return false;
+  if(d > bounds.end) return false;
+  return true;
+}
+
+// Whether the current range reaches further back than the app's default load
+// window (RECENT_WINDOW_DAYS), meaning some matching rows may not be in memory
+// yet unless "Load full history" has been run for that table.
+function reportNeedsFullHistory(bounds){
+  if(!bounds.start) return true; // "All time"
+  return (Date.now() - bounds.start.getTime()) > RECENT_WINDOW_DAYS*86400000;
+}
+
+function reportFilteredTickets(bounds){
+  const f = S.reportFilters;
+  return S.tickets.filter(t=>{
+    if(!reportInRange(t.created_at, bounds)) return false;
+    if(f.status && (t.status||'') !== f.status) return false;
+    if(f.priority && (t.priority||'') !== f.priority) return false;
+    if(f.source && (t.source||'') !== f.source) return false;
+    if(f.category){
+      if(f.category==='__none__'){ if(t.category) return false; }
+      else if((t.category||'') !== f.category) return false;
+    }
+    if(f.tag && !(t.tags||[]).includes(f.tag)) return false;
+    if(f.assignedTo){
+      if(f.assignedTo==='__unassigned__'){ if(t.assigned_to) return false; }
+      else if((t.assigned_to||'') !== f.assignedTo) return false;
+    }
+    return true;
+  });
+}
+
+function reportFilteredOrders(bounds){
+  const f = S.reportFilters;
+  return (S.emails||[]).filter(e=>{
+    if(e.mailbox !== 'orders') return false;
+    if(!reportInRange(e.created_at, bounds)) return false;
+    if(f.dealer && String(e.dealer_id||'') !== f.dealer) return false;
+    return true;
+  });
+}
+
+function reportFilteredSupportEmails(bounds){
+  return (S.emails||[]).filter(e=> e.mailbox !== 'orders' && reportInRange(e.created_at, bounds));
+}
+
+function reportFilteredWarranty(bounds){
+  return (S.warranty||[]).filter(w=> reportInRange(w.created_at, bounds));
+}
+
+function reportFilteredShipErrors(bounds){
+  return (S.shipErrors||[]).filter(e=> reportInRange(e.created_at, bounds));
+}
+
+// Buckets a list of dated items into a volume-over-time series. Granularity
+// auto-adjusts to the span so a 7-day range shows days and a 1-year range
+// shows months, rather than one giant bar or 365 tiny ones.
+function reportVolumeSeries(items, bounds){
+  const end = bounds.end;
+  const start = bounds.start || (items.length ? new Date(Math.min(...items.map(x=>new Date(x.created_at)))) : new Date(end.getTime()-30*86400000));
+  const spanDays = Math.max(1, Math.round((end-start)/86400000));
+  let unit = 'day', stepDays = 1, count;
+  if(spanDays <= 21){ unit='day'; stepDays=1; }
+  else if(spanDays <= 120){ unit='week'; stepDays=7; }
+  else { unit='month'; stepDays=null; }
+
+  const buckets = [];
+  if(unit==='month'){
+    const cur = new Date(start.getFullYear(), start.getMonth(), 1);
+    const last = new Date(end.getFullYear(), end.getMonth(), 1);
+    while(cur <= last){
+      const next = new Date(cur.getFullYear(), cur.getMonth()+1, 1);
+      buckets.push({ label: cur.toLocaleDateString('en-US',{month:'short',year:'2-digit'}), from: new Date(cur), to: next });
+      cur.setMonth(cur.getMonth()+1);
+    }
+  } else {
+    // Align to whole steps ending "now" so the most recent bucket is always current.
+    let cur = new Date(end); cur.setHours(0,0,0,0); cur.setDate(cur.getDate()+1); // exclusive end of today
+    const steps = Math.ceil(spanDays/stepDays);
+    const raw = [];
+    for(let i=0;i<steps;i++){
+      const to = new Date(cur.getTime() - i*stepDays*86400000);
+      const from = new Date(to.getTime() - stepDays*86400000);
+      raw.push({ from, to });
+    }
+    raw.reverse().forEach(r=>{
+      buckets.push({
+        label: unit==='day'
+          ? r.from.toLocaleDateString('en-US',{month:'short',day:'numeric'})
+          : r.from.toLocaleDateString('en-US',{month:'short',day:'numeric'}),
+        from: r.from, to: r.to
+      });
+    });
+  }
+
+  buckets.forEach(b=>{ b.count = items.filter(x=>{ const d=new Date(x.created_at); return d>=b.from && d<b.to; }).length; });
+  return buckets;
+}
+
+const REPORT_STATUS_COLOR = { open:'var(--teal)', pending:'var(--yellow)', waiting_customer:'var(--orange)', resolved:'var(--green)', closed:'var(--text3)' };
+
+function reportsDealerOptions(){
+  return (S.dealers||[]).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+}
+
+function reportFilterBar(){
+  const f = S.reportFilters;
+  return `
+    <div class="filter-bar">
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.range=this.value; renderReports()">
+        <option value="7" ${f.range==='7'?'selected':''}>Last 7 Days</option>
+        <option value="30" ${f.range==='30'?'selected':''}>Last 30 Days</option>
+        <option value="90" ${f.range==='90'?'selected':''}>Last 90 Days</option>
+        <option value="180" ${f.range==='180'?'selected':''}>Last 6 Months</option>
+        <option value="365" ${f.range==='365'?'selected':''}>Last 12 Months</option>
+        <option value="all" ${f.range==='all'?'selected':''}>All Time</option>
+        <option value="custom" ${f.range==='custom'?'selected':''}>Custom Range</option>
+      </select>
+      ${f.range==='custom' ? `
+        <input type="date" class="form-input" style="width:auto" value="${f.start}" onchange="S.reportFilters.start=this.value; renderReports()">
+        <span style="color:var(--text3)">to</span>
+        <input type="date" class="form-input" style="width:auto" value="${f.end}" onchange="S.reportFilters.end=this.value; renderReports()">
+      ` : ''}
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.status=this.value; renderReports()">
+        <option value="">All Statuses</option>
+        ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}" ${f.status===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.priority=this.value; renderReports()">
+        <option value="">All Priorities</option>
+        ${['low','medium','high','urgent'].map(s=>`<option value="${s}" ${f.priority===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.source=this.value; renderReports()">
+        <option value="">All Sources</option>
+        ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${f.source===s?'selected':''}>${label(s)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.category=this.value; renderReports()">
+        <option value="">All Categories</option>
+        ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${f.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
+        <option value="__none__" ${f.category==='__none__'?'selected':''}>Uncategorized</option>
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.tag=this.value; renderReports()">
+        <option value="">All Tags</option>
+        ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${f.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.assignedTo=this.value; renderReports()">
+        <option value="">Everyone</option>
+        <option value="__unassigned__" ${f.assignedTo==='__unassigned__'?'selected':''}>Unassigned</option>
+        ${S.team.map(m=>`<option value="${m.email}" ${f.assignedTo===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
+      </select>
+      <select class="form-input" style="width:auto" onchange="S.reportFilters.dealer=this.value; renderReports()">
+        <option value="">All Dealers (orders)</option>
+        ${reportsDealerOptions().map(d=>`<option value="${d.id}" ${f.dealer===String(d.id)?'selected':''}>${escapeHtml(d.name||d.email)}</option>`).join('')}
+      </select>
+      <button class="btn btn-sm" onclick="S.reportFilters={range:'30',start:'',end:'',status:'',priority:'',source:'',category:'',tag:'',assignedTo:'',dealer:''}; renderReports()">Clear</button>
+      <button class="btn btn-sm" onclick="exportReportToCSV()"><span class="ic ic-download"></span>Export CSV</button>
+    </div>
+  `;
+}
+
+function exportReportToCSV(){
+  const bounds = reportRangeBounds();
+  const list = reportFilteredTickets(bounds);
+  if(!list.length){ toast('Nothing to export with the current filters', true); return; }
+  const headers = ['Ticket #','Subject','Status','Priority','Source','Category','Tags','Customer Name','Customer Email','Order Number','Assigned To','Created At','Resolved At','Resolution Days'];
+  const rows = list.map(t=>{
+    const days = t.resolved_at ? ((new Date(t.resolved_at)-new Date(t.created_at))/86400000).toFixed(1) : '';
+    return [
+      t.ticket_number, t.subject, label(t.status), label(t.priority), label(t.source), t.category||'',
+      (t.tags||[]).join('; '), t.customer_name, t.customer_email, t.order_number, t.assigned_to,
+      t.created_at, t.resolved_at||'', days
+    ];
+  });
+  const csv = [headers, ...rows].map(row => row.map(csvEscape).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'tgk-report-'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+window.exportReportToCSV = exportReportToCSV;
+
 function renderReports(){
   const el = document.getElementById('content');
-  const t = S.tickets;
+  const bounds = reportRangeBounds();
+  const t = reportFilteredTickets(bounds);
 
-  const weeks = [];
-  for(let i=7;i>=0;i--){
-    const start = new Date(); start.setDate(start.getDate() - i*7); start.setHours(0,0,0,0);
-    const end = new Date(start); end.setDate(end.getDate()+7);
-    const count = t.filter(x=>{ const d=new Date(x.created_at); return d>=start && d<end; }).length;
-    weeks.push({ label: start.toLocaleDateString('en-US',{month:'short',day:'numeric'}), count });
-  }
-  const maxWeek = Math.max(1, ...weeks.map(w=>w.count));
+  const series = reportVolumeSeries(t, bounds);
+  const maxWeek = Math.max(1, ...series.map(w=>w.count));
 
   const bySource = {};
   t.forEach(x=> bySource[x.source] = (bySource[x.source]||0)+1);
@@ -2583,6 +2783,14 @@ function renderReports(){
   t.forEach(x=> { const key = x.assigned_to || 'Unassigned'; byAssignee[key] = (byAssignee[key]||0)+1; });
   const maxAssignee = Math.max(1, ...Object.values(byAssignee), 1);
 
+  const byStatus = {};
+  t.forEach(x=> byStatus[x.status||'unknown'] = (byStatus[x.status||'unknown']||0)+1);
+  const maxStatus = Math.max(1, ...Object.values(byStatus), 1);
+
+  const byCategory = {};
+  t.forEach(x=> { const key = x.category || 'Uncategorized'; byCategory[key] = (byCategory[key]||0)+1; });
+  const maxCategory = Math.max(1, ...Object.values(byCategory), 1);
+
   const resolved = t.filter(x=>x.resolved_at);
   const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '—';
   const medianDays = (()=>{
@@ -2591,47 +2799,82 @@ function renderReports(){
     const mid = Math.floor(days.length/2);
     return (days.length%2 ? days[mid] : (days[mid-1]+days[mid])/2).toFixed(1);
   })();
+  const resolvedPct = t.length ? Math.round((resolved.length/t.length)*100) : 0;
 
   const byOrder = {};
   t.forEach(x=>{ if(x.order_number) byOrder[x.order_number] = (byOrder[x.order_number]||0)+1; });
   const repeatOrders = Object.entries(byOrder).filter(([,c])=>c>1).sort((a,b)=>b[1]-a[1]).slice(0,8);
 
-  // ---- Orders reporting (last 30 days) ----
-  const orders30 = (S.emails||[]).filter(e=>e.mailbox==='orders');
-  const now = Date.now(), WINDOW = 30*86400000;
-  const inWindow = (d)=> d && (now - new Date(d).getTime()) <= WINDOW;
-  const ordersCreated = orders30.filter(e=>inWindow(e.created_at)).length;
-  const ordersCompleted = orders30.filter(e=>e.status==='completed' && inWindow(e.completed_at)).length;
-  const shopifyOrders = orders30.filter(e=>e.shopify_order_id && inWindow(e.created_at)).length;
-  // Avg fulfillment time: created -> completed, for completed orders in window.
-  const fulfilled = orders30.filter(e=>e.completed_at && e.created_at && inWindow(e.completed_at));
+  // ---- Orders & fulfillment ----
+  const orders = reportFilteredOrders(bounds);
+  const ordersCreated = orders.length;
+  const ordersCompleted = orders.filter(e=>e.status==='completed').length;
+  const shopifyOrders = orders.filter(e=>e.shopify_order_id).length;
+  const fulfilled = orders.filter(e=>e.completed_at);
   const avgFulfillDays = fulfilled.length ? (fulfilled.reduce((s,e)=> s + (new Date(e.completed_at)-new Date(e.created_at)),0)/fulfilled.length/86400000).toFixed(1) : '\u2014';
   const byDealer = {};
-  orders30.filter(e=>inWindow(e.created_at)).forEach(e=>{ const key = dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || 'Unassigned'; byDealer[key]=(byDealer[key]||0)+1; });
+  orders.forEach(e=>{ const key = dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || 'Unassigned'; byDealer[key]=(byDealer[key]||0)+1; });
   const dealerVol = Object.entries(byDealer).sort((a,b)=>b[1]-a[1]).slice(0,8);
   const maxDealer = Math.max(1, ...dealerVol.map(d=>d[1]), 1);
-  // Email responsiveness (last 30 days): support emails answered vs waiting.
-  const support30 = (S.emails||[]).filter(e=>e.mailbox!=='orders' && inWindow(e.created_at));
-  const answered = support30.filter(e=>e.last_direction==='outbound' || (e.last_reply_at && inWindow(e.last_reply_at))).length;
+
+  // ---- Email responsiveness ----
+  const support = reportFilteredSupportEmails(bounds);
+  const answered = support.filter(e=>e.last_direction==='outbound' || e.last_reply_at).length;
   const awaiting = (S.emails||[]).filter(e=>emailNeedsReply(e)).length;
 
+  // ---- Warranty & shipment errors ----
+  const warranty = reportFilteredWarranty(bounds);
+  const shipErr = reportFilteredShipErrors(bounds);
+  const warrantyByStatus = {};
+  warranty.forEach(w=> warrantyByStatus[w.status||'unknown'] = (warrantyByStatus[w.status||'unknown']||0)+1);
+  const maxWarrantyStatus = Math.max(1, ...Object.values(warrantyByStatus), 1);
+  const warrantyCost = warranty.reduce((s,w)=> s + (Number(w.claim_cost)||0), 0);
+  const shipErrByType = {};
+  shipErr.forEach(e=> { const key = e.error_type || 'Unspecified'; shipErrByType[key] = (shipErrByType[key]||0)+1; });
+  const maxShipErrType = Math.max(1, ...Object.values(shipErrByType), 1);
+  const shipErrCost = shipErr.reduce((s,e)=> s + (Number(e.claim_cost)||0), 0);
+
+  const needsHistory = reportNeedsFullHistory(bounds);
+  const historyBanner = needsHistory && (!HISTORY_LOADED.tickets || !HISTORY_LOADED.warranty || !HISTORY_LOADED.shipErrors || !HISTORY_LOADED.emails) ? `
+    <div class="panel" style="border-color:var(--orange);background:var(--orange-dim);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div style="font-size:var(--t-sm);color:var(--text2)">This range reaches beyond the ${RECENT_WINDOW_DAYS}-day window loaded by default — older resolved/closed tickets, claims, and emails may be missing from these numbers.</div>
+      <button class="btn btn-sm btn-teal" onclick="reportsLoadFullHistory()">Load full history</button>
+    </div>
+  ` : '';
+
   el.innerHTML = `
-    <div class="kpi-grid kpi-grid-4">
+    <div class="panel-title" style="border:none;margin-bottom:0">${bounds.label}</div>
+    ${reportFilterBar()}
+    ${historyBanner}
+
+    <div class="kpi-grid kpi-grid-5">
       <div class="kpi"><div class="kpi-label">Total Tickets</div><div class="kpi-value">${t.length}</div></div>
+      <div class="kpi kpi-green"><div class="kpi-label">Resolved</div><div class="kpi-value">${resolved.length} <span style="font-size:var(--t-sm);color:var(--text3)">(${resolvedPct}%)</span></div></div>
       <div class="kpi kpi-teal"><div class="kpi-label">Avg Resolution (days)</div><div class="kpi-value">${avgDays}</div></div>
       <div class="kpi kpi-orange"><div class="kpi-label">Median Resolution (days)</div><div class="kpi-value">${medianDays}</div></div>
       <div class="kpi kpi-red"><div class="kpi-label">Repeat-Issue Orders</div><div class="kpi-value">${repeatOrders.length}</div></div>
     </div>
 
     <div class="panel">
-      <div class="panel-title">Ticket Volume — Last 8 Weeks</div>
-      ${weeks.map(w=>barRow(w.label, w.count, maxWeek)).join('')}
+      <div class="panel-title">Ticket Volume</div>
+      ${series.length ? series.map(w=>barRow(w.label, w.count, maxWeek)).join('') : '<div class="empty">No tickets in this range.</div>'}
     </div>
 
     <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="panel">
+        <div class="panel-title">By Status</div>
+        ${Object.keys(byStatus).length ? Object.entries(byStatus).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(label(k), v, maxStatus, REPORT_STATUS_COLOR[k]||'var(--blue)')).join('') : '<div class="empty">No data</div>'}
+      </div>
+      <div class="panel">
         <div class="panel-title">By Source</div>
         ${Object.entries(bySource).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(label(k), v, maxSource, 'var(--orange)')).join('') || '<div class="empty">No data</div>'}
+      </div>
+    </div>
+
+    <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel">
+        <div class="panel-title">By Category</div>
+        ${Object.keys(byCategory).length ? Object.entries(byCategory).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxCategory, 'var(--purple)')).join('') : '<div class="empty">No data</div>'}
       </div>
       <div class="panel">
         <div class="panel-title">By Assignee</div>
@@ -2641,17 +2884,17 @@ function renderReports(){
 
     <div class="panel">
       <div class="panel-title">By Tag</div>
-      ${Object.keys(byTag).length ? Object.entries(byTag).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxTag, 'var(--purple)')).join('') : '<div class="empty">No tags applied yet — add tags to tickets to see this breakdown.</div>'}
+      ${Object.keys(byTag).length ? Object.entries(byTag).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxTag, 'var(--purple)')).join('') : '<div class="empty">No tags applied in this range.</div>'}
     </div>
 
     <div class="panel">
       <div class="panel-title">Orders With Multiple Tickets (possible repeat/unresolved issues)</div>
       ${repeatOrders.length ? `<div class="tbl-wrap"><table><thead><tr><th>Order Number</th><th>Ticket Count</th></tr></thead>
         <tbody>${repeatOrders.map(([ord,c])=>`<tr class="rowlink" onclick="goPage('tickets'); setTimeout(()=>{S.filters.q='${ord}'; renderTicketsList();},50)"><td>#${escapeHtml(ord)}</td><td class="pn">${c}</td></tr>`).join('')}</tbody></table></div>`
-        : '<div class="empty">No repeat-issue orders detected.</div>'}
+        : '<div class="empty">No repeat-issue orders detected in this range.</div>'}
     </div>
 
-    <div class="panel-title" style="border:none;margin-top:8px">Orders & Fulfillment \u2014 Last 30 Days</div>
+    <div class="panel-title" style="border:none;margin-top:8px">Orders & Fulfillment</div>
     <div class="kpi-grid kpi-grid-5">
       <div class="kpi"><div class="kpi-label">Orders Created</div><div class="kpi-value">${ordersCreated}</div></div>
       <div class="kpi kpi-teal"><div class="kpi-label">Pushed to Shopify</div><div class="kpi-value">${shopifyOrders}</div></div>
@@ -2662,19 +2905,44 @@ function renderReports(){
     <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div class="panel">
         <div class="panel-title">Order Volume by Dealer</div>
-        ${dealerVol.length ? dealerVol.map(([name,c])=>barRow(name, c, maxDealer)).join('') : '<div class="empty">No orders in the last 30 days.</div>'}
+        ${dealerVol.length ? dealerVol.map(([name,c])=>barRow(name, c, maxDealer)).join('') : '<div class="empty">No orders in this range.</div>'}
       </div>
       <div class="panel">
         <div class="panel-title">Email Responsiveness</div>
         <div style="display:flex;gap:28px;padding:8px 4px">
-          <div><div class="kpi-value" style="font-size:22px">${support30.length}</div><div class="kpi-label">Support emails (30d)</div></div>
+          <div><div class="kpi-value" style="font-size:22px">${support.length}</div><div class="kpi-label">Support emails</div></div>
           <div><div class="kpi-value" style="font-size:22px;color:var(--green)">${answered}</div><div class="kpi-label">Answered</div></div>
-          <div><div class="kpi-value" style="font-size:22px;color:var(--orange)">${awaiting}</div><div class="kpi-label">Awaiting reply</div></div>
+          <div><div class="kpi-value" style="font-size:22px;color:var(--orange)">${awaiting}</div><div class="kpi-label">Awaiting reply (current)</div></div>
         </div>
+      </div>
+    </div>
+
+    <div class="panel-title" style="border:none;margin-top:8px">Warranty Claims & Shipment Errors</div>
+    <div class="kpi-grid kpi-grid-4">
+      <div class="kpi"><div class="kpi-label">Warranty Claims</div><div class="kpi-value">${warranty.length}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Warranty Cost</div><div class="kpi-value">$${warrantyCost.toFixed(2)}</div></div>
+      <div class="kpi"><div class="kpi-label">Shipment Errors</div><div class="kpi-value">${shipErr.length}</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Shipment Error Cost</div><div class="kpi-value">$${shipErrCost.toFixed(2)}</div></div>
+    </div>
+    <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel">
+        <div class="panel-title">Warranty Claims by Status</div>
+        ${Object.keys(warrantyByStatus).length ? Object.entries(warrantyByStatus).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxWarrantyStatus, 'var(--red)')).join('') : '<div class="empty">No warranty claims in this range.</div>'}
+      </div>
+      <div class="panel">
+        <div class="panel-title">Shipment Errors by Type</div>
+        ${Object.keys(shipErrByType).length ? Object.entries(shipErrByType).sort((a,b)=>b[1]-a[1]).map(([k,v])=>barRow(k, v, maxShipErrType, 'var(--yellow)')).join('') : '<div class="empty">No shipment errors in this range.</div>'}
       </div>
     </div>
   `;
 }
+window.renderReports = renderReports;
+
+async function reportsLoadFullHistory(){
+  await Promise.all(['tickets','warranty','shipErrors','emails'].map(k=> HISTORY_LOADED[k] ? null : loadFullHistory(k)));
+  renderReports();
+}
+window.reportsLoadFullHistory = reportsLoadFullHistory;
 
 let showingNotes = false;
 
