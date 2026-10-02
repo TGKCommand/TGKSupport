@@ -128,7 +128,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
    the bot checks on the server, where they cannot be skipped. Paste the Cloudflare Turnstile SITE key
    (the public one) below to switch the visible math question over to Turnstile. */
 const TICKET_ENDPOINT = SUPABASE_URL + "/functions/v1/submit-ticket";
-const TURNSTILE_SITE_KEY = "";
+const TURNSTILE_SITE_KEY = "0x4AAAAAAFMI8v0XTFiDOpgi";
 
 /* ---------------- Shopify placeholders (unwired until Customer Account API is connected) ---------------- */
 async function fetchShopifyOrders(customerAccessToken){
