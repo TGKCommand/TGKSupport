@@ -124,6 +124,12 @@ const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_JHTuiKlkCD_EHoyDtWtKsQ_gyQ6kgfJ";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+/* Tickets are created by the submit-ticket edge function, NOT straight from this page. The function runs
+   the bot checks on the server, where they cannot be skipped. Paste the Cloudflare Turnstile SITE key
+   (the public one) below to switch the visible math question over to Turnstile. */
+const TICKET_ENDPOINT = SUPABASE_URL + "/functions/v1/submit-ticket";
+const TURNSTILE_SITE_KEY = "";
+
 /* ---------------- Shopify placeholders (unwired until Customer Account API is connected) ---------------- */
 async function fetchShopifyOrders(customerAccessToken){
   // TODO: replace with a real call to the Shopify Customer Account API
@@ -158,18 +164,41 @@ function goPage(p){
 }
 window.goPage = goPage;
 
-/* ---------------- Shared anti-spam block (honeypot + timing + math), same approach as tgk_ticket_form.html ---------------- */
+/* ---------------- Shared anti-spam block ----------------
+   These checks are for the visitor's benefit (instant feedback). The real enforcement is on the server
+   in submit-ticket: Turnstile, a signed form token with a minimum fill-in time, rate limits, and a spam score. */
 const spamState = {};
 function spamGuardHtml(prefix){
   return `
     <div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true">
       <label>Leave this field blank</label>
-      <input type="text" id="${prefix}-website" tabindex="-1" autocomplete="off">
+      <input type="text" id="${prefix}-hp" name="${prefix}-hp" tabindex="-1" autocomplete="off">
     </div>
-    <div class="form-group">
+    <div class="form-group" id="${prefix}-mathWrap">
       <label class="form-label">Quick check: what is <span id="${prefix}-mathLabel">?</span>? <span class="req">*</span></label>
       <input class="form-input" id="${prefix}-mathAnswer" type="number" inputmode="numeric">
-    </div>`;
+    </div>
+    <div id="${prefix}-ts" style="margin:0 0 12px"></div>`;
+}
+let tsLoading = null;
+function loadTurnstile(){
+  if(window.turnstile) return Promise.resolve();
+  if(tsLoading) return tsLoading;
+  tsLoading = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    sc.async = true; sc.onload = resolve; sc.onerror = reject;
+    document.head.appendChild(sc);
+  });
+  return tsLoading;
+}
+async function fetchFormToken(){
+  try{
+    const r = await fetch(TICKET_ENDPOINT, { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_ANON_KEY }, body: JSON.stringify({ action:'token' }) });
+    const j = await r.json();
+    return j.token || '';
+  }catch(e){ return ''; }
 }
 function initSpamGuard(prefix){
   if(!prefix) return;
@@ -177,27 +206,76 @@ function initSpamGuard(prefix){
   if(!label) return;
   const a = Math.floor(Math.random()*8)+2, b = Math.floor(Math.random()*8)+2;
   label.textContent = `${a} + ${b}`;
-  spamState[prefix] = { loadedAt: Date.now(), a, b };
+  const prev = spamState[prefix];
+  spamState[prefix] = { loadedAt: Date.now(), a, b, token:'', tsToken:'', widgetId: prev ? prev.widgetId : null };
+  const st = spamState[prefix];
+  fetchFormToken().then(t => { if(spamState[prefix] === st) st.token = t; });
+  if(TURNSTILE_SITE_KEY){
+    const wrap = document.getElementById(`${prefix}-mathWrap`);
+    if(wrap) wrap.style.display = 'none';
+    const box = document.getElementById(`${prefix}-ts`);
+    loadTurnstile().then(() => {
+      if(!box || !document.body.contains(box)) return;
+      if(st.widgetId !== null && box.firstChild){ try{ window.turnstile.reset(st.widgetId); return; }catch(e){} }
+      st.widgetId = window.turnstile.render(box, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: tok => { spamState[prefix].tsToken = tok; },
+        'expired-callback': () => { spamState[prefix].tsToken = ''; },
+        'error-callback': () => { spamState[prefix].tsToken = ''; }
+      });
+    }).catch(() => {});
+  }
 }
 function passesSpamGuard(prefix, errEl){
   const st = spamState[prefix];
   if(!st){
-    // Should not happen now that goPage translates the prefix, but fail closed
-    // and re-arm the guard rather than throwing and silently losing the submit.
     initSpamGuard(prefix);
-    errEl.textContent = 'Please answer the quick check question below, then submit again.';
+    errEl.textContent = 'Please complete the quick check below, then submit again.';
     return false;
   }
-  const hp = document.getElementById(`${prefix}-website`);
+  const hp = document.getElementById(`${prefix}-hp`);
   const honeypot = hp ? hp.value.trim() : '';
   if(honeypot){ errEl.textContent = 'Something went wrong. Please try again.'; return false; }
   if(Date.now() - st.loadedAt < 2500){ errEl.textContent = 'Please take a moment to review the form before submitting.'; return false; }
+  if(TURNSTILE_SITE_KEY){
+    if(!st.tsToken){ errEl.textContent = 'Please wait for the security check to finish (or disable your ad blocker for this page), then submit again.'; return false; }
+    return true;
+  }
   const answer = parseInt(document.getElementById(`${prefix}-mathAnswer`).value, 10);
   if(answer !== st.a + st.b){ errEl.textContent = 'That answer does not look right — please check the math question.'; return false; }
   return true;
 }
+/* Sends the ticket to the server. Returns {ticket_number} (null when the server held it for a quick manual check). */
+async function sendTicket(prefix, kind, fields){
+  const st = spamState[prefix] || {};
+  const hp = document.getElementById(`${prefix}-hp`);
+  const payload = Object.assign({
+    action:'submit', kind,
+    honeypot: hp ? hp.value : '', form_token: st.token || '', turnstile_token: st.tsToken || ''
+  }, fields);
+  let res, data = {};
+  try{
+    res = await fetch(TICKET_ENDPOINT, { method:'POST',
+      headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_ANON_KEY }, body: JSON.stringify(payload) });
+    data = await res.json().catch(() => ({}));
+  }catch(e){ throw new Error('Could not reach the server. Please check your connection and try again.'); }
+  if(!res.ok || !data.ok){ throw new Error(data.error || 'Something went wrong. Please try again.'); }
+  initSpamGuard(prefix);   // fresh token / security check for the next submission
+  return data;
+}
+const ticketRef = t => (t && t.ticket_number) ? ` (ticket #${t.ticket_number})` : '';
 
 /* ---------------- Shared attachment upload, same bucket/pattern as tgk_ticket_form.html ---------------- */
+const ATTACH_MAX_FILES = 5, ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+function validateFiles(files){
+  if(files.length > ATTACH_MAX_FILES) return `Please attach no more than ${ATTACH_MAX_FILES} files.`;
+  for(const f of files){
+    const okType = /^image\//.test(f.type) || f.type === 'application/pdf';
+    if(!okType) return `"${f.name}" is not an image or PDF.`;
+    if(f.size > ATTACH_MAX_BYTES) return `"${f.name}" is over 10 MB.`;
+  }
+  return '';
+}
 async function uploadAttachments(files){
   const attachments = [];
   for(const file of files){
@@ -342,7 +420,7 @@ const RENDER = {
           <input class="form-input" id="ret-pn" placeholder="If known"></div>
       </div>
       <div class="form-group"><label class="form-label">Reason for Return <span class="req">*</span></label>
-        <textarea class="form-input" id="ret-message" placeholder="What's wrong, and what would you like — refund, replacement, exchange?"></textarea>
+        <textarea class="form-input" id="ret-message" maxlength="5000" placeholder="What's wrong, and what would you like — refund, replacement, exchange?"></textarea>
       </div>
       <div class="form-group"><label class="form-label">Photos (optional)</label>
         <input class="form-input" id="ret-files" type="file" multiple accept="image/*,.pdf"></div>
@@ -368,9 +446,9 @@ const RENDER = {
           <input class="form-input" id="ct-pn" placeholder="If known"></div>
       </div>
       <div class="form-group"><label class="form-label">Subject <span class="req">*</span></label>
-        <input class="form-input" id="ct-subject" placeholder="Brief summary of the issue"></div>
+        <input class="form-input" id="ct-subject" maxlength="150" placeholder="Brief summary of the issue"></div>
       <div class="form-group"><label class="form-label">Message <span class="req">*</span></label>
-        <textarea class="form-input" id="ct-message" placeholder="Describe what's happening in as much detail as you can..."></textarea></div>
+        <textarea class="form-input" id="ct-message" maxlength="5000" placeholder="Describe what's happening in as much detail as you can..."></textarea></div>
       <div class="form-group"><label class="form-label">Photos (optional)</label>
         <input class="form-input" id="ct-files" type="file" multiple accept="image/*,.pdf"></div>
       ${spamGuardHtml('ct')}
@@ -564,23 +642,19 @@ async function submitReturn(){
   if(!name || !email || !order || !message){
     errEl.className='status-msg err'; errEl.style.display='block'; errEl.textContent='Name, email, order number, and reason are required.'; return;
   }
+  { const fe = validateFiles(files); if(fe){ errEl.className='status-msg err'; errEl.style.display='block'; errEl.textContent = fe; return; } }
   if(!passesSpamGuard('ret', errEl)){ errEl.className='status-msg err'; errEl.style.display='block'; return; }
 
   btn.disabled = true; btn.textContent = 'Submitting...';
   try{
     const attachments = await uploadAttachments(files);
-    const { data: ticket, error } = await sb.from('tickets').insert({
-      source: 'website', status: 'open', priority: 'medium',
-      subject: `Return request — order ${order}`,
-      description: message,
-      customer_name: name, customer_email: email,
-      order_number: order, pn: pn || null,
-      attachments, has_unread: true, unread_count: 1
-    }).select().single();
-    if(error) throw error;
+    const ticket = await sendTicket('ret', 'return', {
+      name, email, subject: `Return request — order ${order}`, message,
+      order_number: order, pn: pn || '', attachments
+    });
 
     errEl.className = 'status-msg ok'; errEl.style.display='block';
-    errEl.textContent = `Return request submitted (ticket #${ticket.ticket_number}). We'll follow up at ${email}.`;
+    errEl.textContent = `Return request submitted${ticketRef(ticket)}. We'll follow up at ${email}.`;
     ['ret-name','ret-email','ret-order','ret-pn','ret-message'].forEach(id => document.getElementById(id).value='');
     btn.textContent = 'Submit Return Request'; btn.disabled = false;
   }catch(e){
@@ -608,22 +682,19 @@ async function submitContact(){
   if(!name || !email || !subject || !message){
     errEl.className='status-msg err'; errEl.style.display='block'; errEl.textContent='Name, email, subject, and message are required.'; return;
   }
+  { const fe = validateFiles(files); if(fe){ errEl.className='status-msg err'; errEl.style.display='block'; errEl.textContent = fe; return; } }
   if(!passesSpamGuard('ct', errEl)){ errEl.className='status-msg err'; errEl.style.display='block'; return; }
 
   btn.disabled = true; btn.textContent = 'Submitting...';
   try{
     const attachments = await uploadAttachments(files);
-    const { data: ticket, error } = await sb.from('tickets').insert({
-      source: 'website', status: 'open', priority: 'medium',
-      subject, description: message,
-      customer_name: name, customer_email: email,
-      order_number: order || null, pn: pn || null,
-      attachments, has_unread: true, unread_count: 1
-    }).select().single();
-    if(error) throw error;
+    const ticket = await sendTicket('ct', 'contact', {
+      name, email, subject, message,
+      order_number: order || '', pn: pn || '', attachments
+    });
 
     errEl.className = 'status-msg ok'; errEl.style.display='block';
-    errEl.textContent = `Request submitted (ticket #${ticket.ticket_number}). We'll follow up at ${email}.`;
+    errEl.textContent = `Request submitted${ticketRef(ticket)}. We'll follow up at ${email}.`;
     ['ct-name','ct-email','ct-order','ct-pn','ct-subject','ct-message'].forEach(id => document.getElementById(id).value='');
     btn.textContent = 'Submit Request'; btn.disabled = false;
   }catch(e){
@@ -902,15 +973,11 @@ async function submitWholesale(){
     if(wsFiles.length && !attachments.length){
       throw new Error('the resellers permit upload failed. Please try again, or submit without it and email the permit separately.');
     }
-    const { data: ticket, error } = await sb.from('tickets').insert({
-      source: 'website', status: 'open', priority: 'low',
+    const ticket = await sendTicket('ws', 'wholesale', {
+      name: first + ' ' + last, email,
       subject: 'Wholesale application - ' + legal,
-      description: description,
-      customer_name: first + ' ' + last,
-      customer_email: email,
-      attachments, has_unread: true, unread_count: 1
-    }).select().single();
-    if(error) throw error;
+      message: description, attachments
+    });
 
     wsFiles = [];
     document.getElementById('tgkSupportContent').innerHTML = `
@@ -918,7 +985,7 @@ async function submitWholesale(){
         <div class="success">
           <div class="check"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>
           <h2>Application received</h2>
-          <p>Thank you, ${escapeHtml(first)}. Your wholesale application for <strong>${escapeHtml(legal)}</strong> has been submitted as ticket <strong>#${escapeHtml(String(ticket.ticket_number))}</strong>.<br><br>
+          <p>Thank you, ${escapeHtml(first)}. Your wholesale application for <strong>${escapeHtml(legal)}</strong> has been submitted${ticket.ticket_number ? ' as ticket <strong>#' + escapeHtml(String(ticket.ticket_number)) + '</strong>' : ''}.<br><br>
           Our wholesale team will review it and follow up at <strong>${escapeHtml(email)}</strong>.${wsAttachNote(attachments.length)}</p>
           <button class="btn btn-dark" style="margin-top:18px" onclick="goPage('wholesale')">Submit Another Application</button>
         </div>
