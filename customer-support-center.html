@@ -129,6 +129,7 @@ const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
    (the public one) below to switch the visible math question over to Turnstile. */
 const TICKET_ENDPOINT = SUPABASE_URL + "/functions/v1/submit-ticket";
 const TURNSTILE_SITE_KEY = "0x4AAAAAAFMJRQlOEEBAt7Mz";
+const FALLBACK_FORM_URL = "https://contact.tgkmotorsport.com/";   // opened only if the security box cannot be displayed
 
 /* ---------------- Shopify placeholders (unwired until Customer Account API is connected) ---------------- */
 async function fetchShopifyOrders(customerAccessToken){
@@ -193,6 +194,20 @@ function tsHostHint(code){
   try{ if(document.referrer) add(new URL(document.referrer).hostname); }catch(e){}
   return ' Cloudflare does not allow this site yet. Add these hostnames to the Turnstile widget: ' + hosts.join(', ') + '.';
 }
+/* Some themes hide or collapse iframes with global CSS (lazy-load and video-embed rules). Cloudflare's
+   check is an iframe, so make sure it is really shown. Returns true when it is visible afterwards. */
+function tsRevive(box){
+  const fr = box ? box.querySelector('iframe') : null;
+  if(!fr) return false;
+  const force = (el, rules) => rules.forEach(r => el.style.setProperty(r[0], r[1], 'important'));
+  force(box, [['display','block'],['visibility','visible'],['opacity','1']]);
+  force(fr,  [['display','block'],['visibility','visible'],['opacity','1'],['transform','none'],['clip','auto'],['clip-path','none'],['max-width','100%']]);
+  let r = fr.getBoundingClientRect();
+  if(r.height < 20) force(fr, [['height','65px']]);
+  if(r.width < 50) force(fr, [['width','300px']]);
+  r = fr.getBoundingClientRect();
+  return r.width >= 50 && r.height >= 20;
+}
 let tsLoading = null;
 function loadTurnstile(){
   if(window.turnstile) return Promise.resolve();
@@ -230,6 +245,12 @@ function initSpamGuard(prefix){
     if(tsWrap) tsWrap.style.display = 'block';
     const box = document.getElementById(`${prefix}-ts`);
     const note = msg => { const n = document.getElementById(`${prefix}-tsNote`); if(n) n.textContent = msg; };
+    const noteLink = (msg, url, text) => {
+      const n = document.getElementById(`${prefix}-tsNote`); if(!n) return;
+      n.textContent = msg + ' ';
+      const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = text;
+      n.appendChild(a);
+    };
     let stage = 'script';   // script -> running -> (token)
     const who = () => ' [page: ' + location.hostname + ', key ends ' + TURNSTILE_SITE_KEY.slice(-4) + ']';
     note('Loading security check...');
@@ -248,12 +269,23 @@ function initSpamGuard(prefix){
       st.widgetId = window.turnstile.render(box, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: tok => { clearTimeout(slow); spamState[prefix].tsToken = tok; note(''); },
-        'before-interactive-callback': () => { clearTimeout(slow); note('Please tick the box above to continue.'); },
+        'before-interactive-callback': () => {
+          clearTimeout(slow);
+          tsRevive(box);
+          note('Please tick the box above to continue.');
+          // If the box still is not on screen a moment later, offer the form on its own page.
+          setTimeout(() => {
+            if(spamState[prefix] !== st || st.tsToken) return;
+            if(!tsRevive(box)) noteLink('The security box could not be shown on this page. Please use the form on its own page instead:', FALLBACK_FORM_URL, 'Open the contact form');
+          }, 1500);
+        },
         'timeout-callback': () => { spamState[prefix].tsToken = ''; note('The security check timed out. Please tick the box again, or refresh.'); },
         'unsupported-callback': () => { clearTimeout(slow); note('This browser is not supported by the security check. Please try a different browser.'); },
         'expired-callback': () => { spamState[prefix].tsToken = ''; note('The security check expired. It will refresh by itself.'); },
         'error-callback': code => { clearTimeout(slow); spamState[prefix].tsToken = ''; note('Security check error' + (code ? ' (' + code + ')' : '') + '. Please refresh the page. If it keeps happening, contact us and quote this code.' + tsHostHint(code) + who()); console.warn('[turnstile] error', code); }
       });
+      setTimeout(() => tsRevive(box), 700);
+      setTimeout(() => tsRevive(box), 2500);
     }).catch(e => {
       clearTimeout(slow);
       console.warn('[turnstile] could not load', e);
