@@ -3847,7 +3847,7 @@ async function createManualOrder(){
     const nextNum = orders.reduce((m,e)=>Math.max(m, e.display_number||0), 0) + 1;
     const { data, error } = await sb.from('emails').insert({
       mailbox:'orders', subject:'Manual order', status:'read', has_unread:false, unread_count:0,
-      display_number: nextNum, last_message_at: new Date().toISOString()
+      display_number: nextNum, last_message_at: new Date().toISOString(), order_source:'manual'
     }).select().single();
     if(error) throw error;
     S.emails.unshift(data);
@@ -3860,8 +3860,21 @@ async function createManualOrder(){
 window.createManualOrder = createManualOrder;
 function assigneeName(email){ if(!email) return ''; const m=(S.team||[]).find(x=>x.email===email); return (m&&(m.display_name||m.email))||email; }
 function orderDisplayName(e){ return dealerName(e.dealer_id) || (e.ship_name||'').trim() || e.customer_email || ''; }
+// Where an order came from: a dealer's email to orders@, or one staff created
+// directly in the Support Center. A ticket/email conversion already gets its
+// own richer, clickable "From ticket #.../From E-..." pill elsewhere, so this
+// only fires when there's no source_ticket_id/source_email_id to show instead.
+// order_source is only set going forward -- orders created before this field
+// existed show no pill rather than a guessed one.
+function orderSourcePill(e){
+  if(e.source_ticket_id || e.source_email_id) return '';
+  if(e.order_source==='dealer_email') return '<span class="pill pill-muted" title="Created automatically from an email to orders@">Dealer email</span>';
+  if(e.order_source==='manual') return '<span class="pill pill-muted" title="Created directly in the Support Center">Manual order</span>';
+  return '';
+}
 function emailListOrderMeta(e){
   const parts=[];
+  const sp=orderSourcePill(e); if(sp) parts.push(sp);
   const w=waitingPill(e); if(w) parts.push(w);
   if(e.shopify_order_id) parts.push('<span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>');
   else if(e.shopify_draft_id) parts.push('<span class="pill pill-teal" title="Draft '+escapeHtml(String(e.shopify_draft_id))+' sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>');
@@ -4548,7 +4561,7 @@ function renderEmailPanel(e){
         ${linkedTicket
           ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${linkedTicket.id}'),60)">Converted \u2192 Ticket #${linkedTicket.ticket_number}</span>`
           : e.mailbox==='orders'
-            ? (()=>{ const st = e.source_ticket_id ? S.tickets.find(x=>x.id===e.source_ticket_id) : null; const se = e.source_email_id ? S.emails.find(x=>x.id===e.source_email_id) : null; return st ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${st.id}'),60)">From ticket #${st.ticket_number} \u2197</span>` : se ? `<span class="pill pill-teal">From ${emailRef(se)}</span>` : ''; })()
+            ? (()=>{ const st = e.source_ticket_id ? S.tickets.find(x=>x.id===e.source_ticket_id) : null; const se = e.source_email_id ? S.emails.find(x=>x.id===e.source_email_id) : null; return st ? `<span class="pill pill-teal" style="cursor:pointer" onclick="closePanel(); goPage('tickets'); setTimeout(()=>openTicket('${st.id}'),60)">From ticket #${st.ticket_number} \u2197</span>` : se ? `<span class="pill pill-teal">From ${emailRef(se)}</span>` : orderSourcePill(e); })()
             : `<span style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn btn-sm btn-teal" onclick="convertEmailToTicket('${e.id}')"><span class="ic ic-ticket"></span>Convert to Ticket</button><button class="btn btn-sm" onclick="convertEmailToOrder('${e.id}')"><span class="ic ic-box"></span>Create Order</button></span>`}
       </div>
       <div class="linked-box">
@@ -4923,7 +4936,7 @@ async function convertTicketToOrder(ticketId){
       mailbox:'orders', subject: t.subject||'Order', status:'read', has_unread:false, unread_count:0,
       display_number: num, last_message_at:new Date().toISOString(),
       customer_email: t.customer_email||null, dealer_id: _matchDealerByEmail(t.customer_email),
-      source_ticket_id: ticketId, is_dropship: hasAddr,
+      source_ticket_id: ticketId, is_dropship: hasAddr, order_source:'ticket',
       ship_name: addr.name || t.customer_name || null, ship_email: t.customer_email || null, ship_phone: t.customer_phone || null,
       ship_address1: addr.street1 || null, ship_address2: addr.street2 || null,
       ship_city: addr.city || null, ship_province: addr.state || null,
@@ -4966,7 +4979,7 @@ async function convertEmailToOrder(emailId){
       mailbox:'orders', subject: e.subject||'Order', status:'read', has_unread:false, unread_count:0,
       display_number: num, last_message_at:new Date().toISOString(),
       customer_email: e.customer_email||null, dealer_id: e.dealer_id || _matchDealerByEmail(e.customer_email),
-      source_email_id: emailId, ship_name: e.ship_name || null, ship_email: e.customer_email || null
+      source_email_id: emailId, order_source:'email', ship_name: e.ship_name || null, ship_email: e.customer_email || null
     }).select().single();
     if(error) throw error;
     createdOrderId = order.id;
