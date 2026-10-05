@@ -178,7 +178,20 @@ function spamGuardHtml(prefix){
       <label class="form-label">Quick check: what is <span id="${prefix}-mathLabel">?</span>? <span class="req">*</span></label>
       <input class="form-input" id="${prefix}-mathAnswer" type="number" inputmode="numeric">
     </div>
-    <div id="${prefix}-ts" style="margin:0 0 12px"></div>`;
+    <div id="${prefix}-tsWrap" style="display:none;margin:0 0 12px">
+      <div class="form-hint" style="margin-bottom:4px">Security check</div>
+      <div id="${prefix}-ts"></div>
+      <div id="${prefix}-tsNote" class="form-hint"></div>
+    </div>`;
+}
+function tsHostHint(code){
+  if(String(code) !== '110200') return '';
+  const hosts = [];
+  const add = h => { if(h && hosts.indexOf(h) === -1) hosts.push(h); };
+  add(location.hostname);
+  try{ const ao = location.ancestorOrigins; for(let i = 0; ao && i < ao.length; i++) add(new URL(ao[i]).hostname); }catch(e){}
+  try{ if(document.referrer) add(new URL(document.referrer).hostname); }catch(e){}
+  return ' Cloudflare does not allow this site yet. Add these hostnames to the Turnstile widget: ' + hosts.join(', ') + '.';
 }
 let tsLoading = null;
 function loadTurnstile(){
@@ -213,17 +226,27 @@ function initSpamGuard(prefix){
   if(TURNSTILE_SITE_KEY){
     const wrap = document.getElementById(`${prefix}-mathWrap`);
     if(wrap) wrap.style.display = 'none';
+    const tsWrap = document.getElementById(`${prefix}-tsWrap`);
+    if(tsWrap) tsWrap.style.display = 'block';
     const box = document.getElementById(`${prefix}-ts`);
+    const note = msg => { const n = document.getElementById(`${prefix}-tsNote`); if(n) n.textContent = msg; };
+    note('Loading security check...');
+    const slow = setTimeout(() => { if(spamState[prefix] === st && !st.tsToken) note('Still waiting for the security check. If nothing appears, turn off ad blockers or privacy extensions for this page and refresh.'); }, 8000);
     loadTurnstile().then(() => {
       if(!box || !document.body.contains(box)) return;
+      if(!window.turnstile) throw new Error('turnstile missing');
       if(st.widgetId !== null && box.firstChild){ try{ window.turnstile.reset(st.widgetId); return; }catch(e){} }
       st.widgetId = window.turnstile.render(box, {
         sitekey: TURNSTILE_SITE_KEY,
-        callback: tok => { spamState[prefix].tsToken = tok; },
-        'expired-callback': () => { spamState[prefix].tsToken = ''; },
-        'error-callback': () => { spamState[prefix].tsToken = ''; }
+        callback: tok => { clearTimeout(slow); spamState[prefix].tsToken = tok; note(''); },
+        'expired-callback': () => { spamState[prefix].tsToken = ''; note('The security check expired. It will refresh by itself.'); },
+        'error-callback': code => { spamState[prefix].tsToken = ''; note('Security check error' + (code ? ' (' + code + ')' : '') + '. Please refresh the page. If it keeps happening, contact us and quote this code.' + tsHostHint(code)); console.warn('[turnstile] error', code); }
       });
-    }).catch(() => {});
+    }).catch(e => {
+      clearTimeout(slow);
+      console.warn('[turnstile] could not load', e);
+      note('The security check could not load. Please turn off ad blockers or privacy extensions for this page, then refresh.');
+    });
   }
 }
 function passesSpamGuard(prefix, errEl){
@@ -259,7 +282,10 @@ async function sendTicket(prefix, kind, fields){
       headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_ANON_KEY }, body: JSON.stringify(payload) });
     data = await res.json().catch(() => ({}));
   }catch(e){ throw new Error('Could not reach the server. Please check your connection and try again.'); }
-  if(!res.ok || !data.ok){ throw new Error(data.error || 'Something went wrong. Please try again.'); }
+  if(!res.ok || !data.ok){
+    initSpamGuard(prefix);   // the one-time security token is used up - get a fresh one for the retry
+    throw new Error(data.error || 'Something went wrong. Please try again.');
+  }
   initSpamGuard(prefix);   // fresh token / security check for the next submission
   return data;
 }
