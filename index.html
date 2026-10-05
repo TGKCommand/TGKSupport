@@ -115,6 +115,16 @@ input,button,select,textarea{font-family:var(--font)}
 .btn-primary:hover{background:var(--orange-d);border-color:var(--orange-d)}
 .btn-teal{background:var(--teal-dim);color:var(--teal);border-color:rgba(13,148,136,.22)}
 .btn-teal:hover{background:rgba(13,148,136,.13);border-color:rgba(13,148,136,.35)}
+/* Irreversible actions only (permanent delete, empty archive, cancel an external
+   order) -- NOT archive/soft-delete, which can be restored and should stay as a
+   plain or muted button. */
+.btn-danger{background:var(--red-dim);color:var(--red);border-color:rgba(220,38,38,.25)}
+.btn-danger:hover{background:rgba(220,38,38,.16);border-color:rgba(220,38,38,.4)}
+/* Solid tier -- same relationship to .btn-danger as .btn-primary has to .btn-teal.
+   Reserved for the single highest-stakes confirm in a flow (e.g. processing a
+   real refund), not for ordinary row/list deletes -- those use .btn-danger. */
+.btn-danger-solid{background:var(--red);border-color:var(--red);color:#fff}
+.btn-danger-solid:hover{background:#b91c1c;border-color:#b91c1c}
 .btn-sm{padding:4px 10px;font-size:var(--t-sm)}
 
 /* Panels / KPIs */
@@ -1782,7 +1792,7 @@ function renderTemplateManagerBody(){
         + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">'
           + '<div style="flex:1;font-weight:600;font-size:var(--t-md);color:var(--text,#111)">'+escapeHtml(x.title)+'</div>'
           + '<button class="btn btn-sm" onclick="editTemplate(\''+x.id+'\')">Edit</button>'
-          + '<button class="btn btn-sm" style="color:var(--red,var(--red))" onclick="deleteTemplate(\''+x.id+'\')">Delete</button>'
+          + '<button class="btn btn-sm btn-danger" onclick="deleteTemplate(\''+x.id+'\')">Delete</button>'
         + '</div>'
         + '<div style="font-size:var(--t-sm);color:var(--text2,#555);white-space:pre-wrap;max-height:80px;overflow:hidden">'+escapeHtml(x.body)+'</div>'
       + '</div>';
@@ -2080,7 +2090,7 @@ function renderQuarantineList(){
           <td><div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-sm" onclick="openQuarantined('${q.id}')"><span class="ic ic-doc"></span>Open</button>
             <button class="btn btn-sm btn-teal" onclick="releaseQuarantined('${q.id}')">Release</button>
-            <button class="btn btn-sm" style="color:var(--red)" onclick="deleteQuarantined('${q.id}')"><span class="ic ic-trash"></span>Delete</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteQuarantined('${q.id}')"><span class="ic ic-trash"></span>Delete</button>
           </div></td>
         </tr>`;}).join('')}
     </tbody></table></div>`}
@@ -2125,7 +2135,7 @@ function openQuarantined(id){
       ${atts.length ? `<div class="form-group"><label class="form-label">Attachments</label><div>${atts.map(a=>`<a href="${escapeHtml(a.url||'#')}" target="_blank" rel="noopener">${escapeHtml(a.name||'file')}</a>`).join('<br>')}</div></div>` : ''}
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Close</button>
-        <button class="btn" style="color:var(--red)" onclick="deleteQuarantined('${q.id}')"><span class="ic ic-trash"></span>Delete permanently</button>
+        <button class="btn btn-danger" onclick="deleteQuarantined('${q.id}')"><span class="ic ic-trash"></span>Delete permanently</button>
         <button class="btn btn-primary" onclick="releaseQuarantined('${q.id}')">Release as ticket</button>
       </div>
     </div>
@@ -3902,7 +3912,7 @@ function renderEmailsList(){
       </div>
       ${views.map(([v,lab])=>`<button class="btn btn-sm ${f.view===v?'btn-teal':''}" onclick="S.emailFilters.view='${v}'; renderEmailsList()">${lab}</button>`).join('')}
       <button class="btn btn-sm" onclick="refreshEmails()"><span class="ic ic-refresh"></span>Refresh</button>
-      ${f.view==='archived' ? `<button class="btn btn-sm" style="color:var(--red);border-color:rgba(220,38,38,.3)" onclick="emptyArchive()"><span class="ic ic-trash"></span>Empty Archive</button>` : ''}
+      ${f.view==='archived' ? `<button class="btn btn-sm btn-danger" onclick="emptyArchive()"><span class="ic ic-trash"></span>Empty Archive</button>` : ''}
       ${orders ? `<button class="btn btn-primary btn-sm" onclick="createManualOrder()"><span class="ic ic-plus"></span>New Order</button>` : ''}
       ${HISTORY_LOADED.emails ? '' : `<button class="btn btn-sm" title="Older completed/archived ${orders?'orders':'emails'} beyond ${RECENT_WINDOW_DAYS} days aren't loaded by default -- click to fetch everything" onclick="loadFullHistory('emails')">Load full history</button>`}
     </div>
@@ -4469,7 +4479,7 @@ function renderOrderBuilder(e){
         <button class="btn btn-sm" onclick="sendShopifyInvoice('${e.id}')"><span class="ic ic-mail"></span>Send invoice</button>
         <button class="btn btn-sm btn-teal" onclick="completeShopifyDraft('${e.id}',false)">Mark paid & complete</button>
         <button class="btn btn-sm" onclick="completeShopifyDraft('${e.id}',true)" title="Complete now, payment pending (net terms)">Complete (net terms)</button>
-        <button class="btn btn-sm" style="color:var(--red);margin-left:auto" onclick="cancelShopifyDraft('${e.id}')" title="Delete this draft from Shopify">Cancel draft</button>
+        <button class="btn btn-sm btn-danger" style="margin-left:auto" onclick="cancelShopifyDraft('${e.id}')" title="Delete this draft from Shopify">Cancel draft</button>
       </div>`}
     </div>` : ''}
     <table style="width:100%;font-size:var(--t-sm);border-collapse:collapse"><thead><tr style="color:var(--text3)"><th style="text-align:left;font-weight:600">SKU / Part #</th><th style="width:56px;font-weight:600">Qty</th><th style="width:88px;font-weight:600">Unit $</th><th style="width:28px"></th></tr></thead><tbody>
@@ -5613,7 +5623,7 @@ async function openRefundModal(ticketId){
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" id="refundSubmitBtn" onclick="submitRefund('${ticketId}')" disabled style="background:var(--red);border-color:var(--red)">Process Refund</button>
+        <button class="btn btn-danger-solid" id="refundSubmitBtn" onclick="submitRefund('${ticketId}')" disabled>Process Refund</button>
       </div>
     </div>
   `;
@@ -6343,7 +6353,7 @@ function renderSettingsCategories(){
       + '</select></td>'
       + '<td style="width:150px"><span class="pill ' + (c.color||'pill-muted') + '">' + escapeHtml(c.name) + '</span></td>'
       + '<td style="width:100px;font-family:var(--mono);font-size:var(--t-sm);color:var(--text3)">' + n + ' ticket' + (n===1?'':'s') + '</td>'
-      + '<td style="width:76px"><button class="btn btn-sm" style="color:var(--red)" onclick="promptDeleteCategory(' + i + ')">Delete</button></td>'
+      + '<td style="width:76px"><button class="btn btn-sm btn-danger" onclick="promptDeleteCategory(' + i + ')">Delete</button></td>'
     + '</tr>';
   }).join('');
 
@@ -6536,7 +6546,7 @@ function renderSettingsTags(){
       + '<td><input class="form-input" value="' + escapeHtml(tg) + '" onchange="renameTagPreset(' + i + ', this.value, this)"></td>'
       + '<td style="width:150px"><span class="pill pill-muted">' + escapeHtml(tg) + '</span></td>'
       + '<td style="width:100px;font-family:var(--mono);font-size:var(--t-sm);color:var(--text3)">' + n + ' ticket' + (n===1?'':'s') + '</td>'
-      + '<td style="width:76px"><button class="btn btn-sm" style="color:var(--red)" onclick="deleteTagPreset(' + i + ')">Delete</button></td>'
+      + '<td style="width:76px"><button class="btn btn-sm btn-danger" onclick="deleteTagPreset(' + i + ')">Delete</button></td>'
     + '</tr>';
   }).join('');
 
