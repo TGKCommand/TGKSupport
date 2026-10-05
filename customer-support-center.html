@@ -194,19 +194,34 @@ function tsHostHint(code){
   try{ if(document.referrer) add(new URL(document.referrer).hostname); }catch(e){}
   return ' Cloudflare does not allow this site yet. Add these hostnames to the Turnstile widget: ' + hosts.join(', ') + '.';
 }
-/* Some themes hide or collapse iframes with global CSS (lazy-load and video-embed rules). Cloudflare's
-   check is an iframe, so make sure it is really shown. Returns true when it is visible afterwards. */
+/* Cloudflare puts its check inside a protected area of the page, wrapped in plain <div>s. A theme rule can hide
+   or collapse those wrappers (or something above them). Make them visible, and report whether the box really has
+   room on screen. Returns true when it does. */
+function tsWhyHidden(box){
+  const name = el => el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + ((typeof el.className === 'string' && el.className.trim()) ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '');
+  for(let el = box; el && el !== document.documentElement; el = el.parentElement){
+    const cs = getComputedStyle(el);
+    if(cs.display === 'none') return 'display:none on ' + name(el);
+    if(cs.visibility === 'hidden') return 'visibility:hidden on ' + name(el);
+    if(parseFloat(cs.opacity) === 0) return 'opacity:0 on ' + name(el);
+  }
+  const first = box.querySelector('div');
+  const r = (first || box).getBoundingClientRect();
+  return 'box size ' + Math.round(r.width) + 'x' + Math.round(r.height);
+}
 function tsRevive(box){
-  const fr = box ? box.querySelector('iframe') : null;
-  if(!fr) return false;
+  if(!box) return false;
   const force = (el, rules) => rules.forEach(r => el.style.setProperty(r[0], r[1], 'important'));
+  for(let el = box; el && !(el.classList && el.classList.contains('tgk-support-center')); el = el.parentElement){
+    const cs = getComputedStyle(el);
+    if(cs.display === 'none') force(el, [['display','block']]);
+    if(cs.visibility === 'hidden') force(el, [['visibility','visible']]);
+    if(parseFloat(cs.opacity) === 0) force(el, [['opacity','1']]);
+  }
   force(box, [['display','block'],['visibility','visible'],['opacity','1']]);
-  force(fr,  [['display','block'],['visibility','visible'],['opacity','1'],['transform','none'],['clip','auto'],['clip-path','none'],['max-width','100%']]);
-  let r = fr.getBoundingClientRect();
-  if(r.height < 20) force(fr, [['height','65px']]);
-  if(r.width < 50) force(fr, [['width','300px']]);
-  r = fr.getBoundingClientRect();
-  return r.width >= 50 && r.height >= 20;
+  box.querySelectorAll('div').forEach(d => force(d, [['display','block'],['visibility','visible'],['opacity','1']]));
+  const first = box.querySelector('div');
+  return (first || box).getBoundingClientRect().height >= 20;
 }
 let tsLoading = null;
 function loadTurnstile(){
@@ -245,11 +260,12 @@ function initSpamGuard(prefix){
     if(tsWrap) tsWrap.style.display = 'block';
     const box = document.getElementById(`${prefix}-ts`);
     const note = msg => { const n = document.getElementById(`${prefix}-tsNote`); if(n) n.textContent = msg; };
-    const noteLink = (msg, url, text) => {
+    const noteLink = (msg, url, text, extra) => {
       const n = document.getElementById(`${prefix}-tsNote`); if(!n) return;
       n.textContent = msg + ' ';
       const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; a.textContent = text;
       n.appendChild(a);
+      if(extra) n.appendChild(document.createTextNode(' [' + extra + ']'));
     };
     let stage = 'script';   // script -> running -> (token)
     const who = () => ' [page: ' + location.hostname + ', key ends ' + TURNSTILE_SITE_KEY.slice(-4) + ']';
@@ -276,7 +292,7 @@ function initSpamGuard(prefix){
           // If the box still is not on screen a moment later, offer the form on its own page.
           setTimeout(() => {
             if(spamState[prefix] !== st || st.tsToken) return;
-            if(!tsRevive(box)) noteLink('The security box could not be shown on this page. Please use the form on its own page instead:', FALLBACK_FORM_URL, 'Open the contact form');
+            if(!tsRevive(box)){ const why = tsWhyHidden(box); console.warn('[turnstile] security box not visible:', why); noteLink('The security box could not be shown on this page. Please use the form on its own page instead:', FALLBACK_FORM_URL, 'Open the contact form', why); }
           }, 1500);
         },
         'timeout-callback': () => { spamState[prefix].tsToken = ''; note('The security check timed out. Please tick the box again, or refresh.'); },
