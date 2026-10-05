@@ -230,25 +230,38 @@ function initSpamGuard(prefix){
     if(tsWrap) tsWrap.style.display = 'block';
     const box = document.getElementById(`${prefix}-ts`);
     const note = msg => { const n = document.getElementById(`${prefix}-tsNote`); if(n) n.textContent = msg; };
+    let stage = 'script';   // script -> running -> (token)
+    const who = () => ' [page: ' + location.hostname + ', key ends ' + TURNSTILE_SITE_KEY.slice(-4) + ']';
     note('Loading security check...');
-    const slow = setTimeout(() => { if(spamState[prefix] === st && !st.tsToken) note('Still waiting for the security check. If nothing appears, turn off ad blockers or privacy extensions for this page and refresh.'); }, 8000);
+    const slow = setTimeout(() => {
+      if(spamState[prefix] !== st || st.tsToken) return;
+      note(stage === 'script'
+        ? 'Cloudflare\'s security check did not load after 8 seconds. Turn off ad blockers, privacy extensions or a VPN for this page, then refresh.' + who()
+        : 'The security check loaded but Cloudflare has not answered yet. Wait a few seconds, or refresh. If it keeps happening, try a private window with extensions off.' + who());
+    }, 8000);
     loadTurnstile().then(() => {
       if(!box || !document.body.contains(box)) return;
       if(!window.turnstile) throw new Error('turnstile missing');
+      stage = 'running';
+      note('Running security check...');
       if(st.widgetId !== null && box.firstChild){ try{ window.turnstile.reset(st.widgetId); return; }catch(e){} }
       st.widgetId = window.turnstile.render(box, {
         sitekey: TURNSTILE_SITE_KEY,
         callback: tok => { clearTimeout(slow); spamState[prefix].tsToken = tok; note(''); },
+        'before-interactive-callback': () => { clearTimeout(slow); note('Please tick the box above to continue.'); },
+        'timeout-callback': () => { spamState[prefix].tsToken = ''; note('The security check timed out. Please tick the box again, or refresh.'); },
+        'unsupported-callback': () => { clearTimeout(slow); note('This browser is not supported by the security check. Please try a different browser.'); },
         'expired-callback': () => { spamState[prefix].tsToken = ''; note('The security check expired. It will refresh by itself.'); },
-        'error-callback': code => { spamState[prefix].tsToken = ''; note('Security check error' + (code ? ' (' + code + ')' : '') + '. Please refresh the page. If it keeps happening, contact us and quote this code.' + tsHostHint(code)); console.warn('[turnstile] error', code); }
+        'error-callback': code => { clearTimeout(slow); spamState[prefix].tsToken = ''; note('Security check error' + (code ? ' (' + code + ')' : '') + '. Please refresh the page. If it keeps happening, contact us and quote this code.' + tsHostHint(code) + who()); console.warn('[turnstile] error', code); }
       });
     }).catch(e => {
       clearTimeout(slow);
       console.warn('[turnstile] could not load', e);
-      note('The security check could not load. Please turn off ad blockers or privacy extensions for this page, then refresh.');
+      note('The security check could not load. Please turn off ad blockers or privacy extensions for this page, then refresh.' + who());
     });
   }
 }
+
 function passesSpamGuard(prefix, errEl){
   const st = spamState[prefix];
   if(!st){
