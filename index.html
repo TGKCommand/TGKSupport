@@ -377,7 +377,7 @@ select.form-input{cursor:pointer}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.91</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.92</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -417,8 +417,8 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.91';
-const TGK_SUPPORT_BUILD_DATE = '2026-10-05';
+const TGK_SUPPORT_VERSION = 'v1.92';
+const TGK_SUPPORT_BUILD_DATE = '2026-10-07';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -610,6 +610,7 @@ async function toggleChatAvailability(available){
 window.toggleChatAvailability = toggleChatAvailability;
 
 async function doLogout(){
+  try{ await logApp('sign_out', null, null, 'Signed out'); sessionStorage.removeItem('tgk_alog_session'); }catch(_){}
   if(S.user){
     try{ await sb.from('team_members').update({ chat_available: false }).ilike('email', S.user.email); }catch(e){}
   }
@@ -646,6 +647,9 @@ async function afterLogin(user){
     await sb.auth.signOut();
     return;
   }
+  try{ const r = await sb.rpc('is_activity_log_viewer'); S.canViewActivityLog = !r.error && r.data === true; }catch(_){ S.canViewActivityLog = false; }
+  // One 'opened' entry per browser tab session, not one per page refresh.
+  try{ if(!sessionStorage.getItem('tgk_alog_session')){ sessionStorage.setItem('tgk_alog_session','1'); logApp('sign_in', null, null, 'Opened the Support Center'); } }catch(_){ logApp('sign_in', null, null, 'Opened the Support Center'); }
   document.getElementById('auth-gate').classList.add('hidden');
   document.getElementById('tgk-app').style.display = 'block';
   document.getElementById('userLabel').textContent = user.email;
@@ -1029,6 +1033,7 @@ const NAV = [
   { id:'customers', label:'Customer Lookup', section:'Tools' },
   { id:'reports', label:'Reports', section:'Tools' },
   { id:'settings', label:'Settings', section:'Tools' },
+  { id:'activitylog', label:'Activity Log', section:'Admin', viewerOnly:true },
 ];
 
 /* ============================================================
@@ -1112,7 +1117,7 @@ function renderNav(){
   const nav = document.getElementById('navList');
   let lastSection = null;
   const counts = computeNavCounts();
-  nav.innerHTML = NAV.map(n=>{
+  nav.innerHTML = NAV.filter(n=>!n.viewerOnly || S.canViewActivityLog).map(n=>{
     let sectionHeader = '';
     if(n.section && n.section !== lastSection){ lastSection = n.section; sectionHeader = `<div class="sidebar-section">${escapeHtml(n.section)}</div>`; }
     let badge = '';
@@ -1198,6 +1203,7 @@ function goCategory(cat){
 }
 
 function goPage(id){
+  if(id==='activitylog' && !S.canViewActivityLog) id='dashboard'; // cosmetic; the database refuses non-viewers anyway
   S.page = id;
   closeMobileSidebar(); // tapping a nav link on mobile should close the drawer, not leave it covering the new page
   renderNav();
@@ -1242,7 +1248,210 @@ function renderPage(){
   if(S.page === 'needsreply') return renderNeedsReply();
   if(S.page === 'reports') return renderReports();
   if(S.page === 'settings') return renderSettings();
+  if(S.page === 'activitylog') return renderActivityLog();
 }
+
+/* ============================================================
+   ADMIN ACTIVITY LOG (v1.92)
+   Two sources feed admin_activity_log (see admin_activity_log.sql):
+     db  -- a database trigger records every insert/update/delete on the
+            Support Center's tables, with the signed-in user and time taken
+            from the session on the server. The app cannot skip or fake these.
+     app -- this file reports actions that don't map to a staff-made row
+            change: sign-in/out, CSV exports, and every edge-function call
+            (emails sent, Shopify drafts/invoices/refunds, return labels, AI).
+            Those functions write as the service role, so without this the log
+            would only show "system". Identity + time are still stamped by the
+            server (log_activity), so nobody can log as someone else.
+   Reading is restricted by row-level security to activity_log_viewers;
+   the nav item is hidden for everyone else, but that's only cosmetic.
+   ============================================================ */
+function logApp(action, entityType, entityId, summary, details){
+  try{
+    return sb.rpc('log_activity', { p_action: action, p_entity_type: entityType||null, p_entity_id: entityId!=null?String(entityId):null, p_summary: summary||null, p_details: details||null })
+      .then(()=>{}, ()=>{});
+  }catch(_){ return Promise.resolve(); }
+}
+window.logApp = logApp;
+
+const ALOG_FN_LABELS = {
+  'send-ticket-email':'Sent ticket email', 'send-email-reply':'Sent email reply',
+  'create-draft-order':'Shopify draft order', 'process-shopify-refund':'Processed Shopify refund',
+  'generate-return-label':'Generated return label', 'get-return-rate':'Quoted return shipping rate',
+  'anthropic-proxy':'Used AI assist'
+};
+// Tag every edge-function call with who made it. Wraps fetch once; never changes the request or response.
+(function installActivityFetchHook(){
+  if(window.__tgkAlogHook) return; window.__tgkAlogHook = true;
+  const orig = window.fetch.bind(window);
+  window.fetch = async function(input, init){
+    const url = (typeof input==='string') ? input : (input && input.url) || '';
+    const m = /\/functions\/v1\/([a-z0-9-]+)/i.exec(url);
+    const resp = await orig(input, init);
+    if(m && S.user){
+      try{
+        let b = {}; if(init && typeof init.body==='string'){ try{ b = JSON.parse(init.body)||{}; }catch(_){} }
+        const fn = m[1];
+        let label = ALOG_FN_LABELS[fn] || fn;
+        if(fn==='create-draft-order') label = b.action==='invoice' ? 'Sent Shopify invoice' : b.action==='complete' ? (b.payment_pending ? 'Completed Shopify order (payment pending)' : 'Marked Shopify order paid') : b.action==='delete' ? 'Cancelled Shopify draft' : b.calculate ? 'Previewed Shopify order total' : 'Created Shopify draft order';
+        const ent = b.ticket_id ? ['ticket', b.ticket_id] : b.email_id ? ['email', b.email_id] : [null, null];
+        logApp('call:'+fn, ent[0], ent[1], label + (resp.ok ? '' : ' (FAILED '+resp.status+')'), { ok: resp.ok, status: resp.status, action: b.action||null });
+      }catch(_){}
+    }
+    return resp;
+  };
+})();
+
+S.alog = S.alog || { rows:[], staff:[], done:false, loading:false, showAccess:false,
+  f:{ user:'', kind:'', q:'', from:'', to:'', system:false } };
+
+const ALOG_TABLE_LABEL = { tickets:'ticket', ticket_messages:'ticket message', emails:'email', email_messages:'email message',
+  ticket_templates:'template', support_settings:'setting', team_members:'team member', ticket_quarantine:'held (spam) submission',
+  warranty_claims:'warranty claim', shipment_errors:'shipment error', dealers:'dealer', profiles:'user role', activity_log_viewers:'Activity Log access' };
+
+function alogWho(email){ return email ? (typeof trackerName==='function' ? trackerName(email) : email) : 'System'; }
+function alogStaffEmail(uid){ const x=(S.alog.staff||[]).find(p=>p.user_id===uid); return x ? x.email : uid; }
+function alogDescribe(r){
+  const row = (r.details && r.details.row) || {};
+  if(r.source==='app'){
+    if(r.action==='sign_in') return 'Opened the Support Center';
+    if(r.action==='sign_out') return 'Signed out';
+    return r.summary || r.action;
+  }
+  const verb = r.action==='insert' ? 'Created' : r.action==='delete' ? 'Deleted' : 'Updated';
+  const t = r.entity_type;
+  if(t==='activity_log_viewers') return (r.action==='delete' ? 'Removed' : 'Granted') + ' Activity Log access for ' + alogWho(alogStaffEmail(r.entity_id));
+  if(t==='tickets') return verb + ' ticket' + (row.ticket_number ? ' #'+row.ticket_number : '') + (row.subject && r.action!=='update' ? ' \u2014 '+row.subject : '');
+  if(t==='emails') return verb + ' ' + (row.mailbox==='orders' ? 'order' : 'email') + (row.display_number ? ' #'+row.display_number : '') + (row.subject && r.action!=='update' ? ' \u2014 '+row.subject : '');
+  if(t==='ticket_messages'){ const tk=(S.tickets||[]).find(x=>x.id===row.ticket_id); return (r.action==='insert' ? (row.sender_type==='customer' ? 'Received customer message' : 'Added message') : verb+' message') + ' on ticket' + (tk ? ' #'+tk.ticket_number : ''); }
+  if(t==='email_messages') return (r.action==='insert' ? (row.direction==='inbound' ? 'Received' : 'Sent') + ' email message' : verb + ' email message');
+  if(t==='profiles') return verb + ' user role' + (row.role ? ' ('+row.role+')' : '');
+  if(t==='support_settings') return verb + ' setting' + (row.key ? ' "'+row.key+'"' : '');
+  return verb + ' ' + (ALOG_TABLE_LABEL[t] || t) + (row.name ? ' "'+row.name+'"' : row.email ? ' '+row.email : row.pn ? ' '+row.pn : '');
+}
+function alogChanges(r){
+  const ch = r.details && r.details.changes; if(!ch) return '';
+  return Object.keys(ch).map(k=>{
+    const v = ch[k]||{};
+    if(v.changed) return `<span class="pn">${escapeHtml(k)}</span> changed`;
+    const f = v.from==null ? '\u2014' : String(v.from), to = v.to==null ? '\u2014' : String(v.to);
+    return `<span class="pn">${escapeHtml(k)}</span>: ${escapeHtml(f.slice(0,60))} \u2192 ${escapeHtml(to.slice(0,60))}`;
+  }).join('<br>');
+}
+function alogTarget(r){
+  const row = (r.details && r.details.row) || {};
+  let tid = null, eid = null;
+  if(r.entity_type==='tickets' || r.entity_type==='ticket') tid = r.entity_id;
+  else if(r.entity_type==='ticket_messages') tid = row.ticket_id;
+  else if(r.entity_type==='emails' || r.entity_type==='email') eid = r.entity_id;
+  else if(r.entity_type==='email_messages') eid = row.email_id;
+  if(tid && (S.tickets||[]).some(x=>x.id===tid)) return `<button class="btn btn-sm" onclick="openTicket('${escapeHtml(tid)}')">Open</button>`;
+  if(eid && (S.emails||[]).some(x=>x.id===eid)) return `<button class="btn btn-sm" onclick="openEmail('${escapeHtml(eid)}')">Open</button>`;
+  return '';
+}
+function alogStamp(iso){
+  const d = new Date(iso);
+  return d.toLocaleString([], { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+
+async function alogLoad(more){
+  const A = S.alog; if(A.loading) return; A.loading = true;
+  try{
+    let q = sb.from('admin_activity_log').select('*').order('created_at',{ascending:false}).order('id',{ascending:false}).limit(200);
+    const f = A.f;
+    if(f.user) q = q.eq('user_email', f.user);
+    if(!f.system) q = q.not('user_email','is',null);
+    if(f.kind==='signin') q = q.in('action',['sign_in','sign_out']);
+    else if(f.kind==='app') q = q.eq('source','app').not('action','in','(sign_in,sign_out)');
+    else if(f.kind==='tickets') q = q.in('entity_type',['tickets','ticket_messages']);
+    else if(f.kind==='emails') q = q.in('entity_type',['emails','email_messages']);
+    else if(f.kind==='admin') q = q.in('entity_type',['support_settings','ticket_templates','team_members','profiles','activity_log_viewers']);
+    else if(f.kind==='deletes') q = q.eq('action','delete');
+    if(f.from) q = q.gte('created_at', new Date(f.from+'T00:00:00').toISOString());
+    if(f.to) q = q.lte('created_at', new Date(f.to+'T23:59:59.999').toISOString());
+    if(f.q){ const t = f.q.replace(/[%,()]/g,' ').trim(); if(t) q = q.or(`summary.ilike.%${t}%,entity_id.ilike.%${t}%,user_email.ilike.%${t}%,entity_type.ilike.%${t}%,action.ilike.%${t}%`); }
+    if(more && A.rows.length) q = q.lt('created_at', A.rows[A.rows.length-1].created_at);
+    const { data, error } = await q;
+    if(error) throw error;
+    A.rows = more ? A.rows.concat(data||[]) : (data||[]);
+    A.done = (data||[]).length < 200;
+  }catch(e){
+    toast('Could not load the activity log: '+e.message, true);
+  }finally{ A.loading = false; }
+}
+async function alogLoadStaff(){
+  try{ const { data, error } = await sb.rpc('activity_log_staff'); if(!error) S.alog.staff = data||[]; }catch(_){}
+}
+
+async function renderActivityLog(){
+  const el = document.getElementById('content');
+  if(!S.canViewActivityLog){ el.innerHTML = '<div class="tbl-wrap"><div class="empty">You don\'t have access to the activity log.</div></div>'; return; }
+  el.innerHTML = '<div class="tbl-wrap"><div class="empty">Loading activity\u2026</div></div>';
+  await Promise.all([alogLoadStaff(), alogLoad(false)]);
+  alogPaint();
+}
+window.renderActivityLog = renderActivityLog;
+
+function alogPaint(){
+  if(S.page!=='activitylog') return;
+  const el = document.getElementById('content'); const A = S.alog, f = A.f;
+  const users = (A.staff||[]).map(p=>p.email);
+  el.innerHTML = `
+    <p style="font-size:var(--t-md);color:var(--text3);margin-bottom:12px">Every change to tickets, emails, orders, templates, settings and team access is recorded by the database with who did it and when; sign-ins, exports and actions like sending email or Shopify invoices are recorded by the app. Only people on the access list can see this page. Entries can't be edited or deleted.</p>
+    <div class="filter-bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
+      <select class="form-input" style="width:auto" onchange="S.alog.f.user=this.value;alogRefresh()"><option value="">All staff</option>${users.map(u=>`<option value="${escapeHtml(u)}" ${f.user===u?'selected':''}>${escapeHtml(alogWho(u))}</option>`).join('')}</select>
+      <select class="form-input" style="width:auto" onchange="S.alog.f.kind=this.value;alogRefresh()">
+        ${[['','All activity'],['tickets','Tickets & ticket messages'],['emails','Emails & orders'],['app','Sent / Shopify / exports / AI'],['admin','Settings, templates & access'],['deletes','Deletions only'],['signin','Sign-ins']].map(o=>`<option value="${o[0]}" ${f.kind===o[0]?'selected':''}>${o[1]}</option>`).join('')}
+      </select>
+      <input class="form-input" style="width:auto" type="date" value="${escapeHtml(f.from)}" onchange="S.alog.f.from=this.value;alogRefresh()" title="From">
+      <input class="form-input" style="width:auto" type="date" value="${escapeHtml(f.to)}" onchange="S.alog.f.to=this.value;alogRefresh()" title="To">
+      <div class="search-wrap" style="flex:1;min-width:160px"><input type="text" placeholder="Search action, user, record id\u2026" value="${escapeHtml(f.q)}" onkeydown="if(event.key==='Enter'){S.alog.f.q=this.value;alogRefresh()}"></div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:var(--t-sm);color:var(--text2)"><input type="checkbox" ${f.system?'checked':''} onchange="S.alog.f.system=this.checked;alogRefresh()"> Include system</label>
+      <button class="btn btn-sm" onclick="alogRefresh()"><span class="ic ic-refresh"></span>Refresh</button>
+      <button class="btn btn-sm" onclick="alogExport()"><span class="ic ic-download"></span>Export CSV</button>
+      <button class="btn btn-sm btn-teal" onclick="S.alog.showAccess=!S.alog.showAccess;alogPaint()"><span class="ic ic-user"></span>Who can view</button>
+    </div>
+    ${A.showAccess ? `<div class="panel"><div class="panel-title">Who can view the activity log</div>
+      <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:8px">Checked staff can open this page and read every entry. Changes take effect on their next page load, and are themselves logged.</div>
+      ${(A.staff||[]).map(p=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:var(--t-md)">
+        <input type="checkbox" ${p.is_viewer?'checked':''} ${p.email===(S.user&&S.user.email)?'disabled title="You can\'t remove your own access"':''} onchange="alogSetViewer('${p.user_id}', this.checked, this)">
+        <span style="flex:1">${escapeHtml(alogWho(p.email))} <span style="color:var(--text3)">${escapeHtml(p.email)}</span></span>
+        <span class="pill pill-muted">${escapeHtml(p.role||'')}</span></label>`).join('')}
+    </div>` : ''}
+    ${!A.rows.length ? '<div class="tbl-wrap"><div class="empty">No activity matches these filters.</div></div>' : `
+    <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th><th></th></tr></thead><tbody>
+      ${A.rows.map(r=>`<tr>
+        <td style="white-space:nowrap" title="${escapeHtml(r.created_at)}">${escapeHtml(alogStamp(r.created_at))}<div style="color:var(--text3);font-size:var(--t-xs)">${timeAgo(r.created_at)}</div></td>
+        <td style="white-space:nowrap">${r.user_email ? escapeHtml(alogWho(r.user_email)) : '<span class="pill pill-muted">System</span>'}</td>
+        <td class="main-col">${escapeHtml(alogDescribe(r))}${r.source==='app' ? ' <span class="pill pill-muted" title="Reported by the app (who and when are still stamped by the server)">app</span>' : ''}</td>
+        <td style="font-size:var(--t-xs);color:var(--text2);max-width:380px">${alogChanges(r)}</td>
+        <td>${alogTarget(r)}</td>
+      </tr>`).join('')}
+    </tbody></table></div>
+    ${A.done ? '' : `<div style="text-align:center;margin:12px 0"><button class="btn" onclick="alogMore()">Load older activity</button></div>`}`}
+  `;
+}
+async function alogRefresh(){ await alogLoad(false); alogPaint(); }
+async function alogMore(){ await alogLoad(true); alogPaint(); }
+async function alogSetViewer(uid, allow, cb){
+  try{
+    const { error } = await sb.rpc('set_activity_log_viewer', { p_user: uid, p_allow: !!allow });
+    if(error) throw error;
+    await alogLoadStaff(); toast(allow ? 'Access granted' : 'Access removed'); alogPaint();
+  }catch(e){ if(cb) cb.checked = !allow; toast('Could not change access: '+e.message, true); }
+}
+function alogExport(){
+  const rows = S.alog.rows||[]; if(!rows.length){ toast('Nothing to export', true); return; }
+  const esc = v => '"'+String(v==null?'':v).replace(/"/g,'""')+'"';
+  const strip = h => String(h||'').replace(/<br>/g,'; ').replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'");
+  const lines = [['Timestamp (UTC)','User','Source','Action','Details','Record type','Record id'].map(esc).join(',')]
+    .concat(rows.map(r=>[r.created_at, r.user_email||'System', r.source, alogDescribe(r), strip(alogChanges(r)), r.entity_type, r.entity_id].map(esc).join(',')));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([lines.join('\n')], { type:'text/csv' }));
+  a.download = 'activity-log-'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
+  logApp('export:activity_log', null, null, 'Exported '+rows.length+' activity log entries to CSV');
+}
+window.alogRefresh = alogRefresh; window.alogMore = alogMore; window.alogSetViewer = alogSetViewer; window.alogExport = alogExport; window.alogPaint = alogPaint;
 
 /* ============================================================
    DASHBOARD
@@ -1520,6 +1729,7 @@ function csvEscape(val){
 function exportTicketsToCSV(){
   const list = filteredTickets();
   if(!list.length){ toast('Nothing to export with the current filters', true); return; }
+  logApp('export:tickets', null, null, 'Exported '+list.length+' tickets to CSV');
 
   const headers = [
     'Ticket #','Subject','Status','Priority','Source','Tags',
@@ -2830,6 +3040,7 @@ function exportReportToCSV(){
   const bounds = reportRangeBounds();
   const list = reportFilteredTickets(bounds);
   if(!list.length){ toast('Nothing to export with the current filters', true); return; }
+  logApp('export:report', null, null, 'Exported report ('+list.length+' tickets) to CSV');
   const headers = ['Ticket #','Subject','Status','Priority','Source','Category','Tags','Customer Name','Customer Email','Order Number','Assigned To','Created At','Resolved At','Resolution Days'];
   const rows = list.map(t=>{
     const days = t.resolved_at ? ((new Date(t.resolved_at)-new Date(t.created_at))/86400000).toFixed(1) : '';
@@ -4263,10 +4474,13 @@ function orderDraftPayload(id){
 }
 function renderTotalsStrip(t){
   if(!t) return '';
-  const cur = t.currency||'USD';
-  const fmt = (v)=> v==null?'\u2014':('$'+Number(v).toFixed(2));
+  const cur = String(t.currency||'USD').toUpperCase();
+  // Never print a $ for a non-USD draft: Shopify reads the prices we send (custom line
+  // prices, shipping) in the draft's currency, so "$45" on an AED draft is really AED 45.
+  const fmt = (v)=> v==null?'\u2014':(cur==='USD' ? '$'+Number(v).toFixed(2) : cur+' '+Number(v).toFixed(2));
   const row=(l,v,bold)=>`<div style="display:flex;justify-content:space-between;font-size:var(--t-sm);margin:1px 0;${bold?'font-weight:700;color:var(--text)':'color:var(--text2)'}"><span>${l}</span><span style="font-family:var(--mono)">${escapeHtml(fmt(v))}</span></div>`;
   return `<div class="linked-box" style="background:var(--bg2);margin-top:8px">
+    ${cur!=='USD' ? `<div style="background:var(--red-dim);border:1px solid rgba(220,38,38,.3);color:var(--red);border-radius:var(--r-sm);padding:7px 9px;margin-bottom:8px;font-size:var(--t-sm);font-weight:600">This draft is in ${escapeHtml(cur)}, not USD. Shopify will read the shipping cost and any custom prices you entered as ${escapeHtml(cur)} \u2014 e.g. 45 would mean ${escapeHtml(cur)} 45. Don't create it until the draft function pins USD.</div>` : ''}
     ${row('Subtotal', t.subtotal)}
     ${(t.discount && Number(t.discount)>0) ? row('Discount', '-'+Number(t.discount).toFixed(2).slice(0)) : ''}
     ${(t.tax && Number(t.tax)>0) ? row('Tax', t.tax) : ''}
@@ -4527,6 +4741,11 @@ async function createShopifyDraft(id){
     renderEmailPanel(S.activeEmail);
     logOrderAudit(id,'Draft created', result.draft_id||''); renderOrderAudit(id);
     toast('Shopify draft created' + (result.total?(' \u2014 '+result.total):''));
+    // Belt-and-braces: the draft function pins USD; if Shopify ever reports anything
+    // else, staff-entered prices/shipping were read in that currency -- say so loudly.
+    if(result.currency && String(result.currency).toUpperCase()!=='USD'){
+      toast('WARNING: this draft is in '+result.currency+', not USD -- custom prices and shipping were read as '+result.currency+'. Check it in Shopify before invoicing.', true);
+    }
     return result;
   }catch(err){
     toast('Draft failed: '+err.message, true);
