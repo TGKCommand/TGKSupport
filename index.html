@@ -1205,6 +1205,7 @@ function goCategory(cat){
 function goPage(id){
   if(id==='activitylog' && !S.canViewActivityLog) id='dashboard'; // cosmetic; the database refuses non-viewers anyway
   S.page = id;
+  if(id==='reports') window._respCache = {}; // fresh response times each time Reports is opened
   closeMobileSidebar(); // tapping a nav link on mobile should close the drawer, not leave it covering the new page
   renderNav();
   document.getElementById('pageTitle').textContent = (NAV.find(n=>n.id===id)||{}).label || 'Dashboard';
@@ -1248,7 +1249,7 @@ function renderPage(){
   if(S.page === 'needsreply') return renderNeedsReply();
   if(S.page === 'reports') return renderReports();
   if(S.page === 'settings') return renderSettings();
-  if(S.page === 'activitylog') return renderActivityLog();
+  if(S.page === 'activitylog') return renderAdminActivityLog();
 }
 
 /* ============================================================
@@ -1302,7 +1303,7 @@ const ALOG_FN_LABELS = {
   };
 })();
 
-S.alog = S.alog || { rows:[], staff:[], done:false, loading:false, showAccess:false,
+S.alog = S.alog || { rows:[], staff:[], summary:[], done:false, loading:false, showAccess:false,
   f:{ user:'', kind:'', q:'', from:'', to:'', system:false } };
 
 const ALOG_TABLE_LABEL = { tickets:'ticket', ticket_messages:'ticket message', emails:'email', email_messages:'email message',
@@ -1379,18 +1380,35 @@ async function alogLoad(more){
     toast('Could not load the activity log: '+e.message, true);
   }finally{ A.loading = false; }
 }
+// Period for the staff summary: the page's date filters, or the last 7 days.
+function alogPeriod(){
+  const f = S.alog.f;
+  const to = f.to ? new Date(f.to+'T23:59:59.999') : new Date();
+  const from = f.from ? new Date(f.from+'T00:00:00') : new Date(Date.now() - 7*86400000);
+  return { from, to, label: (f.from||f.to) ? 'Selected dates' : 'Last 7 days' };
+}
+async function alogLoadSummary(){
+  try{
+    const pr = alogPeriod();
+    let tz = 'America/Chicago'; try{ tz = Intl.DateTimeFormat().resolvedOptions().timeZone || tz; }catch(_){}
+    const { data, error } = await sb.rpc('activity_log_summary', { p_from: pr.from.toISOString(), p_to: pr.to.toISOString(), p_tz: tz });
+    if(error) throw error;
+    S.alog.summary = data || [];
+  }catch(e){ S.alog.summary = []; console.error('activity summary:', e.message); }
+}
 async function alogLoadStaff(){
   try{ const { data, error } = await sb.rpc('activity_log_staff'); if(!error) S.alog.staff = data||[]; }catch(_){}
 }
 
-async function renderActivityLog(){
+// NB: must not be called renderActivityLog -- that name is the per-ticket history renderer further down.
+async function renderAdminActivityLog(){
   const el = document.getElementById('content');
   if(!S.canViewActivityLog){ el.innerHTML = '<div class="tbl-wrap"><div class="empty">You don\'t have access to the activity log.</div></div>'; return; }
   el.innerHTML = '<div class="tbl-wrap"><div class="empty">Loading activity\u2026</div></div>';
-  await Promise.all([alogLoadStaff(), alogLoad(false)]);
+  await Promise.all([alogLoadStaff(), alogLoad(false), alogLoadSummary()]);
   alogPaint();
 }
-window.renderActivityLog = renderActivityLog;
+window.renderAdminActivityLog = renderAdminActivityLog;
 
 function alogPaint(){
   if(S.page!=='activitylog') return;
@@ -1418,6 +1436,16 @@ function alogPaint(){
         <span style="flex:1">${escapeHtml(alogWho(p.email))} <span style="color:var(--text3)">${escapeHtml(p.email)}</span></span>
         <span class="pill pill-muted">${escapeHtml(p.role||'')}</span></label>`).join('')}
     </div>` : ''}
+    <div class="panel"><div class="panel-title">Staff activity \u2014 ${escapeHtml(alogPeriod().label)}</div>
+      ${!(A.summary||[]).length ? '<div class="empty">No staff activity in this period.</div>' : `
+      <div class="tbl-wrap"><table><thead><tr><th>Staff</th><th>First activity</th><th>Last activity</th><th>Actions</th><th>Customer replies</th><th>Days active</th></tr></thead><tbody>
+        ${A.summary.map(u=>`<tr class="rowlink" onclick="S.alog.f.user='${escapeHtml(u.user_email)}';alogRefresh()" title="Show only ${escapeHtml(alogWho(u.user_email))}'s activity">
+          <td class="main-col">${escapeHtml(alogWho(u.user_email))}</td>
+          <td>${escapeHtml(alogStamp(u.first_at))}</td>
+          <td>${escapeHtml(alogStamp(u.last_at))}<div style="color:var(--text3);font-size:var(--t-xs)">${timeAgo(u.last_at)}</div></td>
+          <td>${u.actions}</td><td>${u.replies}</td><td>${u.active_days}</td></tr>`).join('')}
+      </tbody></table></div>`}
+    </div>
     ${!A.rows.length ? '<div class="tbl-wrap"><div class="empty">No activity matches these filters.</div></div>' : `
     <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th><th></th></tr></thead><tbody>
       ${A.rows.map(r=>`<tr>
@@ -1431,7 +1459,7 @@ function alogPaint(){
     ${A.done ? '' : `<div style="text-align:center;margin:12px 0"><button class="btn" onclick="alogMore()">Load older activity</button></div>`}`}
   `;
 }
-async function alogRefresh(){ await alogLoad(false); alogPaint(); }
+async function alogRefresh(){ await Promise.all([alogLoad(false), alogLoadSummary()]); alogPaint(); }
 async function alogMore(){ await alogLoad(true); alogPaint(); }
 async function alogSetViewer(uid, allow, cb){
   try{
@@ -3191,6 +3219,9 @@ function renderReports(){
         : '<div class="empty">No repeat-issue orders detected in this range.</div>'}
     </div>
 
+    <div class="panel-title" style="border:none;margin-top:8px">Response Times</div>
+    <div id="respTimesBox">${respTimesHtml(bounds)}</div>
+
     <div class="panel-title" style="border:none;margin-top:8px">Orders & Fulfillment</div>
     <div class="kpi-grid kpi-grid-5">
       <div class="kpi"><div class="kpi-label">Orders Created</div><div class="kpi-value">${ordersCreated}</div></div>
@@ -3234,6 +3265,103 @@ function renderReports(){
   `;
 }
 window.renderReports = renderReports;
+
+/* ---- Response times (v1.92) ----------------------------------------------
+   Computed in the database by support_response_times() (see support_reports.sql):
+   the clock starts when a customer writes and stops at the first staff
+   response; internal notes and staff-created tickets never count. Times are
+   wall-clock, so nights and weekends are included -- medians are shown first
+   because a single overnight wait skews an average. */
+window._respCache = window._respCache || {};
+function respKey(b){ return (b.start? b.start.toISOString() : 'all') + '|' + b.end.toISOString().slice(0,13); }
+function fmtMins(m){
+  if(m==null || isNaN(m)) return '\u2014';
+  m = Number(m);
+  if(m < 1) return '<1m';
+  if(m < 60) return Math.round(m)+'m';
+  if(m < 1440){ const h=Math.floor(m/60), r=Math.round(m%60); return h+'h'+(r?' '+r+'m':''); }
+  const d=Math.floor(m/1440), h=Math.round((m%1440)/60); return d+'d'+(h?' '+h+'h':'');
+}
+function median(a){ if(!a.length) return null; const s=a.slice().sort((x,y)=>x-y), i=Math.floor(s.length/2); return s.length%2 ? s[i] : (s[i-1]+s[i])/2; }
+function avg(a){ return a.length ? a.reduce((x,y)=>x+y,0)/a.length : null; }
+function pctWithin(a, lim){ return a.length ? Math.round(100*a.filter(x=>x<=lim).length/a.length)+'%' : '\u2014'; }
+const RESP_KIND = { ticket:'Tickets', chat:'Live chat', email:'Emails', order:'Orders' };
+
+async function loadRespTimes(b){
+  const k = respKey(b);
+  if(window._respCache[k] && window._respCache[k].loading) return;
+  window._respCache[k] = { loading:true };
+  try{
+    const { data, error } = await sb.rpc('support_response_times', { p_from: (b.start || new Date('2000-01-01')).toISOString(), p_to: b.end.toISOString() });
+    if(error) throw error;
+    window._respCache[k] = { rows: data || [] };
+  }catch(e){
+    window._respCache[k] = { error: e.message };
+  }
+  const box = document.getElementById('respTimesBox');
+  if(box && S.page==='reports') box.innerHTML = respTimesHtml(b);
+}
+function respOpen(r){
+  if(r.kind==='ticket' || r.kind==='chat') return `<button class="btn btn-sm" onclick="openTicket('${escapeHtml(r.item_id)}')">Open</button>`;
+  return `<button class="btn btn-sm" onclick="openEmail('${escapeHtml(r.item_id)}')">Open</button>`;
+}
+function respTimesHtml(b){
+  const c = window._respCache[respKey(b)];
+  if(!c){ setTimeout(()=>loadRespTimes(b), 0); return '<div class="panel"><div class="empty">Calculating response times\u2026</div></div>'; }
+  if(c.loading) return '<div class="panel"><div class="empty">Calculating response times\u2026</div></div>';
+  if(c.error) return `<div class="panel"><div class="empty">Couldn't load response times (${escapeHtml(c.error)}). Run support_reports.sql in Supabase if you haven't.</div></div>`;
+  const rows = c.rows;
+  const done = rows.filter(r=>r.responded_at), open = rows.filter(r=>!r.responded_at);
+  const first = done.filter(r=>r.is_first).map(r=>Number(r.minutes));
+  const all = done.map(r=>Number(r.minutes));
+  const oldestOpen = open.reduce((m,r)=>Math.max(m, Number(r.minutes)), 0);
+  const kinds = ['ticket','chat','email','order'].map(k=>{
+    const d = done.filter(r=>r.kind===k);
+    return { k, n:d.length, first: median(d.filter(r=>r.is_first).map(r=>Number(r.minutes))), all: median(d.map(r=>Number(r.minutes))), open: open.filter(r=>r.kind===k).length };
+  }).filter(x=>x.n || x.open);
+  const byStaff = {};
+  done.forEach(r=>{ const key = r.responder_email || ''; (byStaff[key] = byStaff[key] || []).push(r); });
+  const staffRows = Object.entries(byStaff).map(([em, list])=>{
+    const m = list.map(r=>Number(r.minutes));
+    return { em, n:list.length, firsts:list.filter(r=>r.is_first).length, med:median(m), av:avg(m), in1h:pctWithin(m,60), slow:Math.max(...m) };
+  }).sort((a,b)=>b.n-a.n);
+  const slowest = done.slice().sort((a,b)=>Number(b.minutes)-Number(a.minutes)).slice(0,8);
+  const waiting = open.slice().sort((a,b)=>Number(b.minutes)-Number(a.minutes)).slice(0,10);
+  const who = em => em ? escapeHtml(typeof trackerName==='function' ? trackerName(em) : em) : '<span style="color:var(--text3)">Unattributed</span>';
+  const itemCell = r => `<span class="pn">${escapeHtml(r.item_ref||'')}</span> ${escapeHtml((r.subject||'').slice(0,60))} <span class="pill pill-muted">${RESP_KIND[r.kind]||r.kind}</span>`;
+  return `
+    <div class="kpi-grid kpi-grid-5">
+      <div class="kpi kpi-teal"><div class="kpi-label">Median First Response</div><div class="kpi-value">${fmtMins(median(first))}</div><div class="kpi-sub">${first.length} conversations</div></div>
+      <div class="kpi"><div class="kpi-label">Avg First Response</div><div class="kpi-value">${fmtMins(avg(first))}</div><div class="kpi-sub">includes nights/weekends</div></div>
+      <div class="kpi kpi-green"><div class="kpi-label">First Reply Within 1h</div><div class="kpi-value">${pctWithin(first,60)}</div><div class="kpi-sub">within 4h: ${pctWithin(first,240)}</div></div>
+      <div class="kpi kpi-orange"><div class="kpi-label">Median Any Reply</div><div class="kpi-value">${fmtMins(median(all))}</div><div class="kpi-sub">${all.length} responses incl. follow-ups</div></div>
+      <div class="kpi kpi-red"><div class="kpi-label">Waiting Now</div><div class="kpi-value">${open.length}</div><div class="kpi-sub">${open.length ? 'oldest '+fmtMins(oldestOpen) : 'nothing waiting'}</div></div>
+    </div>
+    <div class="stack-sm" style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="panel"><div class="panel-title">By Channel</div>
+        ${kinds.length ? `<div class="tbl-wrap"><table><thead><tr><th>Channel</th><th>Responses</th><th>Median first</th><th>Median any</th><th>Waiting</th></tr></thead><tbody>
+          ${kinds.map(x=>`<tr><td class="main-col">${RESP_KIND[x.k]}</td><td>${x.n}</td><td>${fmtMins(x.first)}</td><td>${fmtMins(x.all)}</td><td>${x.open}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty">No customer messages in this range.</div>'}
+      </div>
+      <div class="panel"><div class="panel-title">Still Waiting (oldest first)</div>
+        ${waiting.length ? `<div class="tbl-wrap"><table><tbody>
+          ${waiting.map(r=>`<tr><td>${itemCell(r)}</td><td style="white-space:nowrap;color:var(--red);font-weight:600">${fmtMins(r.minutes)}</td><td>${respOpen(r)}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="empty">Nothing waiting on a reply.</div>'}
+      </div>
+    </div>
+    ${S.canViewActivityLog ? `<div class="panel"><div class="panel-title">By Staff Member <span class="pill pill-muted" style="margin-left:6px" title="Visible only to people with Activity Log access">admin only</span></div>
+      ${staffRows.length ? `<div class="tbl-wrap"><table><thead><tr><th>Staff</th><th>Responses</th><th>First responses</th><th>Median</th><th>Average</th><th>Within 1h</th><th>Slowest</th></tr></thead><tbody>
+        ${staffRows.map(x=>`<tr><td class="main-col">${who(x.em)}</td><td>${x.n}</td><td>${x.firsts}</td><td>${fmtMins(x.med)}</td><td>${fmtMins(x.av)}</td><td>${x.in1h}</td><td>${fmtMins(x.slow)}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">No responses in this range.</div>'}
+    </div>` : ''}
+    <div class="panel"><div class="panel-title">Slowest Responses</div>
+      ${slowest.length ? `<div class="tbl-wrap"><table><thead><tr><th>Conversation</th><th>Customer wrote</th><th>Answered by</th><th>Took</th><th></th></tr></thead><tbody>
+        ${slowest.map(r=>`<tr><td>${itemCell(r)}</td><td style="white-space:nowrap">${escapeHtml(alogStamp(r.waiting_since))}</td><td>${who(r.responder_email)}</td><td style="font-weight:600">${fmtMins(r.minutes)}</td><td>${respOpen(r)}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="empty">No responses in this range.</div>'}
+      <div style="font-size:var(--t-xs);color:var(--text3);margin-top:8px">Clock starts when a customer writes and stops at the first staff reply (internal notes don't count; for orders, any order action counts). Wall-clock time, so nights and weekends are included.</div>
+    </div>`;
+}
+window.loadRespTimes = loadRespTimes;
 
 async function reportsLoadFullHistory(){
   await Promise.all(['tickets','warranty','shipErrors','emails'].map(k=> HISTORY_LOADED[k] ? null : loadFullHistory(k)));
