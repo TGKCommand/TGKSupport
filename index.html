@@ -377,7 +377,7 @@ select.form-input{cursor:pointer}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.92</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.93</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -417,7 +417,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.92';
+const TGK_SUPPORT_VERSION = 'v1.93';
 const TGK_SUPPORT_BUILD_DATE = '2026-10-07';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1303,7 +1303,7 @@ const ALOG_FN_LABELS = {
   };
 })();
 
-S.alog = S.alog || { rows:[], staff:[], summary:[], done:false, loading:false, showAccess:false,
+S.alog = S.alog || { view:'timeline', day:null, timeline:[], settings:null, showSettings:false, rows:[], staff:[], summary:[], done:false, loading:false, showAccess:false,
   f:{ user:'', kind:'', q:'', from:'', to:'', system:false } };
 
 const ALOG_TABLE_LABEL = { tickets:'ticket', ticket_messages:'ticket message', emails:'email', email_messages:'email message',
@@ -1358,7 +1358,7 @@ function alogStamp(iso){
 async function alogLoad(more){
   const A = S.alog; if(A.loading) return; A.loading = true;
   try{
-    let q = sb.from('admin_activity_log').select('*').order('created_at',{ascending:false}).order('id',{ascending:false}).limit(200);
+    let q = sb.from('admin_activity_log').select('*').neq('action','presence').order('created_at',{ascending:false}).order('id',{ascending:false}).limit(200);
     const f = A.f;
     if(f.user) q = q.eq('user_email', f.user);
     if(!f.system) q = q.not('user_email','is',null);
@@ -1405,16 +1405,216 @@ async function renderAdminActivityLog(){
   const el = document.getElementById('content');
   if(!S.canViewActivityLog){ el.innerHTML = '<div class="tbl-wrap"><div class="empty">You don\'t have access to the activity log.</div></div>'; return; }
   el.innerHTML = '<div class="tbl-wrap"><div class="empty">Loading activity\u2026</div></div>';
-  await Promise.all([alogLoadStaff(), alogLoad(false), alogLoadSummary()]);
+  await Promise.all([alogLoadStaff(), alogLoad(false), alogLoadSummary(), alogLoadSettings(), alogLoadTimeline()]);
   alogPaint();
 }
 window.renderAdminActivityLog = renderAdminActivityLog;
 
 function alogPaint(){
   if(S.page!=='activitylog') return;
+  if(S.alog.view==='timeline') return alogPaintTimeline();
+  alogPaintLog();
+}
+function alogTabs(){
+  const v = S.alog.view;
+  return `<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn btn-sm ${v==='timeline'?'btn-primary':''}" onclick="S.alog.view='timeline';alogPaint()">Daily timeline</button>
+    <button class="btn btn-sm ${v==='log'?'btn-primary':''}" onclick="S.alog.view='log';alogPaint()">All activity</button>
+    <span style="flex:1"></span>
+    <button class="btn btn-sm" onclick="S.alog.showSettings=!S.alog.showSettings;alogPaint()">Monitoring settings</button>
+    <button class="btn btn-sm btn-teal" onclick="S.alog.showAccess=!S.alog.showAccess;alogPaint()"><span class="ic ic-user"></span>Who can view</button>
+  </div>${S.alog.showSettings ? alogSettingsHtml() : ''}${S.alog.showAccess && S.alog.view==='timeline' ? alogAccessHtml() : ''}`;
+}
+function alogAccessHtml(){
+  const A = S.alog;
+  return `<div class="panel"><div class="panel-title">Who can view the activity log</div>
+      <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:8px">Checked staff can open this page, see timelines and receive the daily summary (unless you list specific recipients in Monitoring settings). Changes are logged.</div>
+      ${(A.staff||[]).map(p=>`<label style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:var(--t-md)">
+        <input type="checkbox" ${p.is_viewer?'checked':''} ${p.email===(S.user&&S.user.email)?'disabled title="You can\'t remove your own access"':''} onchange="alogSetViewer('${p.user_id}', this.checked, this)">
+        <span style="flex:1">${escapeHtml(alogWho(p.email))} <span style="color:var(--text3)">${escapeHtml(p.email)}</span></span>
+        <span class="pill pill-muted">${escapeHtml(p.role||'')}</span></label>`).join('')}
+    </div>`;
+}
+
+/* ---- Daily timeline (v1.93) ----------------------------------------------
+   Built by staff_day_timeline() in the database from the activity log:
+   actions + "active in the app" marks (one per 5 min while someone is using
+   the Support Center in a visible tab). Gaps = stretches inside shift hours
+   with no activity longer than the threshold in Monitoring settings. */
+function alogLocalDate(d){ const x=d||new Date(); return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0'); }
+async function alogLoadTimeline(){
+  const A = S.alog; if(!A.day) A.day = alogLocalDate();
+  try{
+    const { data, error } = await sb.rpc('staff_day_timeline', { p_day: A.day });
+    if(error) throw error;
+    A.timeline = data || []; A.timelineError = null;
+  }catch(e){ A.timeline = []; A.timelineError = e.message; }
+}
+async function alogLoadSettings(){
+  try{ const { data, error } = await sb.from('staff_monitor_settings').select('*').eq('id',1).maybeSingle(); if(error) throw error; S.alog.settings = data; }
+  catch(e){ S.alog.settings = null; }
+}
+async function alogShiftDay(delta){
+  const d = new Date(S.alog.day+'T12:00:00'); d.setDate(d.getDate()+delta);
+  S.alog.day = alogLocalDate(d); await alogLoadTimeline(); alogPaint();
+}
+async function alogSetDay(v){ if(!v) return; S.alog.day = v; await alogLoadTimeline(); alogPaint(); }
+function alogT(iso){ return iso ? new Date(iso).toLocaleTimeString([], { hour:'numeric', minute:'2-digit' }) : '\u2014'; }
+const ALOG_GAP_LABEL = { start:'late start', idle:'idle', end:'nothing since', none:'no activity' };
+
+function alogPaintTimeline(){
+  const el = document.getElementById('content'); const A = S.alog;
+  const rows = (A.timeline||[]).slice().sort((a,b)=> (b.actions||0)-(a.actions||0));
+  const st = A.settings;
+  const isToday = A.day === alogLocalDate();
+  const dayLabel = new Date(A.day+'T12:00:00').toLocaleDateString([], { weekday:'long', month:'short', day:'numeric', year:'numeric' });
+  let body = '';
+  if(A.timelineError){
+    body = `<div class="tbl-wrap"><div class="empty">Couldn't load the timeline (${escapeHtml(A.timelineError)}). Run staff_monitoring.sql in Supabase if you haven't.</div></div>`;
+  } else if(!rows.length){
+    body = '<div class="tbl-wrap"><div class="empty">No staff activity on this day.</div></div>';
+  } else {
+    // one shared time window for every row so the bars line up
+    const ms = x => new Date(x).getTime();
+    let w0 = Math.min(...rows.map(r=>ms(r.shift_start)), ...rows.filter(r=>r.first_at).map(r=>ms(r.first_at)));
+    let w1 = Math.max(...rows.map(r=>ms(r.shift_end)), ...rows.filter(r=>r.last_at).map(r=>ms(r.last_at)));
+    w0 = Math.floor(w0/3600000)*3600000; w1 = Math.ceil(w1/3600000)*3600000; if(w1<=w0) w1 = w0+3600000;
+    const pct = t => Math.max(0, Math.min(100, (t-w0)/(w1-w0)*100));
+    const sh = st && st.shift_start ? st.shift_start.split(':').map(Number) : [8,0];
+    const dayStart = ms(rows[0].shift_start) - (sh[0]*60 + (sh[1]||0))*60000;
+    const hours = []; for(let t=w0; t<=w1; t+=3600000) hours.push(t);
+    const axis = `<div style="position:relative;height:16px;margin:0 0 2px">${hours.map(t=>`<span style="position:absolute;left:${pct(t)}%;transform:translateX(-50%);font-size:var(--t-xs);color:var(--text3)">${new Date(t).toLocaleTimeString([], { hour:'numeric' }).replace(' ','').toLowerCase()}</span>`).join('')}</div>`;
+    body = `<div class="tbl-wrap" style="padding:12px 14px">
+      <div style="display:grid;grid-template-columns:170px 1fr;gap:10px 14px;align-items:center">
+        <div></div><div>${axis}</div>
+        ${rows.map(r=>{
+          const gaps = r.gaps||[];
+          const none = gaps.some(g=>g.kind==='none');
+          const bigGap = gaps.some(g=>g.minutes>=60);
+          const ticks = (r.slots||[]).map(sl=>{ const t = dayStart + sl*300000; return `<span style="position:absolute;top:3px;bottom:3px;left:${pct(t)}%;width:max(2px,${(300000/(w1-w0)*100).toFixed(3)}%);background:var(--teal);border-radius:1px"></span>`; }).join('');
+          const gapBlocks = gaps.map(g=>`<span title="${escapeHtml(alogT(g.from)+' \u2013 '+alogT(g.to)+' '+(ALOG_GAP_LABEL[g.kind]||g.kind)+' ('+fmtMins(g.minutes)+')')}" style="position:absolute;top:0;bottom:0;left:${pct(ms(g.from))}%;width:${(pct(ms(g.to))-pct(ms(g.from))).toFixed(3)}%;background:rgba(220,38,38,.14);border-left:1px solid rgba(220,38,38,.45);border-right:1px solid rgba(220,38,38,.45)"></span>`).join('');
+          const shiftBand = `<span style="position:absolute;top:0;bottom:0;left:${pct(ms(r.shift_start))}%;width:${(pct(ms(r.shift_end))-pct(ms(r.shift_start))).toFixed(3)}%;background:var(--bg3)"></span>`;
+          const nowLine = isToday ? `<span title="now" style="position:absolute;top:-2px;bottom:-2px;left:${pct(Date.now())}%;width:2px;background:var(--orange)"></span>` : '';
+          return `
+          <div style="min-width:0">
+            <div style="font-weight:700;color:var(--text);cursor:pointer" onclick="alogOpenPersonDay('${escapeHtml(r.user_email)}')" title="See everything ${escapeHtml(alogWho(r.user_email))} did this day">${escapeHtml(alogWho(r.user_email))} ${none&&r.is_workday?'<span class="pill pill-red">no activity</span>':(bigGap&&r.is_workday?'<span class="pill pill-orange">gap</span>':'')}</div>
+            <div style="font-size:var(--t-xs);color:var(--text3)">${r.first_at?alogT(r.first_at)+' \u2013 '+alogT(r.last_at):'\u2014'} \u00b7 ${fmtMins(r.engaged_minutes)} engaged</div>
+            <div style="font-size:var(--t-xs);color:var(--text3)">${r.actions||0} actions \u00b7 ${r.replies||0} replies</div>
+          </div>
+          <div>
+            <div style="position:relative;height:26px;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden">${shiftBand}${gapBlocks}${ticks}${nowLine}</div>
+            ${r.is_workday && gaps.length ? `<div style="font-size:var(--t-xs);margin-top:3px;color:var(--text2)">${gaps.map(g=>`<span style="margin-right:12px;color:${g.minutes>=60?'var(--red)':'var(--orange)'}">${alogT(g.from)}\u2013${alogT(g.to)} ${ALOG_GAP_LABEL[g.kind]||g.kind} (${fmtMins(g.minutes)})</span>`).join('')}</div>` : (r.is_workday ? '' : '<div style="font-size:var(--t-xs);margin-top:3px;color:var(--text3)">Not a scheduled workday \u2014 no gaps flagged</div>')}
+          </div>`;}).join('')}
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:var(--t-xs);color:var(--text3);margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--teal);vertical-align:-1px"></span> activity (5-min slots)</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:var(--bg3);border:1px solid var(--border);vertical-align:-1px"></span> shift hours</span>
+        <span><span style="display:inline-block;width:10px;height:10px;background:rgba(220,38,38,.14);border:1px solid rgba(220,38,38,.45);vertical-align:-1px"></span> gap over ${st?st.gap_minutes:30} min in shift</span>
+        ${isToday?'<span><span style="display:inline-block;width:2px;height:10px;background:var(--orange);vertical-align:-1px"></span> now</span>':''}
+      </div>
+    </div>`;
+  }
+  el.innerHTML = `
+    ${alogTabs()}
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+      <button class="btn btn-sm" onclick="alogShiftDay(-1)">\u2039 Prev</button>
+      <input class="form-input" style="width:auto" type="date" value="${escapeHtml(A.day)}" onchange="alogSetDay(this.value)">
+      <button class="btn btn-sm" onclick="alogShiftDay(1)" ${isToday?'disabled':''}>Next \u203a</button>
+      ${isToday?'':'<button class="btn btn-sm" onclick="alogSetDay(alogLocalDate())">Today</button>'}
+      <button class="btn btn-sm" onclick="alogLoadTimeline().then(alogPaint)"><span class="ic ic-refresh"></span>Refresh</button>
+      <span style="font-weight:700;color:var(--text);margin-left:6px">${escapeHtml(dayLabel)}</span>
+      ${st?`<span style="font-size:var(--t-xs);color:var(--text3)">Shift ${escapeHtml(String(st.shift_start).slice(0,5))}\u2013${escapeHtml(String(st.shift_end).slice(0,5))} \u00b7 ${escapeHtml(st.tz)}</span>`:''}
+    </div>
+    ${body}
+    <p style="font-size:var(--t-xs);color:var(--text3);margin-top:10px">Activity = anything done in the Support Center, plus an "active" mark every 5 minutes while someone is using it in a visible tab. Work outside the Support Center (phone calls, shipping, meetings) won't show, so treat a gap as a question to ask, not proof.</p>`;
+}
+async function alogOpenPersonDay(email){
+  const A = S.alog; A.view='log'; A.f.user = email; A.f.from = A.day; A.f.to = A.day; A.f.kind=''; await alogRefresh();
+}
+
+function alogSettingsHtml(){
+  const st = S.alog.settings;
+  if(!st) return `<div class="panel"><div class="empty">Monitoring settings aren't available yet \u2014 run staff_monitoring.sql in Supabase.</div></div>`;
+  const days = [[1,'Mon'],[2,'Tue'],[3,'Wed'],[4,'Thu'],[5,'Fri'],[6,'Sat'],[7,'Sun']];
+  const tzs = ['America/New_York','America/Chicago','America/Denver','America/Phoenix','America/Los_Angeles','America/Anchorage','Pacific/Honolulu'];
+  const hourOpt = h => { const d=new Date(2000,0,1,h); return d.toLocaleTimeString([], { hour:'numeric' }); };
+  return `<div class="panel"><div class="panel-title">Monitoring settings</div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Timezone</label><select class="form-input" id="msTz">${(tzs.includes(st.tz)?tzs:[st.tz].concat(tzs)).map(z=>`<option ${z===st.tz?'selected':''}>${escapeHtml(z)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Flag a gap after (minutes without activity)</label><input class="form-input" id="msGap" type="number" min="5" max="480" value="${st.gap_minutes}"></div>
+    </div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Shift starts</label><input class="form-input" id="msStart" type="time" value="${escapeHtml(String(st.shift_start).slice(0,5))}"></div>
+      <div class="form-group"><label class="form-label">Shift ends</label><input class="form-input" id="msEnd" type="time" value="${escapeHtml(String(st.shift_end).slice(0,5))}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Workdays</label><div style="display:flex;gap:12px;flex-wrap:wrap">${days.map(([n,l])=>`<label style="display:flex;align-items:center;gap:4px;font-size:var(--t-md)"><input type="checkbox" class="msDay" value="${n}" ${(st.workdays||[]).includes(n)?'checked':''}>${l}</label>`).join('')}</div></div>
+    <div class="form-row cols-2">
+      <div class="form-group"><label class="form-label">Daily summary email</label><label style="display:flex;align-items:center;gap:6px;font-size:var(--t-md)"><input type="checkbox" id="msOn" ${st.summary_enabled?'checked':''}> Send every day at</label>
+        <select class="form-input" id="msHour" style="margin-top:6px">${Array.from({length:24},(_,h)=>`<option value="${h}" ${h===st.summary_hour?'selected':''}>${hourOpt(h)}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Send to (comma-separated; blank = everyone with Activity Log access)</label><input class="form-input" id="msTo" value="${escapeHtml((st.recipients||[]).join(', '))}" placeholder="jon@tgkmotorsport.com"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-primary btn-sm" onclick="alogSaveSettings()">Save settings</button>
+      <button class="btn btn-sm btn-teal" onclick="alogTestSummary(this)"><span class="ic ic-mail"></span>Email me a test summary for ${escapeHtml(S.alog.day||'today')}</button>
+    </div>
+    <div style="font-size:var(--t-xs);color:var(--text3);margin-top:8px">The daily email also needs its one-time schedule set up in Supabase (section 5 of staff_monitoring.sql). The test button works without it.</div>
+  </div>`;
+}
+async function alogSaveSettings(){
+  const v = id => (document.getElementById(id)||{}).value;
+  const workdays = [...document.querySelectorAll('.msDay')].filter(x=>x.checked).map(x=>Number(x.value));
+  const gap = parseInt(v('msGap'),10);
+  if(!(gap>=5 && gap<=480)){ toast('Gap must be between 5 and 480 minutes', true); return; }
+  if(!v('msStart') || !v('msEnd') || v('msStart')>=v('msEnd')){ toast('Shift end must be after shift start', true); return; }
+  const recipients = String(v('msTo')||'').split(/[,\s;]+/).map(x=>x.trim().toLowerCase()).filter(Boolean);
+  const bad = recipients.filter(x=>!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+  if(bad.length){ toast('Not an email address: '+bad.join(', '), true); return; }
+  try{
+    const { data, error } = await sb.from('staff_monitor_settings').update({
+      tz: v('msTz'), gap_minutes: gap, shift_start: v('msStart'), shift_end: v('msEnd'), workdays,
+      summary_enabled: !!(document.getElementById('msOn')||{}).checked, summary_hour: parseInt(v('msHour'),10),
+      recipients, updated_at: new Date().toISOString()
+    }).eq('id',1).select().single();
+    if(error) throw error;
+    S.alog.settings = data; await alogLoadTimeline(); toast('Monitoring settings saved'); alogPaint();
+  }catch(e){ toast('Could not save: '+e.message, true); }
+}
+async function alogTestSummary(btn){
+  if(btn){ btn.disabled = true; btn.textContent = 'Sending\u2026'; }
+  try{
+    let token = SUPABASE_ANON_KEY;
+    try{ const sres = await sb.auth.getSession(); if(sres && sres.data && sres.data.session) token = sres.data.session.access_token; }catch(_){}
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/daily-staff-summary`, {
+      method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+token, 'apikey':SUPABASE_ANON_KEY },
+      body: JSON.stringify({ day: S.alog.day })
+    });
+    const r = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(r.error || ('HTTP '+resp.status));
+    toast('Test summary sent to '+(r.sent_to||[]).join(', '));
+  }catch(e){ toast('Test failed: '+e.message+' (is the daily-staff-summary function deployed?)', true); }
+  if(btn){ btn.disabled = false; btn.textContent = 'Email me a test summary'; }
+}
+window.alogShiftDay=alogShiftDay; window.alogSetDay=alogSetDay; window.alogLocalDate=alogLocalDate; window.alogLoadTimeline=alogLoadTimeline;
+window.alogOpenPersonDay=alogOpenPersonDay; window.alogSaveSettings=alogSaveSettings; window.alogTestSummary=alogTestSummary;
+
+// "Active in the app": one mark every 5 minutes, only while the tab is visible AND
+// the person has moused/typed/scrolled in the last 5 minutes. Records nothing about
+// what they were doing -- it just keeps reading and reviewing from looking idle.
+(function installPresenceMarks(){
+  if(window.__tgkPresence) return; window.__tgkPresence = true;
+  let lastInput = 0;
+  ['mousemove','mousedown','keydown','wheel','scroll','touchstart'].forEach(ev=>window.addEventListener(ev, ()=>{ lastInput = Date.now(); }, { passive:true, capture:true }));
+  setInterval(()=>{
+    if(!S.user || document.visibilityState!=='visible' || Date.now()-lastInput > 300000) return;
+    logApp('presence');
+  }, 300000);
+})();
+
+function alogPaintLog(){
   const el = document.getElementById('content'); const A = S.alog, f = A.f;
   const users = (A.staff||[]).map(p=>p.email);
   el.innerHTML = `
+    ${alogTabs()}
     <p style="font-size:var(--t-md);color:var(--text3);margin-bottom:12px">Every change to tickets, emails, orders, templates, settings and team access is recorded by the database with who did it and when; sign-ins, exports and actions like sending email or Shopify invoices are recorded by the app. Only people on the access list can see this page. Entries can't be edited or deleted.</p>
     <div class="filter-bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">
       <select class="form-input" style="width:auto" onchange="S.alog.f.user=this.value;alogRefresh()"><option value="">All staff</option>${users.map(u=>`<option value="${escapeHtml(u)}" ${f.user===u?'selected':''}>${escapeHtml(alogWho(u))}</option>`).join('')}</select>
@@ -1427,7 +1627,6 @@ function alogPaint(){
       <label style="display:flex;align-items:center;gap:5px;font-size:var(--t-sm);color:var(--text2)"><input type="checkbox" ${f.system?'checked':''} onchange="S.alog.f.system=this.checked;alogRefresh()"> Include system</label>
       <button class="btn btn-sm" onclick="alogRefresh()"><span class="ic ic-refresh"></span>Refresh</button>
       <button class="btn btn-sm" onclick="alogExport()"><span class="ic ic-download"></span>Export CSV</button>
-      <button class="btn btn-sm btn-teal" onclick="S.alog.showAccess=!S.alog.showAccess;alogPaint()"><span class="ic ic-user"></span>Who can view</button>
     </div>
     ${A.showAccess ? `<div class="panel"><div class="panel-title">Who can view the activity log</div>
       <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:8px">Checked staff can open this page and read every entry. Changes take effect on their next page load, and are themselves logged.</div>
