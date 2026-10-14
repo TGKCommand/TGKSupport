@@ -131,14 +131,20 @@ const TICKET_ENDPOINT = SUPABASE_URL + "/functions/v1/submit-ticket";
 const TURNSTILE_SITE_KEY = "0x4AAAAAAFMJRQlOEEBAt7Mz";
 const FALLBACK_FORM_URL = "https://contact.tgkmotorsport.com/";   // opened only if the security box cannot be displayed
 
-/* ---------------- Shopify placeholders (unwired until Customer Account API is connected) ---------------- */
-async function fetchShopifyOrders(customerAccessToken){
-  // TODO: replace with a real call to the Shopify Customer Account API
-  // (New Customer Accounts session). Expected shape: [{name, order_number,
-  // fulfillment_status, tracking_number, tracking_url, financial_status, created_at, total}]
-  console.warn('fetchShopifyOrders: not yet wired to Shopify Customer Account API');
-  return [];
+/* ---------------- Shopify order lookup ----------------
+   Goes through the order-lookup edge function, which talks to the Shopify Admin API server-side.
+   track:   order # + checkout email must both match before anything is shown.
+   history: the order list is EMAILED to the address entered, never shown on the page, so typing
+            someone else's email reveals nothing. */
+const LOOKUP_ENDPOINT = SUPABASE_URL + "/functions/v1/order-lookup";
+async function orderLookup(payload){
+  const r = await fetch(LOOKUP_ENDPOINT, { method:'POST',
+    headers:{ 'Content-Type':'application/json', 'apikey':SUPABASE_ANON_KEY, 'Authorization':'Bearer ' + SUPABASE_ANON_KEY },
+    body: JSON.stringify(payload) });
+  if(!r.ok) throw new Error('Lookup failed (' + r.status + ')');
+  return r.json();
 }
+const prettyStatus = s => (s||'').toLowerCase().replace(/_/g,' ');
 
 const PAGES = ['track','history','return','contact','wholesale','warranty'];
 const LABELS = {
@@ -482,10 +488,10 @@ const RENDER = {
   history: () => `
     <div class="card">
       <h1>View Order History</h1>
-      <p class="sub">Enter the email used at checkout to view your past orders.</p>
+      <p class="sub">Enter the email used at checkout and we'll email you a list of your past orders.</p>
       <div class="form-group"><label class="form-label">Email</label>
         <input class="form-input" id="histEmail" placeholder="you@example.com"></div>
-      <button class="btn" onclick="loadHistory()">View Orders</button>
+      <button class="btn" onclick="loadHistory()">Email My Orders</button>
       <div id="histResult" style="margin-top:16px"></div>
     </div>`,
 
@@ -669,47 +675,55 @@ async function trackOrder(){
   if(!order || !email){ box.innerHTML = '<div class="status-msg err" style="display:block">Enter both an order number and email.</div>'; return; }
   box.innerHTML = '<p class="sub">Looking up order…</p>';
 
-  const shopifyOrders = await fetchShopifyOrders(null);
-  const match = shopifyOrders.find(o => o.order_number === order || o.name === order);
+  let res;
+  try{ res = await orderLookup({ action:'track', order, email }); }
+  catch(e){ box.innerHTML = '<div class="status-msg err" style="display:block">We couldn\'t reach our order system just now. Please try again in a minute.</div>'; return; }
 
-  let ticketHtml = '';
-  try{
-    const { data: tickets } = await sb.from('tickets')
-      .select('ticket_number,status,subject,created_at')
-      .eq('order_number', order).ilike('customer_email', email)
-      .order('created_at', { ascending:false }).limit(5);
-    if(tickets && tickets.length){
-      ticketHtml = `<h2 style="margin-top:18px">Related Support Tickets</h2>` + tickets.map(t => `
+  if(!res.found){
+    box.innerHTML = '<div class="status-msg err" style="display:block">We couldn\'t find an order with that number and email. Double-check both — use the email from your order confirmation.</div>';
+    return;
+  }
+  const o = res.order;
+  const trackingHtml = (o.tracking||[]).length
+    ? o.tracking.map(t => `
         <div class="order-item">
-          <div><strong>#${t.ticket_number}</strong> — ${escapeHtml(t.subject||'')}</div>
-          <span class="badge ${t.status}">${(t.status||'').replace(/_/g,' ')}</span>
-        </div>`).join('');
-    }
-  }catch(e){ /* RLS may block anon select until policies are set — expected */ }
+          <div><strong>${escapeHtml(t.company||'Shipment')}</strong><div class="meta">${escapeHtml(t.number||'')} · ${escapeHtml(prettyStatus(t.status))}</div></div>
+          ${t.url ? `<a class="btn" href="${escapeHtml(t.url)}" target="_blank" rel="noopener">Track Package</a>` : ''}
+        </div>`).join('')
+    : '<p class="sub" style="margin-top:8px">No tracking number yet — you\'ll get an email as soon as it ships.</p>';
 
-  box.innerHTML = (match
-    ? `<div class="order-item"><div><strong>Order ${order}</strong><div class="meta">${match.fulfillment_status||'—'}</div></div>
-        ${match.tracking_url ? `<a class="btn" href="${match.tracking_url}" target="_blank">Track Package</a>` : ''}</div>`
-    : `<div class="status-msg err" style="display:block">Shopify order lookup isn't connected yet — needs the Customer Account API wired in (see code comments).</div>`
-  ) + ticketHtml;
+  const ticketHtml = (res.tickets||[]).length
+    ? `<h2 style="margin-top:18px">Related Support Tickets</h2>` + res.tickets.map(t => `
+        <div class="order-item">
+          <div><strong>#${escapeHtml(String(t.ticket_number))}</strong> — ${escapeHtml(t.subject||'')}</div>
+          <span class="badge ${escapeHtml(t.status||'')}">${escapeHtml(prettyStatus(t.status))}</span>
+        </div>`).join('')
+    : '';
+
+  box.innerHTML = `
+    <div class="order-item">
+      <div><strong>Order ${escapeHtml(o.name)}</strong>
+        <div class="meta">${new Date(o.created_at).toLocaleDateString()} · $${escapeHtml(o.total||'')} · ${escapeHtml(prettyStatus(o.financial_status))}</div></div>
+      <span class="badge open">${escapeHtml(prettyStatus(o.fulfillment_status))}</span>
+    </div>
+    ${trackingHtml}
+    ${o.status_url ? `<p style="margin-top:10px"><a href="${escapeHtml(o.status_url)}" target="_blank" rel="noopener">View full order details →</a></p>` : ''}
+    ${ticketHtml}`;
 }
 window.trackOrder = trackOrder;
 
 async function loadHistory(){
   const email = document.getElementById('histEmail').value.trim();
   const box = document.getElementById('histResult');
-  if(!email){ box.innerHTML = '<div class="status-msg err" style="display:block">Enter your email.</div>'; return; }
-  box.innerHTML = '<p class="sub">Loading order history…</p>';
-  const orders = await fetchShopifyOrders(null);
-  if(!orders.length){
-    box.innerHTML = '<div class="status-msg err" style="display:block">Shopify order history isn\'t connected yet — needs the Customer Account API wired in.</div>';
-    return;
+  if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ box.innerHTML = '<div class="status-msg err" style="display:block">Enter a valid email.</div>'; return; }
+  box.innerHTML = '<p class="sub">Sending…</p>';
+  try{
+    await orderLookup({ action:'history', email });
+    box.innerHTML = `<div class="status-msg ok" style="display:block">If we have orders under ${escapeHtml(email)}, we've emailed the list there. It can take a minute or two — check spam if you don't see it.</div>
+      <p class="sub" style="margin-top:10px">Have an account? <a href="https://tgkmotorsport.com/account" target="_blank" rel="noopener">Sign in</a> to see your orders instantly.</p>`;
+  }catch(e){
+    box.innerHTML = '<div class="status-msg err" style="display:block">We couldn\'t reach our order system just now. Please try again in a minute.</div>';
   }
-  box.innerHTML = orders.map(o => `
-    <div class="order-item">
-      <div><strong>${o.name}</strong><div class="meta">${o.created_at||''} · $${o.total||''}</div></div>
-      <span class="badge open">${o.fulfillment_status||o.financial_status||''}</span>
-    </div>`).join('');
 }
 window.loadHistory = loadHistory;
 
