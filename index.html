@@ -329,6 +329,72 @@ select.form-input{cursor:pointer}
   .sidebar-footer .sync-pill{background:var(--bg3)!important;background-image:none!important;box-shadow:none!important}
 }
 </style>
+<style id="tgk-mobile">
+/* [Support v1.96] phone pass: tap targets, readable text, no wrapped labels, usable header and menus */
+
+@media(max-width:768px){
+:root{--t-xs:11.5px;--t-sm:12.5px;--t-md:13.5px}
+html{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:rgba(13,148,136,.15)}
+button,a,[onclick],select,input,label,summary{touch-action:manipulation}
+button,.btn,select,input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=hidden]),textarea{min-height:40px}
+button{min-width:40px}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]):not([type=color]):not([type=hidden]),select,textarea{font-size:16px!important}
+.btn,.action-btn,.filter-btn,.showall-btn{white-space:nowrap}
+.filter-chip,[class*="-chip"]{min-height:36px;white-space:nowrap;flex:none}
+.tab,.panel-tab,.pill,.badge{white-space:nowrap}
+.tab,.panel-tab{flex:none}
+:is(div,nav,ul):has(>.tab),:is(div,nav,ul):has(>.panel-tab),:is(div,nav,ul):has(>.filter-chip){overflow-x:auto!important;flex-wrap:nowrap!important;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+:is(div,nav,ul):has(>.tab)::-webkit-scrollbar,:is(div,nav,ul):has(>.panel-tab)::-webkit-scrollbar,:is(div,nav,ul):has(>.filter-chip)::-webkit-scrollbar{display:none}
+.kpi-label,.stat-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.nav-item,.nav-subitem{min-height:44px}
+.dash-link{display:inline-block;padding:12px 4px}
+input[type=checkbox],input[type=radio]{width:30px;height:30px}
+td[onclick],th[onclick]{min-width:40px}
+a.money-neutral,a.money-pos,a.money-neg{display:inline-block;min-width:40px;text-align:right}
+td:has(>input[type=checkbox]),th:has(>input[type=checkbox]){min-width:44px;padding-left:11px!important;padding-right:11px!important}
+.sidebar-section{font-size:11px!important}
+.bomtag{font-size:11px!important}
+select.form-input,select.fm-in{min-width:110px;max-width:100%}
+td>a,a[onclick]:not(.btn):not(.nav-item):not(.dash-link):not(.nav-subitem){display:inline-block;padding:11px 8px;margin:-11px -8px}
+.dl-label{font-size:11px!important}
+}
+@media(min-width:769px){#tgk-more-btn,#tgk-search-btn,#tgk-sheet,#tgk-sheet-scrim{display:none!important}}
+#tgk-more-btn,#tgk-search-btn{display:none;align-items:center;justify-content:center;width:40px;height:40px;padding:0;border-radius:8px;cursor:pointer}
+#tgk-sheet-scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:3000;display:none}
+#tgk-sheet{position:fixed;left:0;right:0;bottom:0;z-index:3001;background:#fff;color:#1b2529;border-radius:16px 16px 0 0;padding:8px 12px calc(14px + env(safe-area-inset-bottom));box-shadow:0 -8px 30px rgba(0,0,0,.25);display:none}
+#tgk-sheet button{display:flex;width:100%;align-items:center;gap:12px;min-height:48px;padding:0 10px;background:none;border:0;border-bottom:1px solid #eef1f4;font:600 15px 'DM Sans',sans-serif;color:#1b2529;text-align:left}
+#tgk-sheet button:last-child{border-bottom:0}
+#tgk-sheet button[disabled]{opacity:.4}
+#tgk-sheet h6{margin:6px 10px 4px;font:700 11px 'DM Sans',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:#667085}
+body.tgk-sheet-open #tgk-sheet,body.tgk-sheet-open #tgk-sheet-scrim{display:block}
+
+@media(max-width:768px){
+.topbar{padding-left:10px!important;padding-right:10px!important;gap:6px!important}
+.topbar-title{min-width:0;flex:1 1 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.topbar-actions{flex:none!important;gap:6px!important;margin-left:auto}
+#undoBtn,#redoBtn{display:none!important}
+#tgk-more-btn{display:inline-flex!important}
+.kpi-grid.kpi-grid-6,.kpi-grid-6{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.kpi-grid>*{min-width:0}
+.sidebar-section{font-size:11px!important}
+.filter-bar{display:grid!important;grid-template-columns:1fr 1fr;gap:8px!important}
+.filter-bar>.search-wrap{grid-column:1/-1}
+.filter-bar>.checkbox-row{min-height:40px;display:flex;align-items:center}
+.filter-bar>.btn{width:100%}
+#tgk-devtrk-banner{left:8px!important;right:8px!important;width:auto!important;max-width:none!important;bottom:calc(8px + env(safe-area-inset-bottom))!important;padding:10px 12px!important;font-size:12.5px!important}
+#tk-panel,#tk-panel[data-w]{--tk-w:100vw;left:0!important;right:0!important;width:auto!important;max-width:none!important;border-left:0!important;overscroll-behavior:contain}
+#tk-panel .tk-body,#tk-panel .tk-thread{overscroll-behavior:contain;max-width:100%;overflow-x:hidden}
+#tk-overlay{overscroll-behavior:contain;touch-action:none}
+html:has(#tk-panel.open),html:has(#tk-panel.open) body,html:has(#tk-panel.open) .main,html:has(#tk-panel.open) .content{overflow:hidden!important}
+#tk-panel #tmplPicker{min-width:0!important;width:100%!important;max-width:100%!important;flex:1 1 0!important;text-overflow:ellipsis}
+#tk-panel .tk-body *{min-width:0}
+#tk-panel .tk-body select,#tk-panel .tk-body input:not([type=checkbox]):not([type=radio]),#tk-panel .tk-body textarea{max-width:100%}
+#tk-width-btn{display:none!important}
+.tk-tracker{display:flex;flex-wrap:wrap;gap:2px 12px}
+.tk-head{gap:6px}
+html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
+}
+</style>
 </head>
 <body>
 
@@ -377,7 +443,7 @@ select.form-input{cursor:pointer}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.95</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.97</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -417,7 +483,7 @@ select.form-input{cursor:pointer}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.95';
+const TGK_SUPPORT_VERSION = 'v1.97';
 const TGK_SUPPORT_BUILD_DATE = '2026-10-19';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3972,8 +4038,8 @@ function trackerName(email){
 function renderTicketTracker(t){
   if(!t) return '';
   var parts=[];
-  if(t.last_reply_at) parts.push('<span title="Last staff reply">Last reply: '+escapeHtml(trackerName(t.last_reply_by))+' \u00b7 '+timeAgo(t.last_reply_at)+' ago</span>');
-  if(t.last_viewed_at) parts.push('<span title="Last opened by a team member">Last viewed: '+escapeHtml(trackerName(t.last_viewed_by))+' \u00b7 '+timeAgo(t.last_viewed_at)+' ago</span>');
+  if(t.last_reply_at) parts.push('<span title="Last staff reply">Last reply: '+escapeHtml(trackerName(t.last_reply_by))+' \u00b7 '+timeAgo(t.last_reply_at)+'</span>');
+  if(t.last_viewed_at) parts.push('<span title="Last opened by a team member">Last viewed: '+escapeHtml(trackerName(t.last_viewed_by))+' \u00b7 '+timeAgo(t.last_viewed_at)+'</span>');
   if(!parts.length) return '<div class="tk-tracker" id="tkTracker"></div>';
   return '<div class="tk-tracker" id="tkTracker">'+parts.join('<span class="tk-tracker-dot">\u2022</span>')+'</div>';
 }
@@ -7471,5 +7537,42 @@ html body .nav-subdot{width:4px;height:4px;border-radius:50%;background:#565f6d;
 html body .nav-subitem.active .nav-subdot{background:#0d9488}
 html body .nav-item:focus-visible,html body .nav-subitem:focus-visible{outline:2px solid #0d9488;outline-offset:1px}
 </style>
+<script>window.__TGK_MORE={bar:'.topbar-actions',btnClass:'btn',insertBefore:'.topbar-actions>.btn-primary',items:[['Undo','#undoBtn'],['Redo','#redoBtn']]};</script>
+<script>/* ===== phone: "More" sheet and search button ===== */
+(function () {
+  'use strict';
+  var CFG = window.__TGK_MORE || {};
+  function el(sel) { return document.querySelector(sel); }
+  function close() { document.body.classList.remove('tgk-sheet-open'); }
+  function build() {
+    var bar = el(CFG.bar || '.topbar-actions'); if (!bar || el('#tgk-more-btn')) return;
+    var b = document.createElement('button'); b.id = 'tgk-more-btn'; b.type = 'button'; b.className = CFG.btnClass || 'btn btn-sm'; b.setAttribute('aria-label', 'More actions'); b.setAttribute('aria-haspopup', 'dialog');
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
+    var first = CFG.insertBefore ? el(CFG.insertBefore) : null; if (first && first.parentNode === bar) bar.insertBefore(b, first); else bar.appendChild(b);
+    var scrim = document.createElement('div'); scrim.id = 'tgk-sheet-scrim'; document.body.appendChild(scrim);
+    var sh = document.createElement('div'); sh.id = 'tgk-sheet'; sh.setAttribute('role', 'dialog'); sh.setAttribute('aria-label', 'More actions'); document.body.appendChild(sh);
+    scrim.addEventListener('click', close); document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+    b.addEventListener('click', function () {
+      sh.innerHTML = '<h6>More</h6>';
+      (CFG.items || []).forEach(function (it) {
+        var o = el(it[1]); if (!o) return; var r = document.createElement('button'); r.type = 'button'; r.textContent = it[0]; if (o.disabled) r.disabled = true;
+        r.addEventListener('click', function () { close(); setTimeout(function () { o.click(); }, 30); }); sh.appendChild(r);
+      });
+      document.body.classList.add('tgk-sheet-open');
+    });
+  }
+  function searchBtn() {
+    if (!CFG.search || el('#tgk-search-btn')) return; var w = el(CFG.search); var bar = el(CFG.bar || '.topbar-actions'); if (!w || !bar) return;
+    var b = document.createElement('button'); b.id = 'tgk-search-btn'; b.type = 'button'; b.className = CFG.btnClass || 'btn btn-sm'; b.setAttribute('aria-label', 'Search');
+    b.innerHTML = '<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
+    var first = bar.firstChild; bar.insertBefore(b, first);
+    b.addEventListener('click', function () { document.body.classList.add('tgk-search-open'); var i = w.querySelector('input'); if (i) setTimeout(function () { i.focus(); }, 60); });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') document.body.classList.remove('tgk-search-open'); });
+    document.addEventListener('click', function (e) { if (document.body.classList.contains('tgk-search-open') && !w.contains(e.target) && e.target !== b && !b.contains(e.target)) document.body.classList.remove('tgk-search-open'); });
+  }
+  function init() { build(); searchBtn(); setTimeout(function () { build(); searchBtn(); }, 1500); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
 </body>
 </html>
