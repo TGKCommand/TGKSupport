@@ -503,8 +503,8 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.98';
-const TGK_SUPPORT_BUILD_DATE = '2026-10-20';
+const TGK_SUPPORT_VERSION = 'v1.99';
+const TGK_SUPPORT_BUILD_DATE = '2026-10-21';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -746,6 +746,7 @@ async function afterLogin(user){
   goPage('dashboard');
   setupBackButton();
   subscribeRealtime();
+  window._tgkSupportLoaded = true; try{ _tgkAnnounceReady(); }catch(_){} // [v1.99] lets the Command Center open an exact item
 
   try{
     const { data: myRow } = await sb.from('team_members').select('chat_available').ilike('email', user.email).maybeSingle();
@@ -757,6 +758,91 @@ async function afterLogin(user){
     Notification.requestPermission();
   }
 }
+
+/* ============================================================
+   OPEN THE EXACT ITEM FROM A COMMAND CENTER NOTIFICATION (v1.99)
+   Clicking "New ticket ..." (or an email, live chat, warranty claim or shipment error) in the Command Center opens
+   this app and asks it to show that one item. Three ways in, the same as the ERP uses for orders:
+     1. an OPEN_ITEM message from the Command Center (origin checked like the sign-in token)
+     2. an address like https://support.example/?open=tickets:<id> (a cold start; also works as a bookmark)
+     3. a READY announcement once everything has loaded, so the Command Center knows to ask
+   It waits until the app has finished loading, opens the item, then answers ITEM_OPENED so the Command Center stops asking.
+   Tickets and emails open in the side panel (the app already keeps every ACTIVE one in memory; an older one is fetched
+   by its id). Warranty claims and shipment errors have no panel here, so the right list opens with that row highlighted.
+   ============================================================ */
+var _tgkItSeen={},_tgkItWait={},_tgkItLast={key:'',t:0};
+var _TGK_ITEM_KINDS={
+  tickets:{page:'tickets',table:'tickets',list:'tickets',what:'ticket'},
+  livechat:{page:'livechat',table:'tickets',list:'tickets',what:'chat'},
+  orderemails:{page:'orders',table:'emails',list:'emails',what:'email'},
+  supportemails:{page:'emails',table:'emails',list:'emails',what:'email'},
+  warranty:{page:'warranty',table:'warranty_claims',list:'warranty',what:'warranty claim'},
+  shiperrors:{page:'shiperrors',table:'shipment_errors',list:'shipErrors',what:'shipment error'}
+};
+function _tgkSupportReady(){
+  var app=document.getElementById('tgk-app');
+  return !!(window._tgkSupportLoaded && typeof S!=='undefined' && S && S.user && app && app.style.display!=='none');
+}
+function _tgkAnnounceReady(){
+  if(window.parent===window) return;
+  try{ window.parent.postMessage({source:'TGK_SUPPORT',type:'READY',version:TGK_SUPPORT_VERSION,items:true},'https://command.tgkmotorsport.com'); }catch(_){}
+}
+(function(){ try{ var st=document.createElement('style'); st.id='tgk-flash-css';
+  st.textContent='@keyframes tgkFlash{0%,45%{background:rgba(232,115,28,.32)}100%{background:transparent}} tr.tgk-flash>td{animation:tgkFlash 3.2s ease-out} tr.tgk-flash>td:first-child{box-shadow:inset 3px 0 0 #e8731c}';
+  document.head.appendChild(st); }catch(_){} })();
+function _tgkFlashClaim(row,m){
+  var id=String(row.id).replace(/["\\]/g,'');
+  var el=document.querySelector('tr[data-claim-id="'+id+'"]');
+  if(!el){ toast('That '+m.what+' is already '+(row.status||'closed')+' in the ERP, so it is not in the active list.'); return; }
+  try{ el.scrollIntoView({block:'center'}); }catch(_){}
+  el.classList.remove('tgk-flash'); void el.offsetWidth; el.classList.add('tgk-flash');
+}
+async function _tgkShowItem(kind,item){
+  var m=_TGK_ITEM_KINDS[kind]; if(!m||!item) return;
+  var id=String(item), arr=S[m.list]||[];
+  var row=arr.find(function(x){ return String(x.id)===id; });
+  if(!row){ // older than what the app keeps in memory: fetch just this one
+    try{ var r=await sb.from(m.table).select('*').eq('id',item).maybeSingle(); if(r && r.data){ row=r.data; S[m.list]=[row].concat(arr); } }catch(_){}
+  }
+  if(!row){ toast('Could not find that '+m.what+'. It may have been deleted.', true); return; }
+  try{ closePanel(); }catch(_){}
+  if(S.page!==m.page) goPage(m.page);
+  if(m.table==='tickets') await openTicket(row.id);
+  else if(m.table==='emails') await openEmail(row.id);
+  else _tgkFlashClaim(row,m);
+}
+function _tgkOpenItemFromCC(id,it,ev){
+  function ack(){ try{ if(ev && ev.source) ev.source.postMessage({source:'TGK_SUPPORT',type:'ITEM_OPENED',id:id}, ev.origin); }catch(_){} }
+  if(id && _tgkItSeen[id]){ ack(); return; }
+  var kind=String((it && it.kind)||''), item=String((it && it.item)||'').trim().slice(0,80);
+  if(!_TGK_ITEM_KINDS[kind] || !item) return;
+  if(id && _tgkItWait[id]) return;
+  if(id) _tgkItWait[id]=1;
+  var tries=0;
+  (function go(){
+    if(!_tgkSupportReady()){ if(tries++<240) setTimeout(go,500); return; }
+    if(id){ if(_tgkItSeen[id]){ ack(); return; } _tgkItSeen[id]=1; }
+    // the same item asked for twice within a few seconds (the address AND the message on a cold start) is opened once
+    var key=kind+':'+item;
+    if(_tgkItLast.key===key && Date.now()-_tgkItLast.t<8000){ ack(); return; }
+    _tgkItLast={key:key,t:Date.now()};
+    _tgkShowItem(kind,item).then(ack,function(e){ console.warn('[CC] open item failed:',e); toast('Could not open that item: '+((e&&e.message)||e), true); ack(); });
+  })();
+}
+window.addEventListener('message', function(event){
+  if(event.origin!=='https://command.tgkmotorsport.com') return; // only the Command Center, like the sign-in token
+  var d=event.data; if(!d || d.source!=='TGK_CC' || d.type!=='OPEN_ITEM') return;
+  try{ _tgkOpenItemFromCC(d.id,{kind:d.kind,item:d.item,ref:d.ref,label:d.label},event); }catch(e){ console.warn('[CC] open item failed:',e); }
+});
+// an address like https://support.example/?open=tickets:<id> opens that item once the app has loaded, then tidies the address
+try{
+  var _tgkOp=new URLSearchParams(location.search).get('open');
+  if(_tgkOp){
+    var _tgkIx=_tgkOp.indexOf(':');
+    if(_tgkIx>0) _tgkOpenItemFromCC('qo'+Date.now(),{kind:_tgkOp.slice(0,_tgkIx),item:_tgkOp.slice(_tgkIx+1)},null);
+    try{ history.replaceState(history.state,'',location.pathname+location.hash); }catch(_){}
+  }
+}catch(_){}
 
 (async function checkSession(){
   const { data } = await sb.auth.getSession();
@@ -2867,7 +2953,7 @@ function renderWarrantyList(){
       ${active.map(w=>{
         const linkedTicket = S.tickets.find(t=>t.warranty_claim_id===w.id);
         return `
-        <tr>
+        <tr data-claim-id="${escapeHtml(String(w.id))}">
           <td>${w.order_number?'#'+escapeHtml(w.order_number):'—'}</td>
           <td class="pn">${escapeHtml(w.pn||'—')}</td>
           <td><span class="pill ${STATUS_PILL[w.status]||'pill-muted'}">${escapeHtml(w.status||'—')}</span></td>
@@ -2892,7 +2978,7 @@ function renderShipErrorsList(){
       ${active.map(e=>{
         const linkedTicket = S.tickets.find(t=>t.shipment_error_id===e.id);
         return `
-        <tr>
+        <tr data-claim-id="${escapeHtml(String(e.id))}">
           <td>${e.order_number?'#'+escapeHtml(e.order_number):'—'}</td>
           <td class="pn">${escapeHtml(e.expected_pn||'—')}</td>
           <td class="pn">${escapeHtml(e.actual_pn||'—')}</td>
