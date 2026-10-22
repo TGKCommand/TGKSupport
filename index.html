@@ -503,8 +503,8 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v1.99';
-const TGK_SUPPORT_BUILD_DATE = '2026-10-21';
+const TGK_SUPPORT_VERSION = 'v2.00';
+const TGK_SUPPORT_BUILD_DATE = '2026-10-22';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -1132,7 +1132,7 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
   if(!ticket) return;
 
   try{
-    const noteBody = `<span class="ic ic-box"></span>ERP update: ${kind==='warranty'?'Warranty claim':'Shipment error'} marked as shipped`
+    const noteBody = `ERP update: ${kind==='warranty'?'Warranty claim':'Shipment error'} marked as shipped`
       + (newRow.carrier ? ` via ${newRow.carrier}` : '')
       + (newRow.tracking_number ? ` — tracking: ${newRow.tracking_number}` : '')
       + `. Ticket marked resolved automatically — if the customer replies, it'll reopen. (Synced automatically from the ERP.)`;
@@ -3488,7 +3488,7 @@ async function confirmSendToERP(ticketId, kind){
       ticket_id: ticketId,
       sender_type: 'system',
       sender_name: 'System',
-      body: `<span class="ic ic-box"></span>Sent to ERP as a ${kindLabelLower} by ${S.user.email} — the warehouse team will see this in their queue.`,
+      body: `Sent to ERP as a ${kindLabelLower} by ${S.user.email} — the warehouse team will see this in their queue.`,
       is_internal_note: true
     });
     await loadMessages(ticketId);
@@ -4843,9 +4843,17 @@ window.sizeEmailFrame = function(f){
   try{ const d=f.contentDocument||f.contentWindow.document; f.style.height=((d.body?d.body.scrollHeight:0)+18)+'px'; }
   catch(e){ f.style.height='320px'; }
 };
+// Notes saved by earlier versions begin with the icon's markup as plain text (<span class="ic ic-box"></span>). Draw it as the icon it was
+// meant to be. Only that exact, attribute-free tag is turned back into an icon; everything else stays escaped text.
+function restoreNoteIcons(escapedHtml){
+  return String(escapedHtml).replace(/&lt;span class=&quot;ic ic-([a-z0-9-]+)&quot;&gt;&lt;\/span&gt;/g, '<span class="ic ic-$1"></span>');
+}
+function stripLegacyIcons(text){
+  return String(text==null?'':text).replace(/<span class="ic ic-[a-z0-9-]+"><\/span>/g, '');
+}
 function msgBody(m){
   if(m && m.body_html && String(m.body_html).trim()) return emailFrame(stripReplyQuoteHtml(m.body_html));
-  return linkifyBody(stripReplyQuoteText(m ? (m.body||'') : ''));
+  return restoreNoteIcons(linkifyBody(stripReplyQuoteText(m ? (m.body||'') : '')));
 }
 
 function renderThread(msgs, notesOnly){
@@ -4855,7 +4863,7 @@ function renderThread(msgs, notesOnly){
   return threadTranslateBar(needed) + list.map(m=>`
     <div class="msg ${m.is_internal_note?'note':m.sender_type}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.sender_type)}</span><span>·</span><span>${timeAgo(m.created_at)}</span>${m.emailed_at?'<span>·</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Emailed</span>':''}</div>
-      <div id="tmsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(m.body||'')}">${msgBody(m)}</div>
+      <div id="tmsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(stripLegacyIcons(m.body||''))}">${msgBody(m)}</div>
       ${renderAttachments(m.attachments)}
     </div>
   `).join('');
@@ -5141,7 +5149,7 @@ function renderEmailThread(msgs){
     }
     return `<div class="msg ${m.direction==='outbound'?'staff':'customer'}">
       <div class="meta"><span>${escapeHtml(m.sender_name||m.from_email||(m.direction==='outbound'?'TGK Support':'Customer'))}</span><span>\u00b7</span><span>${timeAgo(m.created_at)}</span>${m.direction==='outbound'?'<span>\u00b7</span><span style="color:var(--teal)"><span class="ic ic-mail"></span>Sent</span>':''}</div>
-      <div id="emsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(m.body||'')}">${msgBody(m)}</div>
+      <div id="emsg_${m.id}" class="xl-body" data-xltext="${escapeHtml(stripLegacyIcons(m.body||''))}">${msgBody(m)}</div>
       ${renderAttachments(m.attachments)}
     </div>`;
   }).join('');
