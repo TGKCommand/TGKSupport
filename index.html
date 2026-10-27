@@ -1627,12 +1627,18 @@ async function rebateSend(id){
   if(!confirm(msg)) return;
   st.busy = true; rebateSyncBtn(id);
   try{
-    const resp = await fetch(`${SUPABASE_URL}/functions/v1/process-shopify-refund`, {
-      method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY },
-      body: JSON.stringify({ ticket_id:id, ticket_number:t.ticket_number, shopify_order_id:orderId, line_items:[], refund_amount:amount, restocking_fee:0, reason:'5% Facebook review rebate' })
-    });
+    const sess = await sb.auth.getSession();
+    const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    if(!tok) throw new Error('Your sign-in expired. Sign in again, then retry.');
+    let resp;
+    try{
+      resp = await fetch(`${SUPABASE_URL}/functions/v1/process-shopify-refund`, {
+        method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + tok, 'apikey':SUPABASE_ANON_KEY },
+        body: JSON.stringify({ ticket_id:id, ticket_number:t.ticket_number, shopify_order_id:orderId, line_items:[], refund_amount:amount, restocking_fee:0, reason:'5% Facebook review rebate' })
+      });
+    }catch(netErr){ throw new Error('Could not reach the refund service. Check order #' + t.order_number + ' in Shopify for a refund before trying again.'); }
     const result = await resp.json().catch(()=>({}));
-    if(!resp.ok) throw new Error(result.error || 'Refund failed');
+    if(!resp.ok || result.ok === false) throw new Error(result.error || 'Refund failed');
     st.sentLocal = amount;            // the money has moved: lock this ticket for good, whatever happens next
   }catch(e){
     st.busy = false; rebateSyncBtn(id);
@@ -6720,9 +6726,12 @@ async function submitRefund(ticketId){
     const rows = await findSalesByOrderNumber(t.order_number);
     const shopifyOrderId = rows[0]?.shopify_order_id;
 
+    const sess = await sb.auth.getSession();
+    const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+    if(!tok) throw new Error('Your sign-in expired. Sign in again, then retry.');
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/process-shopify-refund`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'apikey': SUPABASE_ANON_KEY },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + tok, 'apikey': SUPABASE_ANON_KEY },
       body: JSON.stringify({
         ticket_id: ticketId,
         ticket_number: t.ticket_number,
@@ -6733,8 +6742,8 @@ async function submitRefund(ticketId){
         reason
       })
     });
-    const result = await resp.json();
-    if(!resp.ok) throw new Error(result.error || 'Refund failed');
+    const result = await resp.json().catch(()=>({}));
+    if(!resp.ok || result.ok === false) throw new Error(result.error || 'Refund failed');
 
     const { data: updated } = await sb.from('tickets').select('*').eq('id', ticketId).single();
     if(updated){
