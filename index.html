@@ -463,7 +463,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v2.06</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v2.07</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.06';
+const TGK_SUPPORT_VERSION = 'v2.07';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -3464,7 +3464,7 @@ async function convertToTicket(kind, recordId){
   const subject = kind==='warranty'
     ? `Warranty claim — order #${record.order_number||'?'} / ${recordPn||'?'}`
     : `Shipment error — order #${record.order_number||'?'} / ${recordPn||'?'}`;
-  const payload = {
+  const basic = {
     source: kind==='warranty' ? 'warranty' : 'shipment_error',
     status: 'open',
     priority: 'medium',
@@ -3474,10 +3474,31 @@ async function convertToTicket(kind, recordId){
     warranty_claim_id: kind==='warranty' ? record.id : null,
     shipment_error_id: kind==='shipment_error' ? record.id : null,
   };
+  // Carry over everything the claim already knows, so the ticket opens filled in.
+  const sd = record.shipping_details || {};
+  const full = Object.assign({}, basic, {
+    customer_name: record.customer_name || null,
+    customer_email: record.customer_email || null,
+    category: kind==='warranty' ? 'Warranty' : 'Shipment Error',
+    description: (kind==='warranty' ? record.issue : record.notes) || null
+  });
+  if(sd.street1) full.shipping_address = { name: sd.name||'', street1: sd.street1, street2: sd.street2||'', city: sd.city||'', state: sd.state||'', postal_code: sd.postal_code||'', country: sd.country||'US' };
   try{
-    const { data, error } = await sb.from('tickets').insert(payload).select().single();
-    if(error) throw error;
+    let res = await sb.from('tickets').insert(full).select().single();
+    if(res.error){ res = await sb.from('tickets').insert(basic).select().single(); } // never fail just because of an extra field
+    if(res.error) throw res.error;
+    const data = res.data;
     S.tickets.unshift(data);
+    try{
+      const lines = claimDetailText(record, kind==='warranty' ? 'warranty' : 'shiperror');
+      const body = ((kind==='warranty' ? record.issue : record.notes) || '').trim();
+      await sb.from('ticket_messages').insert({
+        ticket_id: data.id, sender_type: 'system', sender_name: 'System',
+        body: 'Ticket created from an ERP ' + (kind==='warranty' ? 'warranty claim' : 'shipment error') + '. ' + lines.join('. ') + '.' + (body ? '\n\nIssue: ' + body : ''),
+        is_internal_note: true
+      });
+    }catch(_){}
+    closeModal();
     toast('Ticket #' + data.ticket_number + ' created');
     goPage('tickets');
     openTicket(data.id);
@@ -3564,6 +3585,7 @@ function renderWarrantyItemsRows(){
       </select>
       <input class="form-input" style="flex:0 0 56px" type="number" min="1" placeholder="Qty" value="${item.qty||1}" oninput="warrantyClaimItems[${i}].qty=parseInt(this.value,10)||1">
       <input class="form-input" style="flex:3" placeholder="Description (optional)" value="${escapeHtml(item.description||'')}" oninput="warrantyClaimItems[${i}].description=this.value">
+      <label style="flex:0 0 auto;display:flex;align-items:center;gap:4px;font-size:var(--t-xs);color:var(--text3);white-space:nowrap" title="The customer's own unit: ships out but does not use stock"><input type="checkbox" ${item.own_unit?'checked':''} onchange="warrantyClaimItems[${i}].own_unit=this.checked; warrantyClaimItems[${i}].ownManual=true">Own unit</label>
       ${warrantyClaimItems.length > 1 ? `<button type="button" class="btn btn-sm" style="color:var(--red);flex:0 0 auto" onclick="removeWarrantyItem(${i})"><span class="ic ic-x"></span></button>` : ''}
     </div>
   `).join('');
@@ -3581,136 +3603,146 @@ function removeWarrantyItem(i){
 }
 window.removeWarrantyItem = removeWarrantyItem;
 
+/* ============================================================
+   ONE CLAIM FORM (v2.07): replacement, repair, shipment error, refund only.
+   Same form for every type; steps only show when they apply. Items ticked "Own unit" are the
+   customer's own product going back out (a repair): the warehouse ships them without using stock.
+   ============================================================ */
+var CLAIM_TYPES = [
+  { key:'replacement', label:'Replacement' },
+  { key:'repair',      label:'Repair' },
+  { key:'shiperror',   label:'Shipment error' },
+  { key:'refund',      label:'Refund only' }
+];
+var CLAIM_SERVICES = ['', 'UPS Ground', 'UPS 2nd Day Air', 'UPS Next Day Air', 'UPS Worldwide Expedited', 'USPS Priority Mail', 'FedEx Ground'];
+var claimDraft = { type:'replacement', ticketId:null, ticketPn:'' };
+function claimIsIntl(c){ var u = String(c == null ? 'US' : c).trim().toUpperCase(); return !(u === '' || u === 'US' || u === 'USA' || u === 'UNITED STATES'); }
+function claimServiceOptions(sel, country){
+  var def = sel || (claimIsIntl(country) ? 'UPS Worldwide Expedited' : '');
+  return CLAIM_SERVICES.map(function(x){
+    return '<option value="' + escapeHtml(x) + '"' + (x === def ? ' selected' : '') + '>' + (x ? escapeHtml(x) : 'Warehouse picks in ShipStation') + '</option>';
+  }).join('');
+}
+function claimCountryChanged(){
+  var c = document.getElementById('clCountry'), sv = document.getElementById('clService');
+  if(!c || !sv) return;
+  if(claimIsIntl(c.value) && !sv.value) sv.value = 'UPS Worldwide Expedited';
+  else if(!claimIsIntl(c.value) && sv.value === 'UPS Worldwide Expedited') sv.value = '';
+}
+function setClaimType(type){
+  claimDraft.type = type;
+  document.querySelectorAll('#claimTypes button').forEach(function(b){ b.classList.toggle('btn-teal', b.getAttribute('data-t') === type); });
+  document.querySelectorAll('[data-claim-for]').forEach(function(el){
+    el.style.display = el.getAttribute('data-claim-for').split(' ').indexOf(type) > -1 ? '' : 'none';
+  });
+  // A repair sends the customer's own unit back: tick it on the first line unless staff already chose.
+  var it = warrantyClaimItems[0];
+  if(it && it.pn && it.pn === claimDraft.ticketPn && !it.ownManual) it.own_unit = (type === 'repair');
+  var c = document.getElementById('warrantyItemsContainer'); if(c) c.innerHTML = renderWarrantyItemsRows();
+  var none = document.getElementById('claimInNone'); if(none) none.style.display = (type === 'repair') ? 'none' : '';
+  if(type === 'repair'){
+    var ch = document.querySelector('input[name=claimIn]:checked');
+    if(ch && ch.value === 'none'){ var f = document.querySelector('input[name=claimIn][value=ships]'); if(f) f.checked = true; }
+  }
+  var inl = document.getElementById('claimInLabel');
+  if(inl) inl.textContent = (type === 'repair') ? 'Coming to us' : 'Does the old part come back?';
+}
+window.setClaimType = setClaimType;
+window.claimCountryChanged = claimCountryChanged;
+
 function openSendToERPModal(ticketId, kind){
   const t = S.tickets.find(x=>x.id===ticketId);
   if(!t){ toast('Ticket not found', true); return; }
-  if(!t.order_number){ toast('Add an order number to this ticket first', true); return; }
-  if(!t.pn){ toast('Add a part number to this ticket first — use the order lookup to pick one', true); return; }
+  var map = { warranty:'replacement', shipment_error:'shiperror' };
+  var type = map[kind] || kind || ((t.category === 'Shipment Error') ? 'shiperror' : 'replacement');
+  if(['replacement','repair','shiperror','refund'].indexOf(type) === -1) type = 'replacement';
 
   const msgs = (S.messages[ticketId]||[]).filter(m=>!m.is_internal_note);
   const latest = msgs.length ? msgs[msgs.length-1].body : '';
   const defaultNotes = [t.subject, latest || t.description].filter(Boolean).join('\n\n');
-  const kindLabel = kind==='warranty' ? 'Warranty Claim' : 'Shipment Error';
-
-  // warranty_claims: id, created_at, pn, order_number, customer_name, customer_email,
-  //   issue, status, resolution, resolved_at, notes, resolution_type, shipping_details,
-  //   ss_order_id, claim_items, tracking_number, carrier, shipped_at, claim_cost
-  if(kind === 'warranty'){
-    warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '', type: 'part' }];
-  } else {
-    shipErrorItems = [{ pn: t.pn || '', qty: 1, description: '' }];
-  }
-  const warrantyFields = `
-    <div class="form-group" style="margin-bottom:8px">
-      <label class="form-label">Parts On This Claim</label>
-      <div id="warrantyItemsContainer">${renderWarrantyItemsRows()}</div>
-      <button type="button" class="btn btn-sm" style="margin-top:6px" onclick="addWarrantyItem()">+ Add Another Part</button>
-    </div>
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Issue</label><textarea class="form-input" id="erpIssue" rows="4" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Status</label>
-        <select class="form-input" id="erpStatus">
-          <option value="Open" selected>Open</option>
-          <option value="Resolved">Resolved</option>
-          <option value="Closed">Closed</option>
-          <option value="Denied">Denied</option>
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Resolution Type <span style="color:var(--red)">*</span></label>
-        <select class="form-input" id="erpResolutionType" onchange="toggleResTypeOther(this,'erpResolutionTypeOther')">
-          <option value="" disabled selected>Select resolution type</option>
-          <option value="replacement">Replacement</option>
-          <option value="refund">Refund</option>
-          <option value="repair">Repair</option>
-          <option value="denied">Denied</option>
-          <option value="other">Other</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group" id="erpResolutionTypeOtherWrap" style="display:none;margin-bottom:12px"><label class="form-label">Specify Resolution Type <span style="color:var(--red)">*</span></label><input class="form-input" id="erpResolutionTypeOther" placeholder="Describe the resolution"></div>
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Notes (optional)</label><input class="form-input" id="erpResolution" placeholder="What was decided, if known yet"></div>
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
-      <div class="form-group"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
-    </div>
-    <div class="form-group" style="margin-bottom:4px"><label class="form-label">Carrier (optional)</label><input class="form-input" id="erpCarrier" placeholder="e.g. UPS, FedEx"></div>
-  `;
-
-  // shipment_errors: id, created_at, updated_at, order_number, customer_name, customer_email,
-  //   error_type, expected_pn, expected_qty, actual_pn, actual_qty, resolution, notes, status,
-  //   ss_order_id, resolved_at, tracking_number, carrier, shipped_at, claim_cost,
-  //   return_tracking, return_received_at
-  const shipErrorFields = `
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Error Type</label>
-        <select class="form-input" id="erpErrorType">
-          <option value="Wrong Item">Wrong Item</option>
-          <option value="Wrong Qty">Wrong Qty</option>
-          <option value="Missing">Missing</option>
-          <option value="Damaged">Damaged</option>
-          <option value="Other">Other</option>
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Status</label>
-        <select class="form-input" id="erpStatus">
-          <option value="Open" selected>Open</option>
-          <option value="Reshipping">Reshipping</option>
-          <option value="Resolved">Resolved</option>
-          <option value="Denied">Denied</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-group" style="margin-bottom:8px">
-      <label class="form-label">Parts &amp; Quantities Needed to Correct This</label>
-      <div id="shipErrorItemsContainer">${renderShipErrorItemsRows()}</div>
-      <button type="button" class="btn btn-sm" style="margin-top:6px" onclick="addShipErrorItem()">+ Add Another Part</button>
-    </div>
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Actual Part Number (if wrong item)</label><input class="form-input" id="erpActualPn" placeholder="What actually shipped"></div>
-      <div class="form-group"><label class="form-label">Actual Qty</label><input class="form-input" id="erpActualQty" type="number" min="0"></div>
-    </div>
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Notes</label><textarea class="form-input" id="erpNotes" rows="3" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
-    <div class="form-group" style="margin-bottom:12px"><label class="form-label">Resolution Type <span style="color:var(--red)">*</span></label>
-      <select class="form-input" id="erpResolution" onchange="toggleResTypeOther(this,'erpResolutionOther')">
-        <option value="" disabled selected>Select resolution type</option>
-        <option value="Reship">Reship</option>
-        <option value="Refund">Refund</option>
-        <option value="Replacement">Replacement</option>
-        <option value="Return &amp; Refund">Return &amp; Refund</option>
-        <option value="Partial Refund">Partial Refund</option>
-        <option value="Denied">Denied</option>
-        <option value="Other">Other</option>
-      </select>
-    </div>
-    <div class="form-group" id="erpResolutionOtherWrap" style="display:none;margin-bottom:12px"><label class="form-label">Specify Resolution <span style="color:var(--red)">*</span></label><input class="form-input" id="erpResolutionOther" placeholder="Describe the resolution"></div>
-    <div class="form-row cols-2">
-      <div class="form-group"><label class="form-label">Claim Cost (optional)</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
-      <div class="form-group"><label class="form-label">Tracking Number (optional)</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
-    </div>
-    <div class="form-group" style="margin-bottom:4px"><label class="form-label">Carrier (optional)</label><input class="form-input" id="erpCarrier" placeholder="e.g. UPS, FedEx"></div>
-  `;
-
+  claimDraft = { type:type, ticketId:ticketId, ticketPn:t.pn || '' };
+  warrantyClaimItems = [{ pn: t.pn || '', qty: 1, description: '', type: 'part', own_unit: false }];
+  const sa = t.shipping_address || {};
+  const inp = (id, label, val, extra) => '<div class="form-group"><label class="form-label">' + label + '</label><input class="form-input" id="' + id + '" value="' + escapeHtml(val || '') + '" ' + (extra || '') + '></div>';
+  const stepNum = (n, title, idAttr) => '<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="width:20px;height:20px;border-radius:50%;background:var(--teal-dim);color:var(--teal);font-size:var(--t-xs);font-weight:700;display:flex;align-items:center;justify-content:center">' + n + '</span><span ' + (idAttr ? 'id="' + idAttr + '" ' : '') + 'style="font-weight:600;font-size:var(--t-md)">' + title + '</span></div>';
   const ov = document.getElementById('modalOverlay');
   ov.classList.remove('hidden');
   ov.innerHTML = `
-    <div class="modal">
-      <div class="modal-title">Review Before Sending — ${kindLabel}</div>
-      <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:14px">This creates a real row in the ERP's ${kind==='warranty'?'warranty_claims':'shipment_errors'} table. Review everything below.</div>
-      <div class="form-row cols-2">
-        <div class="form-group"><label class="form-label">Order Number</label><input class="form-input" id="erpOrder" value="${escapeHtml(t.order_number)}"></div>
-        <div class="form-group"><label class="form-label">Customer Name</label><input class="form-input" id="erpCustomer" value="${escapeHtml(t.customer_name||'')}"></div>
+    <div class="modal" style="width:680px;max-width:96vw">
+      <div class="modal-title">Create Claim</div>
+      <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">One form for every type. It creates a real record in the ERP queue, so review everything before sending.</div>
+      <div id="claimTypes" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px">
+        ${CLAIM_TYPES.map(c => '<button type="button" class="btn btn-sm' + (c.key === type ? ' btn-teal' : '') + '" data-t="' + c.key + '" onclick="setClaimType(\'' + c.key + '\')">' + c.label + '</button>').join('')}
       </div>
-      ${kind==='shipment_error' ? `<div class="form-group" style="margin-bottom:12px"><label class="form-label">Customer Email</label><input class="form-input" id="erpCustomerEmail" value="${escapeHtml(t.customer_email||'')}"></div>` : ''}
-      ${kind==='warranty' ? warrantyFields : shipErrorFields}
+
+      ${stepNum(1, 'What happened')}
+      <div class="form-row cols-2">
+        ${inp('erpOrder', 'Order Number', t.order_number || '')}
+        ${inp('erpCustomer', 'Customer Name', t.customer_name || '')}
+      </div>
+      <div class="form-group" style="margin-bottom:10px"><label class="form-label">Customer Email</label><input class="form-input" id="erpCustomerEmail" value="${escapeHtml(t.customer_email || '')}"></div>
+      <div data-claim-for="shiperror" style="display:none">
+        <div class="form-row cols-2">
+          <div class="form-group"><label class="form-label">Error Type</label>
+            <select class="form-input" id="erpErrorType"><option value="Wrong Item">Wrong Item</option><option value="Wrong Qty">Wrong Qty</option><option value="Missing">Missing</option><option value="Damaged">Damaged</option><option value="Other">Other</option></select></div>
+          <div class="form-group"><label class="form-label">Actual Part Shipped (if wrong item)</label><input class="form-input" id="erpActualPn" placeholder="What actually shipped"></div>
+        </div>
+        <div class="form-group" style="max-width:50%"><label class="form-label">Actual Qty</label><input class="form-input" id="erpActualQty" type="number" min="0"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:6px"><label class="form-label">Issue</label><textarea class="form-input" id="erpIssue" rows="3" style="resize:vertical">${escapeHtml(defaultNotes)}</textarea></div>
+
+      <div data-claim-for="replacement repair shiperror">
+        ${stepNum(2, 'Does the old part come back?', 'claimInLabel')}
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:var(--t-md)">
+          <label><input type="radio" name="claimIn" value="ships" checked> Customer ships it to us</label>
+          <label><input type="radio" name="claimIn" value="here"> Already here</label>
+          <label id="claimInNone"><input type="radio" name="claimIn" value="none"> Not needed back</label>
+        </div>
+        <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Make the return label from the Return Label box on this ticket.</div>
+
+        ${stepNum(3, 'Going out')}
+        <div id="warrantyItemsContainer">${renderWarrantyItemsRows()}</div>
+        <button type="button" class="btn btn-sm" style="margin-top:4px" onclick="addWarrantyItem()">+ Add item to ship with it</button>
+
+        ${stepNum(4, 'Ship to')}
+        <div class="form-row cols-2">
+          ${inp('clName', 'Name', sa.name || t.customer_name || '')}
+          ${inp('clStreet1', 'Address', sa.street1 || '')}
+        </div>
+        <div class="form-row cols-2">
+          ${inp('clStreet2', 'Address line 2', sa.street2 || '')}
+          ${inp('clCity', 'City', sa.city || '')}
+        </div>
+        <div class="form-row cols-3">
+          ${inp('clState', 'State', sa.state || '')}
+          ${inp('clZip', 'ZIP', sa.postal_code || '')}
+          ${inp('clCountry', 'Country', sa.country || 'US', 'oninput="claimCountryChanged()"')}
+        </div>
+        <div class="form-group"><label class="form-label">Shipping Service</label>
+          <select class="form-input" id="clService">${claimServiceOptions('', sa.country || 'US')}</select>
+          <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Goes on the ShipStation order as the requested service.</div></div>
+      </div>
+      <div data-claim-for="refund" style="display:none">
+        ${stepNum(2, 'Refund')}
+        <div style="font-size:var(--t-sm);color:var(--text3)">No shipping steps for this type. This records the claim for the warehouse team. Issue the refund from the Refund box on this ticket.</div>
+      </div>
+
+      <div style="margin-top:14px;font-size:var(--t-xs);color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:700">Already handled or has a cost? (optional)</div>
+      <div class="form-row cols-3" style="margin-top:6px">
+        <div class="form-group"><label class="form-label">Status</label>
+          <select class="form-input" id="erpStatus"><option value="Open" selected>Open</option><option value="Resolved">Resolved</option><option value="Denied">Denied</option></select></div>
+        <div class="form-group"><label class="form-label">Claim Cost</label><input class="form-input" id="erpClaimCost" type="number" step="0.01" min="0" placeholder="0.00"></div>
+        <div class="form-group"><label class="form-label">Tracking Number</label><input class="form-input" id="erpTracking" placeholder="If already known"></div>
+      </div>
+      <div class="form-group" style="margin-bottom:4px"><label class="form-label">Carrier</label><input class="form-input" id="erpCarrier" placeholder="e.g. UPS, FedEx"></div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="confirmSendToERP('${ticketId}','${kind}')">Create ${kindLabel}</button>
+        <button class="btn btn-primary" id="claimSubmitBtn" onclick="confirmSendToERP('${ticketId}')">Create Claim</button>
       </div>
     </div>
   `;
-  if(kind === 'warranty'){
-    warrantyClaimItems.forEach((it, i)=>{ if(it.pn) detectWarrantyItemType(i); });
-  }
+  setClaimType(type);
+  warrantyClaimItems.forEach((it, i)=>{ if(it.pn) detectWarrantyItemType(i); });
 }
 window.openSendToERPModal = openSendToERPModal;
 
@@ -3765,99 +3797,120 @@ async function resendToERP(ticketId, kind){
   openSendToERPModal(ticketId, kind);
 }
 
-async function confirmSendToERP(ticketId, kind){
-  const table = kind==='warranty' ? 'warranty_claims' : 'shipment_errors';
+function claimDetailText(rec, kind){
+  if(!rec) return [];
+  var sd = rec.shipping_details || {};
+  var typeLbl = kind === 'warranty'
+    ? ({ replacement:'Replacement', repair:'Repair', refund:'Refund only' }[String(rec.resolution_type || '').toLowerCase()] || 'Warranty claim')
+    : 'Shipment error';
+  var items = kind === 'warranty' ? rec.claim_items : rec.line_items;
+  var itemTxt = (Array.isArray(items) && items.length) ? items.map(function(i){ return i.pn + ' x' + (i.qty || 1) + (i.own_unit ? ' (own unit)' : ''); }).join(', ') : '';
+  var inb = { ships:'customer ships it to us', here:'already here', none:'not needed back' }[sd.inbound] || '';
+  var lines = ['Type: ' + typeLbl];
+  if(itemTxt) lines.push('Going out: ' + itemTxt);
+  if(sd.street1) lines.push('Ship to: ' + [sd.city, sd.state].filter(Boolean).join(', ') + (sd.service ? ' via ' + sd.service : ''));
+  if(inb) lines.push('Old part: ' + inb);
+  return lines;
+}
+function claimDetailHtml(rec, kind){
+  var lines = claimDetailText(rec, kind);
+  if(!lines.length) return '';
+  return '<div style="font-size:var(--t-sm);color:var(--text2);margin-top:6px;line-height:1.6">' + lines.map(escapeHtml).join('<br>') + '</div>';
+}
+
+async function confirmSendToERP(ticketId){
+  const type = claimDraft.type;
+  const t = S.tickets.find(x=>x.id===ticketId);
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const ships = (type !== 'refund');
+  const issue = val('erpIssue');
+  const validItems = warrantyClaimItems.filter(i=>i.pn && i.pn.trim()).map(i=>({
+    pn: i.pn.trim(), type: i.type || 'part', qty: i.qty || 1, description: i.description || '', own_unit: !!i.own_unit
+  }));
+  if(!issue){ toast('Describe the issue first', true); return; }
+  if(ships && !validItems.length){ toast('Add at least one part to send', true); return; }
 
-  let payload;
-  if(kind==='warranty'){
-    const t = S.tickets.find(x=>x.id===ticketId);
-    const validItems = warrantyClaimItems.filter(i=>i.pn && i.pn.trim());
-    const primaryPn = validItems.length ? validItems[0].pn.trim() : '';
-    // Each line carries its own type (part / assembly / finished_good) chosen in the form -- auto-detected
-    // from parts/assemblies and overridable by staff. Finished goods are included so Support can send the
-    // warehouse anything a customer needs. This is exactly what the ERP's ship logic reads.
-    const __resTypeSel = val('erpResolutionType');
-    const __resType = __resTypeSel === 'other' ? val('erpResolutionTypeOther') : __resTypeSel;
-    payload = {
-      order_number: val('erpOrder'),
-      pn: primaryPn,
-      claim_items: validItems.length ? validItems.map(i=>({ pn: i.pn.trim(), type: i.type || 'part', qty: i.qty||1, description: i.description||'' })) : null,
-      customer_name: val('erpCustomer') || null,
-      issue: val('erpIssue') || null,
-      status: val('erpStatus'),
-      resolution_type: __resType || null,
-      resolution: val('erpResolution') || null,
-      claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null,
-      tracking_number: val('erpTracking') || null,
-      carrier: val('erpCarrier') || null,
-      shipping_details: (t && t.shipping_address && Object.values(t.shipping_address).some(v=>v)) ? t.shipping_address : null
-    };
-    if(!payload.order_number || !payload.pn){ toast('Order number and at least one part number are required', true); return; }
-    if(!__resType){ toast(__resTypeSel === 'other' ? 'Please describe the resolution type' : 'Resolution type is required', true); return; }
-  } else {
-    const t = S.tickets.find(x=>x.id===ticketId);
-    const __resSel = val('erpResolution');
-    const __resVal = __resSel.toLowerCase() === 'other' ? val('erpResolutionOther') : __resSel;
-    // The exact parts and quantities needed to correct this - decided here, not in the ERP.
-    // expected_pn/expected_qty stay populated from the FIRST line for every existing dashboard,
-    // export and list view that reads those two columns directly; line_items carries the full
-    // list, which is what the ERP's ship flow and inventory deduction actually use.
-    const validShipItems = shipErrorItems.filter(i=>i.pn && i.pn.trim());
-    const primaryItem = validShipItems[0] || null;
-    payload = {
-      order_number: val('erpOrder'),
-      customer_name: val('erpCustomer') || null,
-      customer_email: val('erpCustomerEmail') || null,
-      error_type: val('erpErrorType'),
-      expected_pn: primaryItem ? primaryItem.pn.trim() : null,
-      expected_qty: primaryItem ? (primaryItem.qty||1) : null,
-      line_items: validShipItems.length ? validShipItems.map(i=>({ pn: i.pn.trim(), qty: i.qty||1, description: i.description||'' })) : null,
-      actual_pn: val('erpActualPn') || null,
-      resolution: __resVal || null,
-      notes: val('erpNotes') || null,
-      status: val('erpStatus'),
-      tracking_number: val('erpTracking') || null,
-      carrier: val('erpCarrier') || null,
-      claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null,
-      shipping_details: (t && t.shipping_address && Object.values(t.shipping_address).some(v=>v)) ? t.shipping_address : null
-    };
-    const actQty = val('erpActualQty');
-    if(actQty) payload.actual_qty = parseInt(actQty, 10);
-    if(!payload.order_number || !primaryItem){ toast('Order number and at least one part number are required', true); return; }
-    if(!__resVal){ toast(__resSel.toLowerCase() === 'other' ? 'Please describe the resolution' : 'Resolution type is required', true); return; }
+  const addr = { name: val('clName'), street1: val('clStreet1'), street2: val('clStreet2'), city: val('clCity'), state: val('clState'), postal_code: val('clZip'), country: val('clCountry') || 'US' };
+  let shipping_details = null;
+  if(ships){
+    if(!addr.street1 || !addr.city || !addr.postal_code){ toast('Street address, city and ZIP are required', true); return; }
+    const chosen = document.querySelector('input[name=claimIn]:checked');
+    shipping_details = Object.assign({}, addr, { inbound: chosen ? chosen.value : 'ships', service: val('clService') || null });
   }
-
+  const common = {
+    order_number: val('erpOrder'),
+    customer_name: val('erpCustomer') || null,
+    customer_email: val('erpCustomerEmail') || null,
+    status: val('erpStatus') || 'Open',
+    claim_cost: val('erpClaimCost') ? parseFloat(val('erpClaimCost')) : null,
+    tracking_number: val('erpTracking') || null,
+    carrier: val('erpCarrier') || null,
+    shipping_details: shipping_details
+  };
+  let table, payload;
+  if(type === 'shiperror'){
+    table = 'shipment_errors';
+    const first = validItems[0];
+    payload = Object.assign({}, common, {
+      error_type: val('erpErrorType'),
+      expected_pn: first.pn, expected_qty: first.qty,
+      line_items: validItems,
+      actual_pn: val('erpActualPn') || null,
+      resolution: 'Reship',
+      notes: issue
+    });
+    const aq = val('erpActualQty'); if(aq) payload.actual_qty = parseInt(aq, 10);
+  } else {
+    table = 'warranty_claims';
+    const primaryPn = validItems.length ? validItems[0].pn : ((t && t.pn) || '');
+    if(!primaryPn){ toast('Add the part this claim is about', true); return; }
+    payload = Object.assign({}, common, {
+      pn: primaryPn,
+      claim_items: (ships && validItems.length) ? validItems : null,
+      issue: issue,
+      resolution_type: type
+    });
+  }
+  const typeLabel = (CLAIM_TYPES.filter(c=>c.key===type)[0] || {}).label || 'Claim';
+  const btn = document.getElementById('claimSubmitBtn'); if(btn){ btn.disabled = true; btn.textContent = 'Creating...'; }
   try{
     const { data, error } = await sb.from(table).insert(payload).select().single();
     if(error) throw error;
-    if(kind==='warranty'){ S.warranty.unshift(data); } else { S.shipErrors.unshift(data); }
+    if(table === 'warranty_claims'){ S.warranty.unshift(data); } else { S.shipErrors.unshift(data); }
 
-    const linkPatch = kind==='warranty'
+    const linkPatch = (table === 'warranty_claims')
       ? { warranty_claim_id: data.id, updated_at: new Date().toISOString() }
       : { shipment_error_id: data.id, updated_at: new Date().toISOString() };
+    const ck = String((t && t.category) || '').trim().toLowerCase();
+    if(tkGenericCat(ck)) linkPatch.category = (type === 'shiperror') ? 'Shipment Error' : 'Warranty';
+    if(ships) linkPatch.shipping_address = addr;
+    if(t && !t.customer_name && common.customer_name) linkPatch.customer_name = common.customer_name;
+    if(t && !t.customer_email && common.customer_email) linkPatch.customer_email = common.customer_email;
+    if(t && !t.order_number && common.order_number) linkPatch.order_number = common.order_number;
     const { data: updated, error: updErr } = await sb.from('tickets').update(linkPatch).eq('id', ticketId).select().single();
     if(updErr) throw updErr;
     const idx = S.tickets.findIndex(x=>x.id===ticketId);
     if(idx!==-1) S.tickets[idx] = updated;
     S.activeTicket = updated;
 
-    const kindLabelLower = kind==='warranty' ? 'warranty claim' : 'shipment error';
     await sb.from('ticket_messages').insert({
       ticket_id: ticketId,
       sender_type: 'system',
       sender_name: 'System',
-      body: `Sent to ERP as a ${kindLabelLower} by ${S.user.email} — the warehouse team will see this in their queue.`,
+      body: 'Sent to ERP as a ' + typeLabel.toLowerCase() + ' by ' + S.user.email + '. ' + claimDetailText(data, table === 'warranty_claims' ? 'warranty' : 'shiperror').join('. ') + '. The warehouse team will see it in their queue.',
       is_internal_note: true
     });
     await loadMessages(ticketId);
 
     closeModal();
-    toast((kind==='warranty'?'Warranty claim':'Shipment error') + ' created in the ERP — warehouse will see it in their queue');
+    toast(typeLabel + ' created in the ERP - warehouse will see it in their queue');
     renderNav();
     renderTicketPanel(updated);
+    var _ov = document.getElementById('tk-overlay'), _pn = document.getElementById('tk-panel');
+    if(_ov) _ov.classList.add('open'); if(_pn) _pn.classList.add('open');
   }catch(e){
-    toast('Failed to send to ERP: ' + e.message, true);
+    if(btn){ btn.disabled = false; btn.textContent = 'Create Claim'; }
+    toast('Failed to send to ERP: ' + (e.message || e), true);
   }
 }
 window.confirmSendToERP = confirmSendToERP;
@@ -4921,19 +4974,18 @@ function renderTicketPanel(t){
       ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim <button class="btn btn-sm" onclick="resendToERP('${t.id}','warranty')" style="float:right;font-size:var(--t-xs);padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(warranty.status||'—')} · Cost: ${warranty.claim_cost?'$'+Number(warranty.claim_cost).toFixed(2):'—'}
         ${warranty.tracking_number?' · Tracking: '+escapeHtml(warranty.tracking_number):''}
+        ${claimDetailHtml(warranty,'warranty')}
       </div>` : ''}
       ${shipErr ? `<div class="linked-box"><div class="lk-title">Linked Shipment Error <button class="btn btn-sm" onclick="resendToERP('${t.id}','shipment_error')" style="float:right;font-size:var(--t-xs);padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(shipErr.status||'—')} · Cost: ${shipErr.claim_cost?'$'+Number(shipErr.claim_cost).toFixed(2):'—'}
         ${shipErr.return_tracking?' · Return Tracking: '+escapeHtml(shipErr.return_tracking):''}
+        ${claimDetailHtml(shipErr,'shiperror')}
       </div>` : ''}
       ${(!warranty && !shipErr) ? `
       <div class="linked-box">
-        <div class="lk-title">Send to ERP for Shipping</div>
-        <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:8px">Creates a record in the ERP's warranty/shipment-error queue so the warehouse can ship a replacement. Requires an order number and a part number${!t.pn ? ' — use the order lookup above to pick one' : ''}.</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','warranty')" ${!t.pn?'disabled':''}>Create Warranty Claim</button>
-          <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}','shipment_error')" ${!t.pn?'disabled':''}>Log Shipment Error</button>
-        </div>
+        <div class="lk-title">Create claim for the warehouse</div>
+        <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:8px">One form for a replacement, repair, shipment error or refund. It goes to the ERP queue so the warehouse can ship it.</div>
+        <button class="btn btn-sm btn-teal" onclick="openSendToERPModal('${t.id}')">Create claim</button>
       </div>` : ''}
       <div class="linked-box">
         <div class="lk-title">Return Label</div>
