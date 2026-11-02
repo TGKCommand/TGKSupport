@@ -463,7 +463,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v1.98</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v2.02</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -503,8 +503,8 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.01';
-const TGK_SUPPORT_BUILD_DATE = '2026-10-27';
+const TGK_SUPPORT_VERSION = 'v2.02';
+const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -743,6 +743,7 @@ async function afterLogin(user){
   const bd = document.getElementById('support-build-date'); if(bd) bd.textContent = TGK_SUPPORT_BUILD_DATE;
   await loadAll();
   renderNav();
+  try{ tkAutoFile(); }catch(_){}
   goPage('dashboard');
   setupBackButton();
   subscribeRealtime();
@@ -1173,6 +1174,7 @@ function handleTicketRealtime(payload){
   const idx = S.tickets.findIndex(t=>t.id === (payload.new?.id || payload.old?.id));
   if(payload.eventType === 'INSERT'){
     if(idx === -1) S.tickets.unshift(payload.new);
+    try{ setTimeout(tkAutoFile, 800); }catch(_){}
     if(payload.new.is_live_chat){
       toast('<span class="ic ic-chat"></span>New live chat from ' + (payload.new.customer_name||'a visitor'));
       desktopNotify('<span class="ic ic-chat"></span>New Live Chat', (payload.new.customer_name||'A visitor') + ' started a chat', payload.new.id);
@@ -1198,9 +1200,9 @@ const NAV = [
   { id:'livechat', label:'Live Chat', badgeKey:'livechat', section:'Inbox' },
   { id:'emails', label:'Emails', badgeKey:'emails', section:'Inbox' },
   { id:'orders', label:'Orders', badgeKey:'orders', section:'Inbox' },
-  { id:'tickets', label:'Tickets', badgeKey:'tickets', section:'Inbox' },
-  { id:'rebates', label:'Rebates', badgeKey:'rebates', section:'Inbox' },
   { id:'quarantine', label:'Held (Spam)', badgeKey:'quarantine', section:'Inbox' },
+  { id:'tickets', label:'All forms', badgeKey:'tickets', section:'Website forms' },
+  { id:'rebates', label:'Rebates', badgeKey:'rebates', section:'Website forms', inGroup:true },
   { id:'warranty', label:'Warranty Claims', badgeKey:'warranty', section:'ERP Queues' },
   { id:'shiperrors', label:'Shipment Errors', badgeKey:'shiperrors', section:'ERP Queues' },
   { id:'customers', label:'Customer Lookup', section:'Tools' },
@@ -1291,6 +1293,7 @@ function renderNav(){
   let lastSection = null;
   const counts = computeNavCounts();
   nav.innerHTML = NAV.filter(n=>!n.viewerOnly || S.canViewActivityLog).map(n=>{
+    if(n.inGroup) return ''; // shown as a line inside the Website forms group instead
     let sectionHeader = '';
     if(n.section && n.section !== lastSection){ lastSection = n.section; sectionHeader = `<div class="sidebar-section">${escapeHtml(n.section)}</div>`; }
     let badge = '';
@@ -1329,9 +1332,12 @@ function renderNav(){
     if(n.badgeKey==='quarantine'){
       if(counts.quarantineCount){ badge = `<span class="nav-badge" style="color:var(--orange);background:var(--orange-dim);border-color:rgba(224,123,40,.2)">${counts.quarantineCount}</span>`; alertClass='alert-nav'; }
     }
-    return sectionHeader + `<button class="nav-item ${S.page===n.id?'active':''} ${alertClass}" onclick="goPage('${n.id}')">
+    const isAll = n.id==='tickets';
+    const onAttr = isAll ? "goRoute('')" : "goPage('" + n.id + "')";
+    const isOn = isAll ? (S.page==='tickets' && !S.filters.route) : S.page===n.id;
+    return sectionHeader + `<button class="nav-item ${isOn?'active':''} ${alertClass}" onclick="${onAttr}">
       <span class="nav-dot"></span>${n.label}${badge}
-    </button>` + (n.id==='tickets' && S.page==='tickets' ? renderCategorySubnav() : '');
+    </button>` + (isAll ? renderFormsSubnav() : '');
   }).join('');
 }
 
@@ -1370,6 +1376,148 @@ function renderCategorySubnav(){
     + '</div>';
 }
 
+/* ============================================================
+   WEBSITE FORMS: automatic routing (v2.02)
+   Every ticket lands in exactly one group of the Website forms menu. The public support page tags its forms
+   with fixed subjects ("Return request - order", "Rebate request - order", "Wholesale application - "), so
+   those route exactly; Contact Us messages are sorted by what the customer wrote. A category already on the
+   ticket always wins (except the legacy "Inquiry"), so staff changes are never overridden. Website tickets
+   that arrive with no category get the matching category saved on them, so filters and Reports agree.
+   ============================================================ */
+var TK_ROUTES = [
+  { key:'product',   label:'Product questions',  cat:'Product Question' },
+  { key:'return',    label:'Returns',            cat:'Return' },
+  { key:'warranty',  label:'Warranty',           cat:'Warranty' },
+  { key:'rebate',    label:'Rebates',            cat:'Rebate' },
+  { key:'shipment',  label:'Shipment errors',    cat:'Shipment Error' },
+  { key:'wholesale', label:'Wholesale / dealer', cat:'Wholesale/Dealer' },
+  { key:'other',     label:'Other',              cat:'Other' }
+];
+var TK_ROUTE_SORTING = { key:'sorting', label:'Needs sorting', cat:'' };
+var TK_CAT_TO_ROUTE = {
+  'rebate':'rebate', 'return':'return', 'returns':'return', 'warranty':'warranty',
+  'shipment error':'shipment', 'shipment errors':'shipment',
+  'wholesale/dealer':'wholesale', 'wholesale':'wholesale', 'dealer':'wholesale',
+  'product question':'product', 'product questions':'product', 'other':'other'
+};
+var TK_RE_SHIP = /(wrong (item|part|product|size)|incorrect (item|part)|missing (item|part|parts|piece|pieces|hardware)|never (arrived|received|showed)|not (received|delivered)|(arrived|came|shipped) (damaged|broken|crushed)|damaged (in|during) (shipping|transit)|lost (package|in transit)|sent (me )?the wrong)/;
+var TK_RE_WARR = /(warrant|defect|faulty|malfunction|stopped working|quit working|not working|doesn'?t work|does not work|\bfailed\b|failure|\bbroke|\bcracked|\bleak|rattl|premature)/;
+var TK_RE_RET = /(\breturn|\brefund|\bexchange|send (it )?back|\brma\b|\bcancel|money back|restocking)/;
+var TK_RE_PROD = /(\bfit(s|ment|ting)?\b|compatib|will this|does this|do you (have|make|sell)|part number|which (one|part|size)|\binstall|instruction|recommend|difference between|in stock|availab|lead time|when will|\bdyno|horsepower|\bspec|dimension|\becu\b|\btune\b)/;
+
+function tkIsFormTicket(t){
+  return t.source === 'website' || /^(return request|rebate request|wholesale application)/i.test(String(t.subject||''));
+}
+function tkUntouched(t){ return t.status === 'open' && !t.assigned_to; }
+function tkIsActiveTicket(t){ return !t.merged_into_id && !t.archived && !['resolved','closed'].includes(t.status); }
+
+function tkRouteCompute(t){
+  var cat = String(t.category||'').trim();
+  var ck = cat.toLowerCase();
+  var subj = String(t.subject||'');
+  var text = (subj + ' ' + String(t.description||'').slice(0,800)).toLowerCase();
+  var key;
+  if(ck && ck !== 'inquiry'){
+    key = TK_CAT_TO_ROUTE[ck] || 'other';
+    // The Return form also takes warranty claims. Until staff touch the ticket, a Return-form ticket that
+    // describes a defect belongs under Warranty.
+    if(key === 'return' && tkUntouched(t) && /^return request/i.test(subj) && TK_RE_WARR.test(text)) key = 'warranty';
+    return key;
+  }
+  if(t.is_live_chat) return 'chat';
+  if(t.warranty_claim_id || t.source === 'warranty') return 'warranty';
+  if(t.shipment_error_id || t.source === 'shipment_error') return 'shipment';
+  if(/^wholesale application/i.test(subj) || isWholesaleApp(t.description)) return 'wholesale';
+  if(/^rebate request/i.test(subj)) return 'rebate';
+  if(/^return request/i.test(subj)) return TK_RE_WARR.test(text) ? 'warranty' : 'return';
+  if(TK_RE_SHIP.test(text)) return 'shipment';
+  if(TK_RE_WARR.test(text)) return 'warranty';
+  if(TK_RE_RET.test(text)) return 'return';
+  if(TK_RE_PROD.test(text)) return 'product';
+  if(tkIsFormTicket(t) || ck === 'inquiry') return 'other';
+  return 'sorting';
+}
+var _tkRouteCache = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
+function tkRoute(t){
+  if(!t) return 'sorting';
+  var sig = [t.category, t.subject, t.source, t.warranty_claim_id, t.shipment_error_id, t.status, t.assigned_to, t.is_live_chat, (t.description||'').length].join('|');
+  var c = _tkRouteCache && _tkRouteCache.get(t);
+  if(c && c.sig === sig) return c.key;
+  var key = tkRouteCompute(t);
+  if(_tkRouteCache) _tkRouteCache.set(t, { sig:sig, key:key });
+  return key;
+}
+function tkRouteInfo(key){
+  return TK_ROUTES.filter(function(r){ return r.key === key; })[0] || (key === 'sorting' ? TK_ROUTE_SORTING : null);
+}
+
+function renderFormsSubnav(){
+  var counts = {};
+  S.tickets.filter(tkIsActiveTicket).forEach(function(t){ var k = tkRoute(t); counts[k] = (counts[k]||0) + 1; });
+  var curRoute = (S.page === 'tickets') ? (S.filters.route || '') : '__off__';
+  var red = ' style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)"';
+  function row(labelText, count, isRed, clickJs, on){
+    return '<button class="nav-subitem ' + (on ? 'active' : '') + '" onclick="' + clickJs + '">'
+      + '<span class="nav-subdot"></span>' + escapeHtml(labelText)
+      + (count ? '<span class="nav-badge"' + (isRed ? red : '') + '>' + count + '</span>' : '')
+      + '</button>';
+  }
+  var html = TK_ROUTES.map(function(r){
+    if(r.key === 'rebate') return row(r.label, rebateReviewItems().length, false, "goPage('rebates')", S.page === 'rebates');
+    return row(r.label, counts[r.key] || 0, false, "goRoute('" + r.key + "')", curRoute === r.key);
+  }).join('');
+  html += row(TK_ROUTE_SORTING.label, counts.sorting || 0, true, "goRoute('sorting')", curRoute === 'sorting');
+  return '<div class="nav-sub">' + html + '</div>';
+}
+
+function goRoute(key){
+  S.page = 'tickets';
+  S.filters.route = key || '';
+  S.filters.category = '';
+  S.filters.status = '__active__';
+  S.filters.showArchived = false;
+  closeMobileSidebar();
+  renderNav();
+  var info = key ? tkRouteInfo(key) : null;
+  var pt = document.getElementById('pageTitle'); if(pt) pt.textContent = info ? info.label : 'All forms';
+  renderPage();
+}
+window.goRoute = goRoute;
+
+var _tkAutoDone = {};
+var _tkAutoBusy = false;
+async function tkAutoFile(){
+  if(_tkAutoBusy) return;
+  _tkAutoBusy = true;
+  try{
+    var todo = (S.tickets || []).filter(function(t){
+      if(!t || !t.id || _tkAutoDone[t.id] || !tkIsActiveTicket(t) || !tkIsFormTicket(t) || t.is_live_chat) return false;
+      var ck = String(t.category||'').trim().toLowerCase();
+      var key = tkRoute(t);
+      var info = tkRouteInfo(key);
+      if(!info || !info.cat) return false;
+      if(!ck || ck === 'inquiry') return true;
+      return ck === 'return' && key === 'warranty';
+    }).slice(0, 200);
+    var changed = false;
+    for(var i = 0; i < todo.length; i++){
+      var t = todo[i];
+      _tkAutoDone[t.id] = 1;
+      var info = tkRouteInfo(tkRoute(t));
+      try{
+        var q = sb.from('tickets').update({ category: info.cat }).eq('id', t.id);
+        q = t.category ? q.eq('category', t.category) : q.or('category.is.null,category.eq.');
+        var r = await q.select();
+        if(r.error) throw r.error;
+        if(r.data && r.data.length){ t.category = info.cat; changed = true; }
+      }catch(e){
+        try{ logError('Auto-filing ticket ' + (t.ticket_number || t.id) + ' failed: ' + ((e && e.message) || e)); }catch(_){}
+      }
+    }
+    if(changed){ renderNav(); if(S.page === 'tickets') renderPage(); }
+  }finally{ _tkAutoBusy = false; }
+}
+
 function goCategory(cat){
   S.page = 'tickets';
   S.filters.category = cat;
@@ -1382,6 +1530,7 @@ function goCategory(cat){
 function goPage(id){
   if(id==='activitylog' && !S.canViewActivityLog) id='dashboard'; // cosmetic; the database refuses non-viewers anyway
   S.page = id;
+  if(id==='tickets') S.filters.route = '';
   if(id==='reports') window._respCache = {}; // fresh response times each time Reports is opened
   closeMobileSidebar(); // tapping a nav link on mobile should close the drawer, not leave it covering the new page
   renderNav();
@@ -2347,7 +2496,7 @@ function renderTicketsList(){
         <option value="">All Sources</option>
         ${['manual','website','warranty','shipment_error','email'].map(s=>`<option value="${s}" ${S.filters.source===s?'selected':''}>${label(s)}</option>`).join('')}
       </select>
-      <select class="form-input" style="width:auto" onchange="S.filters.category=this.value; renderNav(); renderTicketsList()">
+      <select class="form-input" style="width:auto" onchange="S.filters.category=this.value; S.filters.route=''; renderNav(); renderTicketsList()">
         <option value="">All Categories</option>
         ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${S.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
         <option value="__none__" ${S.filters.category==='__none__'?'selected':''}>Uncategorized</option>
@@ -2585,6 +2734,7 @@ function tkCategoryListBase(){
 function tkCategoryList(){
   var base = tkCategoryListBase();
   if(!base.some(function(c){ return c.name === 'Rebate'; })) base = base.concat([{ name:'Rebate', color:'pill-teal' }]);
+  if(!base.some(function(c){ return c.name === 'Product Question'; })) base = base.concat([{ name:'Product Question', color:'pill-green' }]);
   return base;
 }
 function tkCategoryColor(name){
@@ -2653,6 +2803,7 @@ async function saveSetting(key, value){
 function ticketCategory(t){
   if(!t) return 'Inquiry';
   if(t.category) return t.category;
+  try{ var _ri = tkRouteInfo(tkRoute(t)); if(_ri && _ri.cat) return _ri.cat; }catch(_){}
   var m = { warranty:'Warranty', shipment_error:'Shipment Error' };
   return m[t.source] || 'Inquiry';
 }
@@ -2821,6 +2972,7 @@ function filteredTickets(){
   else if(f.status && f.status !== '__active__') list = list.filter(t=>t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
+  if(f.route) list = list.filter(t=>tkRoute(t)===f.route);
   if(f.category === '__none__') list = list.filter(t=>!t.category);
   else if(f.category) list = list.filter(t=>(t.category||'')===f.category);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
