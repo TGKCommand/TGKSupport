@@ -463,7 +463,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
-        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v2.02</span>
+        <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3);font-weight:600;letter-spacing:.05em" id="support-version-badge">v2.05</span>
         <span style="font-size:var(--t-xs);font-family:var(--mono);color:var(--text3)" id="support-build-date"></span>
       </div>
     </div>
@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.02';
+const TGK_SUPPORT_VERSION = 'v2.05';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1333,11 +1333,12 @@ function renderNav(){
       if(counts.quarantineCount){ badge = `<span class="nav-badge" style="color:var(--orange);background:var(--orange-dim);border-color:rgba(224,123,40,.2)">${counts.quarantineCount}</span>`; alertClass='alert-nav'; }
     }
     const isAll = n.id==='tickets';
-    const onAttr = isAll ? "goRoute('')" : "goPage('" + n.id + "')";
-    const isOn = isAll ? (S.page==='tickets' && !S.filters.route) : S.page===n.id;
+    const isOrd = n.id==='orders';
+    const onAttr = isAll ? "goRoute('')" : (isOrd ? "goOrderView('')" : "goPage('" + n.id + "')");
+    const isOn = isAll ? (S.page==='tickets' && !S.filters.route) : (isOrd ? (S.page==='orders' && !S.orderView) : S.page===n.id);
     return sectionHeader + `<button class="nav-item ${isOn?'active':''} ${alertClass}" onclick="${onAttr}">
       <span class="nav-dot"></span>${n.label}${badge}
-    </button>` + (isAll ? renderFormsSubnav() : '');
+    </button>` + (isAll ? renderFormsSubnav() : (isOrd ? renderOrdersSubnav() : ''));
   }).join('');
 }
 
@@ -1386,6 +1387,7 @@ function renderCategorySubnav(){
    ============================================================ */
 var TK_ROUTES = [
   { key:'product',   label:'Product questions',  cat:'Product Question' },
+  { key:'orderstatus', label:'Order status',     cat:'Order Status' },
   { key:'return',    label:'Returns',            cat:'Return' },
   { key:'warranty',  label:'Warranty',           cat:'Warranty' },
   { key:'rebate',    label:'Rebates',            cat:'Rebate' },
@@ -1398,45 +1400,81 @@ var TK_CAT_TO_ROUTE = {
   'rebate':'rebate', 'return':'return', 'returns':'return', 'warranty':'warranty',
   'shipment error':'shipment', 'shipment errors':'shipment',
   'wholesale/dealer':'wholesale', 'wholesale':'wholesale', 'dealer':'wholesale',
-  'product question':'product', 'product questions':'product', 'other':'other'
+  'product question':'product', 'product questions':'product', 'order status':'orderstatus', 'other':'other'
 };
 var TK_RE_SHIP = /(wrong (item|part|product|size)|incorrect (item|part)|missing (item|part|parts|piece|pieces|hardware)|never (arrived|received|showed)|not (received|delivered)|(arrived|came|shipped) (damaged|broken|crushed)|damaged (in|during) (shipping|transit)|lost (package|in transit)|sent (me )?the wrong)/;
 var TK_RE_WARR = /(warrant|defect|faulty|malfunction|stopped working|quit working|not working|doesn'?t work|does not work|\bfailed\b|failure|\bbroke|\bcracked|\bleak|rattl|premature)/;
+var TK_TOPICS = {
+  'product question':'product', 'order status':'orderstatus', 'return or refund':'return',
+  'warranty or defect':'warranty', 'wrong, missing or damaged item':'shipment', 'something else':'other',
+  'return request':'return', 'warranty claim':'warranty'
+};
+// First line of the ticket text, written by the storefront forms: "Topic: Order status"
+function tkTopicText(t){
+  var m = /^\s*topic:[ \t]*([^\r\n]+)/i.exec(String(t.description || ''));
+  return m ? m[1].trim() : '';
+}
+function tkTopicRoute(t){ return TK_TOPICS[tkTopicText(t).toLowerCase()] || ''; }
+// Categories a form or a default can leave behind that mean "nobody chose yet"
+function tkGenericCat(ck){ return !ck || ck === 'inquiry' || ck === 'other' || ck === 'general' || ck === 'general inquiry' || ck === 'contact'; }
+var TK_RE_STATUS = /(where is my (order|package|parcel|part|parts|stuff)|order status|status of (my|the|this) order|track(ing)? (number|info|my)|\btracking\b|when (will|does|is|should) (my|the|this) (order|package|shipment|parcel)|(has|have) (my|the) (order|package|parts?) (shipped|left)|(not|n'?t) shipped yet|(update|change|correct) (my|the) (shipping )?address|\bshipping (status|update|time|eta)\b|\beta\b)/;
+var TK_RE_NOTPART = /(coupon|discount code|promo|checkout|website|login|password|\bcart\b|\bsite\b|\bapp\b)/;
+function tkWarr(text){ return TK_RE_WARR.test(text) && !TK_RE_NOTPART.test(text); }
 var TK_RE_RET = /(\breturn|\brefund|\bexchange|send (it )?back|\brma\b|\bcancel|money back|restocking)/;
 var TK_RE_PROD = /(\bfit(s|ment|ting)?\b|compatib|will this|does this|do you (have|make|sell)|part number|which (one|part|size)|\binstall|instruction|recommend|difference between|in stock|availab|lead time|when will|\bdyno|horsepower|\bspec|dimension|\becu\b|\btune\b)/;
 
+var _dlrCache = { src:null, n:-1, set:null };
+function ticketIsDealer(t){
+  var d = S.dealers || [];
+  if(_dlrCache.src !== d || _dlrCache.n !== d.length){
+    var set = {};
+    d.forEach(function(x){ if(x && x.email) set[String(x.email).trim().toLowerCase()] = 1; });
+    _dlrCache = { src:d, n:d.length, set:set };
+  }
+  var em = String((t && t.customer_email) || '').trim().toLowerCase();
+  return !!em && _dlrCache.set[em] === 1;
+}
+var TK_DEALER_PILL = '<span class="pill pill-teal" title="Email matches a dealer on file">Dealer</span>';
 function tkIsFormTicket(t){
-  return t.source === 'website' || /^(return request|rebate request|wholesale application)/i.test(String(t.subject||''));
+  return t.source === 'website' || /^(return request|warranty claim|rebate request|wholesale application)/i.test(String(t.subject||''));
 }
 function tkUntouched(t){ return t.status === 'open' && !t.assigned_to; }
 function tkIsActiveTicket(t){ return !t.merged_into_id && !t.archived && !['resolved','closed'].includes(t.status); }
 
-function tkRouteCompute(t){
-  var cat = String(t.category||'').trim();
+// Returns [routeKey, plain-English reason]. ignoreCat=true answers "where would this go if it had no category".
+function tkRouteWhy(t, ignoreCat){
+  var cat = ignoreCat ? '' : String(t.category||'').trim();
   var ck = cat.toLowerCase();
   var subj = String(t.subject||'');
   var text = (subj + ' ' + String(t.description||'').slice(0,800)).toLowerCase();
   var key;
+  var topic = tkTopicRoute(t);
+  if(topic && (ignoreCat || tkGenericCat(ck) || (topic === 'warranty' && ck === 'return' && tkUntouched(t)))){
+    return [topic, 'Customer chose: ' + tkTopicText(t)];
+  }
   if(ck && ck !== 'inquiry'){
     key = TK_CAT_TO_ROUTE[ck] || 'other';
     // The Return form also takes warranty claims. Until staff touch the ticket, a Return-form ticket that
     // describes a defect belongs under Warranty.
-    if(key === 'return' && tkUntouched(t) && /^return request/i.test(subj) && TK_RE_WARR.test(text)) key = 'warranty';
-    return key;
+    if(key === 'return' && tkUntouched(t) && (/^warranty claim/i.test(subj) || (/^return request/i.test(subj) && tkWarr(text)))) return ['warranty', 'Return form describing a defect'];
+    return [key, 'Category already set: ' + cat];
   }
-  if(t.is_live_chat) return 'chat';
-  if(t.warranty_claim_id || t.source === 'warranty') return 'warranty';
-  if(t.shipment_error_id || t.source === 'shipment_error') return 'shipment';
-  if(/^wholesale application/i.test(subj) || isWholesaleApp(t.description)) return 'wholesale';
-  if(/^rebate request/i.test(subj)) return 'rebate';
-  if(/^return request/i.test(subj)) return TK_RE_WARR.test(text) ? 'warranty' : 'return';
-  if(TK_RE_SHIP.test(text)) return 'shipment';
-  if(TK_RE_WARR.test(text)) return 'warranty';
-  if(TK_RE_RET.test(text)) return 'return';
-  if(TK_RE_PROD.test(text)) return 'product';
-  if(tkIsFormTicket(t) || ck === 'inquiry') return 'other';
-  return 'sorting';
+  if(t.is_live_chat) return ['chat', 'Live chat'];
+  if(t.warranty_claim_id || t.source === 'warranty') return ['warranty', 'Linked to a warranty claim'];
+  if(t.shipment_error_id || t.source === 'shipment_error') return ['shipment', 'Linked to a shipment error'];
+  if(/^wholesale application/i.test(subj) || isWholesaleApp(t.description)) return ['wholesale', 'Wholesale application form'];
+  if(/^rebate request/i.test(subj)) return ['rebate', 'Rebate form'];
+  if(/^warranty claim/i.test(subj)) return ['warranty', 'Warranty claim form'];
+  if(/^return request/i.test(subj)) return tkWarr(text) ? ['warranty', 'Return form describing a defect'] : ['return', 'Return form'];
+  if(TK_RE_SHIP.test(text)) return ['shipment', 'Wording: wrong, missing or damaged shipment'];
+  if(tkWarr(text)) return ['warranty', 'Wording: defect or failure'];
+  if(TK_RE_RET.test(text)) return ['return', 'Wording: return, refund or cancel'];
+  if(TK_RE_STATUS.test(text)) return ['orderstatus', 'Wording: order status or tracking'];
+  if(TK_RE_PROD.test(text)) return ['product', 'Wording: product or fitment question'];
+  if(tkIsFormTicket(t) || ck === 'inquiry') return ['other', 'Website message with no clear topic'];
+  return ['sorting', 'No clear topic'];
 }
+function tkRouteCompute(t){ return tkRouteWhy(t, false)[0]; }
 var _tkRouteCache = (typeof WeakMap !== 'undefined') ? new WeakMap() : null;
 function tkRoute(t){
   if(!t) return 'sorting';
@@ -1484,6 +1522,159 @@ function goRoute(key){
 }
 window.goRoute = goRoute;
 
+/* ============================================================
+   ORDERS: dealer vs customer (v2.04)
+   dealer    = a dealer is assigned to the order
+   customer  = no dealer, and staff created it (manual, from a ticket, from a support email)
+   needsdealer = arrived at orders@ and no dealer is assigned yet
+   ============================================================ */
+function orderKind(e){
+  if(e.dealer_id) return 'dealer';
+  var os = e.order_source || '';
+  if(os === 'manual' || os === 'ticket' || os === 'email' || e.source_ticket_id || e.source_email_id) return 'customer';
+  return 'needsdealer';
+}
+function tkNavRow(labelText, count, isRed, clickJs, on){
+  var red = ' style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)"';
+  return '<button class="nav-subitem ' + (on ? 'active' : '') + '" onclick="' + clickJs + '">'
+    + '<span class="nav-subdot"></span>' + escapeHtml(labelText)
+    + (count ? '<span class="nav-badge"' + (isRed ? red : '') + '>' + count + '</span>' : '')
+    + '</button>';
+}
+function renderOrdersSubnav(){
+  var c = { dealer:0, customer:0, needsdealer:0 };
+  (S.emails || []).forEach(function(e){
+    if(e.mailbox !== 'orders' || e.status === 'archived' || e.status === 'completed') return;
+    c[orderKind(e)]++;
+  });
+  var cur = (S.page === 'orders') ? (S.orderView || '') : '__off__';
+  return '<div class="nav-sub">'
+    + tkNavRow('Dealer orders', c.dealer, false, "goOrderView('dealer')", cur === 'dealer')
+    + tkNavRow('Customer orders', c.customer, false, "goOrderView('customer')", cur === 'customer')
+    + tkNavRow('Needs dealer', c.needsdealer, true, "goOrderView('needsdealer')", cur === 'needsdealer')
+    + '</div>';
+}
+function goOrderView(v){
+  S.page = 'orders';
+  S.orderView = v || '';
+  S.emailFilters.view = 'open';
+  closeMobileSidebar();
+  renderNav();
+  var names = { dealer:'Dealer orders', customer:'Customer orders', needsdealer:'Needs dealer' };
+  var pt = document.getElementById('pageTitle'); if(pt) pt.textContent = names[v] || 'Orders';
+  renderPage();
+}
+window.goOrderView = goOrderView;
+
+/* ============================================================
+   SORT TICKETS (Settings tab, v2.04): preview, then apply, with undo
+   ============================================================ */
+var _sorter = { scope:'blank', done:false, rows:null, sel:{}, stay:0, same:0, busy:false };
+function sorterBuild(){
+  var s = _sorter, rows = [], stay = 0, same = 0;
+  (S.tickets || []).forEach(function(t){
+    if(!t || t.merged_into_id || t.archived || t.is_live_chat) return;
+    if(!s.done && ['resolved','closed'].indexOf(t.status) > -1) return;
+    var ck = String(t.category || '').trim().toLowerCase();
+    if(s.scope === 'blank' && ck && ck !== 'inquiry') return;
+    var w = tkRouteWhy(t, true);
+    var info = tkRouteInfo(w[0]);
+    if(!info || !info.cat){ stay++; return; }
+    if(String(t.category || '').trim() === info.cat){ same++; return; }
+    rows.push({ id:t.id, num:t.ticket_number, subject:t.subject || '', from:String(t.category || ''), to:info.cat, why:w[1] });
+  });
+  s.rows = rows; s.stay = stay; s.same = same; s.sel = {};
+  if(s.scope === 'blank') rows.forEach(function(r){ s.sel[r.id] = true; });
+}
+function sorterSelCount(){ var n = 0; (_sorter.rows || []).forEach(function(r){ if(_sorter.sel[r.id]) n++; }); return n; }
+function sorterSet(k, v){ _sorter[k] = v; if(k === 'scope' || k === 'done') sorterBuild(); renderSettings(); }
+function sorterToggle(id, on){ if(on) _sorter.sel[id] = true; else delete _sorter.sel[id]; renderSettings(); }
+function sorterAll(on){ _sorter.sel = {}; if(on) (_sorter.rows || []).forEach(function(r){ _sorter.sel[r.id] = true; }); renderSettings(); }
+async function sorterLoadAll(){ await loadFullHistory('tickets'); sorterBuild(); renderSettings(); }
+function renderSettingsSorter(){
+  var s = _sorter; if(!s.rows) sorterBuild();
+  var n = sorterSelCount();
+  var h = '<div class="panel"><div class="panel-title">Sort Tickets</div>'
+    + '<div style="font-size:var(--t-md);color:var(--text2);line-height:1.6;margin-bottom:12px">Preview where each existing ticket would be filed. Nothing is saved until you press Apply, and Ctrl+Z undoes it right after.</div>'
+    + '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px">'
+    + '<select class="form-input" style="width:auto" onchange="sorterSet(\'scope\', this.value)">'
+    + '<option value="blank"' + (s.scope === 'blank' ? ' selected' : '') + '>Tickets with no category (or Inquiry)</option>'
+    + '<option value="all"' + (s.scope === 'all' ? ' selected' : '') + '>Everything: also show disagreements with saved categories</option></select>'
+    + '<label style="display:flex;align-items:center;gap:6px;font-size:var(--t-md)"><input type="checkbox" ' + (s.done ? 'checked ' : '') + 'onchange="sorterSet(\'done\', this.checked)">Include resolved and closed</label>'
+    + (HISTORY_LOADED.tickets ? '' : '<button class="btn btn-sm" onclick="sorterLoadAll()">Load full history</button>')
+    + '</div>'
+    + '<div style="font-size:var(--t-md);color:var(--text2);margin-bottom:10px"><strong>' + s.rows.length + '</strong> to change, ' + s.same + ' already in the right category, ' + s.stay + ' with no clear topic (they stay in Needs sorting).</div>';
+  if(!s.rows.length){
+    return h + '<div class="tbl-wrap"><div class="empty">Nothing to change.</div></div></div>';
+  }
+  h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:10px">'
+    + '<button class="btn btn-sm" onclick="sorterAll(true)">Select all</button>'
+    + '<button class="btn btn-sm" onclick="sorterAll(false)">Select none</button>'
+    + '<button class="btn btn-sm btn-teal" ' + ((n && !s.busy) ? '' : 'style="opacity:.5" ') + 'onclick="sorterApply()">' + (s.busy ? 'Applying...' : 'Apply to ' + n + ' selected') + '</button>'
+    + '</div>'
+    + '<div class="tbl-wrap"><table><thead><tr><th style="width:26px"></th><th>#</th><th>Subject</th><th>Now</th><th>Move to</th><th>Why</th></tr></thead><tbody>'
+    + s.rows.slice(0, 500).map(function(r){
+        return '<tr><td><input type="checkbox" ' + (s.sel[r.id] ? 'checked ' : '') + 'onchange="sorterToggle(\'' + r.id + '\', this.checked)"></td>'
+          + '<td class="pn">' + escapeHtml(String(r.num == null ? '' : r.num)) + '</td>'
+          + '<td class="main-col">' + escapeHtml(r.subject) + '</td>'
+          + '<td>' + (r.from ? '<span class="pill pill-muted">' + escapeHtml(r.from) + '</span>' : '<span style="color:var(--text3)">none</span>') + '</td>'
+          + '<td><span class="pill ' + tkCategoryColor(r.to) + '">' + escapeHtml(r.to) + '</span></td>'
+          + '<td style="font-size:var(--t-xs);color:var(--text3)">' + escapeHtml(r.why) + '</td></tr>';
+      }).join('')
+    + '</tbody></table></div>'
+    + (s.rows.length > 500 ? '<div style="font-size:var(--t-xs);color:var(--text3);margin-top:8px">Showing the first 500. Apply, then reopen this tab for the rest.</div>' : '')
+    + '</div>';
+  return h;
+}
+async function sorterApply(){
+  var s = _sorter; if(s.busy) return;
+  var picked = (s.rows || []).filter(function(r){ return s.sel[r.id]; });
+  if(!picked.length){ toast('Nothing selected', true); return; }
+  if(!confirm('Change the category on ' + picked.length + ' ticket' + (picked.length === 1 ? '' : 's') + '? Ctrl+Z undoes it right after.')) return;
+  // skip anything staff changed since the preview was built
+  var live = picked.filter(function(r){
+    var t = S.tickets.find(function(x){ return x.id === r.id; });
+    return t && String(t.category || '') === r.from;
+  });
+  var skipped = picked.length - live.length;
+  s.busy = true; renderSettings();
+  var byCat = {}; live.forEach(function(r){ (byCat[r.to] = byCat[r.to] || []).push(r); });
+  var done = [], failed = 0;
+  try{
+    for(var cat in byCat){
+      var list = byCat[cat];
+      for(var i = 0; i < list.length; i += 100){
+        var chunk = list.slice(i, i + 100);
+        var ids = chunk.map(function(r){ return r.id; });
+        var res = await sb.from('tickets').update({ category: cat }).in('id', ids).select('id');
+        if(res.error){ failed += ids.length; try{ logError('Sort Tickets failed: ' + res.error.message); }catch(_){} continue; }
+        var okIds = {}; (res.data || []).forEach(function(d){ okIds[d.id] = 1; });
+        chunk.forEach(function(r){
+          if(!okIds[r.id]){ failed++; return; }
+          var t = S.tickets.find(function(x){ return x.id === r.id; }); if(t) t.category = cat;
+          done.push({ id:r.id, from:r.from, to:cat });
+        });
+      }
+    }
+  }finally{ s.busy = false; }
+  function restore(items, useTo){
+    var groups = {};
+    items.forEach(function(d){ var c = useTo ? d.to : d.from; (groups[c] = groups[c] || []).push(d.id); });
+    return Promise.all(Object.keys(groups).map(async function(c){
+      var r = await sb.from('tickets').update({ category: c ? c : null }).in('id', groups[c]).select('id');
+      if(r.error) throw r.error;
+      groups[c].forEach(function(id){ var t = S.tickets.find(function(x){ return x.id === id; }); if(t) t.category = c ? c : null; });
+    })).then(function(){ renderNav(); sorterBuild(); if(S.page === 'settings') renderSettings(); });
+  }
+  if(done.length){
+    pushUndo({ label:'sort ' + done.length + ' tickets', undo:function(){ return restore(done, false); }, redo:function(){ return restore(done, true); } });
+  }
+  toast('Sorted ' + done.length + ' ticket' + (done.length === 1 ? '' : 's') + (skipped ? ', ' + skipped + ' skipped (changed since the preview)' : '') + (failed ? ', ' + failed + ' failed' : ''), !!failed);
+  renderNav(); sorterBuild(); renderSettings();
+}
+window.sorterSet = sorterSet; window.sorterToggle = sorterToggle; window.sorterAll = sorterAll;
+window.sorterLoadAll = sorterLoadAll; window.sorterApply = sorterApply;
+
 var _tkAutoDone = {};
 var _tkAutoBusy = false;
 async function tkAutoFile(){
@@ -1497,7 +1688,8 @@ async function tkAutoFile(){
       var info = tkRouteInfo(key);
       if(!info || !info.cat) return false;
       if(!ck || ck === 'inquiry') return true;
-      return ck === 'return' && key === 'warranty';
+      if(String(t.category || '').trim() === info.cat) return false;
+      return (ck === 'return' && key === 'warranty') || !!(tkTopicRoute(t) && tkGenericCat(ck));
     }).slice(0, 200);
     var changed = false;
     for(var i = 0; i < todo.length; i++){
@@ -1531,6 +1723,7 @@ function goPage(id){
   if(id==='activitylog' && !S.canViewActivityLog) id='dashboard'; // cosmetic; the database refuses non-viewers anyway
   S.page = id;
   if(id==='tickets') S.filters.route = '';
+  if(id==='orders') S.orderView = '';
   if(id==='reports') window._respCache = {}; // fresh response times each time Reports is opened
   closeMobileSidebar(); // tapping a nav link on mobile should close the drawer, not leave it covering the new page
   renderNav();
@@ -2501,6 +2694,11 @@ function renderTicketsList(){
         ${TK_CATEGORY_OPTIONS.map(c=>`<option value="${c}" ${S.filters.category===c?'selected':''}>${escapeHtml(c)}</option>`).join('')}
         <option value="__none__" ${S.filters.category==='__none__'?'selected':''}>Uncategorized</option>
       </select>
+      <select class="form-input" style="width:auto" onchange="S.filters.party=this.value; renderTicketsList()">
+        <option value="">Dealers and customers</option>
+        <option value="dealer" ${S.filters.party==='dealer'?'selected':''}>Dealers only</option>
+        <option value="customer" ${S.filters.party==='customer'?'selected':''}>Customers only</option>
+      </select>
       <select class="form-input" style="width:auto" onchange="S.filters.tag=this.value; renderTicketsList()">
         <option value="">All Tags</option>
         ${[...new Set(S.tickets.flatMap(t=>t.tags||[]))].sort().map(tag=>`<option value="${tag}" ${S.filters.tag===tag?'selected':''}>${escapeHtml(tag)}</option>`).join('')}
@@ -2735,6 +2933,7 @@ function tkCategoryList(){
   var base = tkCategoryListBase();
   if(!base.some(function(c){ return c.name === 'Rebate'; })) base = base.concat([{ name:'Rebate', color:'pill-teal' }]);
   if(!base.some(function(c){ return c.name === 'Product Question'; })) base = base.concat([{ name:'Product Question', color:'pill-green' }]);
+  if(!base.some(function(c){ return c.name === 'Order Status'; })) base = base.concat([{ name:'Order Status', color:'pill-teal' }]);
   return base;
 }
 function tkCategoryColor(name){
@@ -2973,6 +3172,8 @@ function filteredTickets(){
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
   if(f.route) list = list.filter(t=>tkRoute(t)===f.route);
+  if(f.party === 'dealer') list = list.filter(ticketIsDealer);
+  else if(f.party === 'customer') list = list.filter(t=>!ticketIsDealer(t));
   if(f.category === '__none__') list = list.filter(t=>!t.category);
   else if(f.category) list = list.filter(t=>(t.category||'')===f.category);
   if(f.tag) list = list.filter(t=>(t.tags||[]).includes(f.tag));
@@ -3021,7 +3222,7 @@ function ticketTable(list, enableBulk){
           ${enableBulk ? `<td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedTickets.has(t.id)?'checked':''} onchange="toggleTicketSelect('${t.id}', this.checked)"></td>` : ''}
           <td class="pn" ${enableBulk?`style="cursor:pointer" onclick="openTicket('${t.id}')"`:''}>#${t.ticket_number}</td>
           <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.archived?' <span class="pill pill-muted"><span class="ic ic-database"></span>Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)"><span class="ic ic-box"></span></span>':''}</td>
-          <td>${escapeHtml(t.customer_name||t.customer_email||'—')}</td>
+          <td>${escapeHtml(t.customer_name||t.customer_email||'—')}${ticketIsDealer(t)?' '+TK_DEALER_PILL:''}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td>${t.category?`<span class="pill ${tkCategoryColor(t.category)}">${escapeHtml(t.category)}</span>`:''}</td>
           <td><span class="src-tag">${label(t.source)}</span></td>
@@ -3048,7 +3249,7 @@ function ticketCard(t, enableBulk){
     </div>
     <div class="tk-card-subj" style="${t.has_unread?'font-weight:700':''}">${escapeHtml(t.subject)}${badges}</div>
     <div class="tk-card-meta">
-      <span>${escapeHtml(t.customer_name||t.customer_email||'No customer')}</span>
+      <span>${escapeHtml(t.customer_name||t.customer_email||'No customer')}${ticketIsDealer(t)?' '+TK_DEALER_PILL:''}</span>
       ${t.order_number?`<span>#${escapeHtml(t.order_number)}</span>`:''}
       <span>${label(t.source)}</span>
       <span>${timeAgo(t.updated_at)}</span>
@@ -5061,6 +5262,7 @@ function emailInMailbox(e, mb){ return mb==='orders' ? e.mailbox==='orders' : e.
 function emailFiltered(){
   const mb = currentMailbox();
   let list = (S.emails||[]).filter(e=>emailInMailbox(e, mb));
+  if(mb==='orders' && S.orderView) list = list.filter(e=>orderKind(e)===S.orderView);
   const f = S.emailFilters;
   if(f.view==='archived') list = list.filter(e=>e.status==='archived');
   else if(f.view==='completed') list = list.filter(e=>e.status==='completed');
@@ -5205,6 +5407,8 @@ function orderSourcePill(e){
 }
 function emailListOrderMeta(e){
   const parts=[];
+  const ok=orderKind(e);
+  parts.push(ok==='dealer' ? '<span class="pill pill-teal">Dealer</span>' : (ok==='customer' ? '<span class="pill pill-green">Customer</span>' : '<span class="pill pill-red" title="Arrived at orders@ with no dealer assigned">Needs dealer</span>'));
   const sp=orderSourcePill(e); if(sp) parts.push(sp);
   const w=waitingPill(e); if(w) parts.push(w);
   if(e.shopify_order_id) parts.push('<span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>');
@@ -7500,6 +7704,7 @@ function renderSettings(){
   el.innerHTML = warn
     + '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px">'
       + settingsTabBtn('categories','Ticket Categories')
+      + settingsTabBtn('sorter','Sort Tickets')
       + settingsTabBtn('tags','Tag Presets')
       + settingsTabBtn('templates','Reply Templates')
       + settingsTabBtn('workflow','Workflow')
@@ -7510,6 +7715,7 @@ function renderSettings(){
 
   var body = document.getElementById('settings-body');
   if(tab === 'categories')      body.innerHTML = renderSettingsCategories();
+  else if(tab === 'sorter')     body.innerHTML = renderSettingsSorter();
   else if(tab === 'tags')       body.innerHTML = renderSettingsTags();
   else if(tab === 'workflow')   body.innerHTML = renderSettingsWorkflow();
   else if(tab === 'team')       body.innerHTML = renderSettingsTeam();
