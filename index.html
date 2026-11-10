@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.08';
+const TGK_SUPPORT_VERSION = 'v2.09';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -958,7 +958,7 @@ async function loadAll(){
     // before it can decide what counts as "linked" -- see comment above.
     const [ticketsR, dealersR, teamR, templatesR, settingsR] = await Promise.allSettled([
       loadBoundedTickets(),
-      sb.from('dealers').select('id,name,email,discount_pct,po_code_prefix').then(r=>r.data||[]),
+      sb.from('dealers').select('*').then(r=>r.data||[]),
       sb.from('team_members').select('email,display_name').then(r=>r.data||[]),
       sb.from('ticket_templates').select('*').order('sort_order',{ascending:true}).then(r=>r.data||[]),
       loadSettings() // resolves to undefined; writes straight into S.settings
@@ -1428,7 +1428,7 @@ function ticketIsDealer(t){
   var d = S.dealers || [];
   if(_dlrCache.src !== d || _dlrCache.n !== d.length){
     var set = {};
-    d.forEach(function(x){ if(x && x.email) set[String(x.email).trim().toLowerCase()] = 1; });
+    d.forEach(function(x){ dealerAllEmails(x).forEach(function(em){ set[em] = 1; }); });
     _dlrCache = { src:d, n:d.length, set:set };
   }
   var em = String((t && t.customer_email) || '').trim().toLowerCase();
@@ -4969,7 +4969,7 @@ function renderTicketPanel(t){
       ${(warranty || shipErr) ? `<div style="background:var(--green-dim);border:1px solid rgba(22,163,74,.3);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:var(--t-md);font-weight:600;color:var(--green)">
         <span class="ic ic-box"></span>Sent to ERP/Warehouse — ${warranty ? 'Warranty Claim' : 'Shipment Error'} created${(warranty||shipErr).created_at ? ' ' + timeAgo((warranty||shipErr).created_at) : ''}
       </div>` : ''}
-      ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealer.email||'')}</div>` : ''}
+      ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealerOrdersEmail(dealer))}${(dealer.email && dealerOrdersEmail(dealer)!==dealer.email)?` <span style="color:var(--text3);font-size:var(--t-xs)">(main: ${escapeHtml(dealer.email)})</span>`:''}</div>` : ''}
       ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim <button class="btn btn-sm" onclick="resendToERP('${t.id}','warranty')" style="float:right;font-size:var(--t-xs);padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(warranty.status||'—')} · Cost: ${warranty.claim_cost?'$'+Number(warranty.claim_cost).toFixed(2):'—'}
         ${warranty.tracking_number?' · Tracking: '+escapeHtml(warranty.tracking_number):''}
@@ -5403,7 +5403,20 @@ function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); 
 window.renderEmailsBody = renderEmailsBody;
 
 function dealerName(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.name||d.email||'') : ''; }
-function dealerEmail(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.email||'') : ''; }
+// Dealers have a Main contact email (d.email) and an Orders email. Anything the
+// support side SENDS to a dealer uses the Orders email, falling back to the main
+// contact email only when no Orders email is set.
+function dealerOrdersEmail(d){
+  if(!d) return '';
+  var o = String(d.orders_email || d.order_email || '').trim();
+  return o || String(d.email || '').trim();
+}
+// Both addresses, lower-cased -- used to recognise an INCOMING email as a dealer.
+function dealerAllEmails(d){
+  if(!d) return [];
+  return [d.email, d.orders_email, d.order_email].map(function(x){ return String(x||'').trim().toLowerCase(); }).filter(Boolean);
+}
+function dealerEmail(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return dealerOrdersEmail(d); }
 async function setOrderDealer(id, dealerId){
   try{
     const e=(S.emails||[]).find(x=>x.id===id);
@@ -6511,7 +6524,8 @@ function _nextOrderDisplayNumber(){
 }
 function _matchDealerByEmail(email){
   if(!email) return null;
-  const d=(S.dealers||[]).find(x=>x.email && String(x.email).toLowerCase()===String(email).toLowerCase());
+  const em=String(email).trim().toLowerCase();
+  const d=(S.dealers||[]).find(x=>dealerAllEmails(x).indexOf(em)!==-1);
   return d ? d.id : null;
 }
 async function convertTicketToOrder(ticketId){
