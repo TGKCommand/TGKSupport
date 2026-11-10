@@ -4969,7 +4969,7 @@ function renderTicketPanel(t){
       ${(warranty || shipErr) ? `<div style="background:var(--green-dim);border:1px solid rgba(22,163,74,.3);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:8px;font-size:var(--t-md);font-weight:600;color:var(--green)">
         <span class="ic ic-box"></span>Sent to ERP/Warehouse — ${warranty ? 'Warranty Claim' : 'Shipment Error'} created${(warranty||shipErr).created_at ? ' ' + timeAgo((warranty||shipErr).created_at) : ''}
       </div>` : ''}
-      ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealerOrdersEmail(dealer))}${(dealer.email && dealerOrdersEmail(dealer)!==dealer.email)?` <span style="color:var(--text3);font-size:var(--t-xs)">(main: ${escapeHtml(dealer.email)})</span>`:''}</div>` : ''}
+      ${dealer ? `<div class="linked-box"><div class="lk-title">Dealer</div>${escapeHtml(dealer.name)} — ${escapeHtml(dealerOrderRecipients(dealer).join(', '))}${(dealer.email && dealerOrderList(dealer).join(', ')!==dealer.email && dealerOrderRecipients(dealer).indexOf(String(dealer.email).trim().toLowerCase())===-1)?` <span style="color:var(--text3);font-size:var(--t-xs)">(main: ${escapeHtml(dealer.email)})</span>`:''}</div>` : ''}
       ${warranty ? `<div class="linked-box"><div class="lk-title">Linked Warranty Claim <button class="btn btn-sm" onclick="resendToERP('${t.id}','warranty')" style="float:right;font-size:var(--t-xs);padding:2px 9px" title="Delete the record in the ERP first, then resend a correction">↻ Resend</button></div>
         Status: ${escapeHtml(warranty.status||'—')} · Cost: ${warranty.claim_cost?'$'+Number(warranty.claim_cost).toFixed(2):'—'}
         ${warranty.tracking_number?' · Tracking: '+escapeHtml(warranty.tracking_number):''}
@@ -5403,18 +5403,28 @@ function renderEmailsBody(){ const b=document.getElementById('emailsListBody'); 
 window.renderEmailsBody = renderEmailsBody;
 
 function dealerName(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d ? (d.name||d.email||'') : ''; }
-// Dealers have a Main contact email (d.email) and an Orders email. Anything the
-// support side SENDS to a dealer uses the Orders email, falling back to the main
-// contact email only when no Orders email is set.
-function dealerOrdersEmail(d){
-  if(!d) return '';
-  var o = String(d.orders_email || d.order_email || '').trim();
-  return o || String(d.email || '').trim();
+// Dealers have a Main contact email (d.email) and an optional Orders email
+// (d.orders_email -- may hold several addresses, comma separated; d.orders_email_cc_main
+// = also copy the main email). Support always uses the Orders email, falling back to
+// the main contact email only when no Orders email is set.
+function _splitEmails(v){ return String(v||'').split(/[,;\s]+/).map(function(x){ return x.trim(); }).filter(function(x){ return x.indexOf('@')>0; }); }
+function dealerOrderList(d){
+  if(!d) return [];
+  var o = _splitEmails(d.orders_email);
+  return o.length ? o : _splitEmails(d.email).slice(0,1);
 }
-// Both addresses, lower-cased -- used to recognise an INCOMING email as a dealer.
+// The single address used as "the dealer's email" (Shopify customer match, order contact).
+function dealerOrdersEmail(d){ return dealerOrderList(d)[0] || ''; }
+// Every address an order email should reach: the Orders list, plus the main email when "copy main" is on.
+function dealerOrderRecipients(d){
+  var l = dealerOrderList(d).slice();
+  if(d && d.orders_email_cc_main && _splitEmails(d.orders_email).length){ _splitEmails(d.email).forEach(function(m){ if(l.indexOf(m)===-1) l.push(m); }); }
+  return l;
+}
+// Both sets, lower-cased -- used to recognise an INCOMING email as a dealer.
 function dealerAllEmails(d){
   if(!d) return [];
-  return [d.email, d.orders_email, d.order_email].map(function(x){ return String(x||'').trim().toLowerCase(); }).filter(Boolean);
+  return _splitEmails(d.email).concat(_splitEmails(d.orders_email)).map(function(x){ return x.toLowerCase(); });
 }
 function dealerEmail(id){ if(!id) return ''; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return dealerOrdersEmail(d); }
 async function setOrderDealer(id, dealerId){
