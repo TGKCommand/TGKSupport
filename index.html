@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.11';
+const TGK_SUPPORT_VERSION = 'v2.12';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1060,6 +1060,7 @@ function subscribeRealtime(){
           desktopNotify('<span class="ic ic-mail"></span>New ' + (isOrder?'Order':'Email'), (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
         }
       } else if(payload.eventType==='UPDATE'){
+        rtSeen('emails', payload.new.id);
         if(idx!==-1){ S.emails[idx] = Object.assign({}, S.emails[idx], payload.new); if(S.activeEmail && S.activeEmail.id===S.emails[idx].id) S.activeEmail = S.emails[idx]; }
         else S.emails.unshift(payload.new);
       } else if(payload.eventType==='DELETE'){
@@ -1108,6 +1109,7 @@ function subscribeRealtime(){
       else if(S.page === 'tickets' || S.page === 'dashboard') renderPage();
     })
     .subscribe(function(status){
+      S._rtStatus = status;
       if(status === 'SUBSCRIBED'){
         if(S._rtWasDown){ S._rtWasDown = false; softRefresh(); }
       } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
@@ -1211,6 +1213,88 @@ window.softRefresh = softRefresh;
 })();
 
 /* ============================================================
+   ASK FIRST (v2.12)
+   Nothing resolves or completes by itself any more. Where the app used to flip a ticket to
+   Resolved or an order to Completed on its own, it now asks. Questions queue up, one popup at a time,
+   and wait their turn if another popup is open. Saying "Not yet" leaves everything as it was.
+   ============================================================ */
+const _askQ = [];
+function tgkAsk(o){
+  if(o.key){ S._asked = S._asked || {}; if(S._asked[o.key]) return; S._asked[o.key] = 1; }
+  _askQ.push(o); _askNext();
+}
+function _askNext(){
+  if(S._askOpen || !_askQ.length) return;
+  const ov = document.getElementById('modalOverlay'); if(!ov) return;
+  if(!ov.classList.contains('hidden') && (ov.innerHTML||'').trim() !== ''){ setTimeout(_askNext, 1000); return; }
+  const o = _askQ.shift(); S._askOpen = true;
+  ov.classList.remove('hidden');
+  ov.innerHTML = '<div class="modal" style="width:460px"><div class="modal-title">' + escapeHtml(o.title) + '</div>'
+    + '<div style="font-size:var(--t-md);color:var(--text2);line-height:1.6">' + o.html + '</div>'
+    + '<div class="modal-footer"><button class="btn" id="tgkAskNo">' + escapeHtml(o.no || 'Not yet') + '</button>'
+    + '<button class="btn btn-primary" id="tgkAskYes">' + escapeHtml(o.yes || 'Yes') + '</button></div></div>';
+  document.getElementById('tgkAskNo').onclick = function(){ closeModal(); };
+  document.getElementById('tgkAskYes').onclick = async function(){
+    this.disabled = true;
+    try{ await o.onYes(); }catch(e){ toast('Failed: ' + (e.message||e), true); }
+    closeModal();
+  };
+}
+window.tgkAsk = tgkAsk;
+function promptShippedOrders(list){
+  S._shipAsked = S._shipAsked || {};
+  const fresh = (list||[]).filter(e=>e && !S._shipAsked[e.id] && e.status!=='completed' && e.status!=='archived');
+  if(!fresh.length) return;
+  fresh.forEach(e=>{ S._shipAsked[e.id] = 1; });
+  const nm = e => escapeHtml(emailRef(e)) + ' (' + escapeHtml((orderDisplayName(e)||e.customer_email||'order')) + ')';
+  const html = fresh.length===1
+    ? 'Order <b>' + nm(fresh[0]) + '</b> has shipped. Mark it complete?'
+    : fresh.length + ' orders have shipped:<br>' + fresh.slice(0,8).map(nm).join('<br>') + (fresh.length>8 ? '<br>and ' + (fresh.length-8) + ' more' : '') + '<br><br>Mark them all complete?';
+  tgkAsk({
+    title: fresh.length===1 ? 'Order shipped' : fresh.length + ' orders shipped',
+    html: html, yes: fresh.length===1 ? 'Mark complete' : 'Mark all complete', no: 'Not yet',
+    onYes: async function(){ for(const e of fresh){ await setOrderComplete(e.id, true); } }
+  });
+}
+window.promptShippedOrders = promptShippedOrders;
+
+// Open the next waiting conversation after you reply (only when you came from Needs Reply or the dashboard queue).
+function nrAutoNextOn(){ try{ return localStorage.getItem('tgk_nr_next') !== '0'; }catch(_){ return true; } }
+function setNrAutoNext(v){ try{ localStorage.setItem('tgk_nr_next', v ? '1' : '0'); }catch(_){} }
+window.setNrAutoNext = setNrAutoNext;
+function nrAdvance(id){
+  if(!S._nrFrom || !nrAutoNextOn()) return;
+  const cur = S.activeTicket || S.activeEmail;
+  if(!cur || cur.id !== id) return;
+  let items = needsReplyItems();
+  if(items.some(i=>i.id===id)) return; // the reply did not go out, or it was an internal note
+  if(S.page==='needsreply'){
+    if((S.nrType||'all')!=='all') items = items.filter(i=>i.type===S.nrType);
+    if((S.nrDir||'oldest')==='newest') items = items.slice().reverse();
+  } else if(S.page==='dashboard' && (S.dashNr||'all')!=='all'){
+    items = items.filter(i=>i.type===S.dashNr);
+  }
+  refreshView();
+  const nxt = items[0];
+  if(!nxt){ closePanel(); toast('Nothing left waiting on a reply'); return; }
+  toast('Next: ' + nxt.ref + ' \u00b7 ' + nxt.who);
+  if(nxt.type==='ticket') openTicket(nxt.id); else openEmail(nxt.id);
+}
+
+// Self-check that live updates really arrive (tells you if a table is missing from the realtime publication).
+function rtExpect(table, id){
+  S._rt = S._rt || {}; const k = table + ':' + id; S._rt[k] = 1;
+  setTimeout(function(){
+    if(!S._rt[k]) return; delete S._rt[k];
+    if(S._rtStatus !== 'SUBSCRIBED') return;
+    S._rtWarned = S._rtWarned || {};
+    if(S._rtWarned[table]) return; S._rtWarned[table] = 1;
+    toast('Live updates for ' + table + ' are not reaching this tab. Run support_center_v2_12.sql in Supabase.', true);
+  }, 8000);
+}
+function rtSeen(table, id){ if(S._rt) delete S._rt[table + ':' + id]; }
+
+/* ============================================================
    ERP → TICKET PING-BACK
    When the ERP ships a warranty claim (status → 'Shipped') or a
    shipment error (tracking_number newly set / status → 'Reshipping'),
@@ -1236,7 +1320,7 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
     const noteBody = `ERP update: ${kind==='warranty'?'Warranty claim':'Shipment error'} marked as shipped`
       + (newRow.carrier ? ` via ${newRow.carrier}` : '')
       + (newRow.tracking_number ? ` — tracking: ${newRow.tracking_number}` : '')
-      + `. Ticket marked resolved automatically — if the customer replies, it'll reopen. (Synced automatically from the ERP.)`;
+      + `. (Synced automatically from the ERP.)`;
 
     await sb.from('ticket_messages').insert({
       ticket_id: ticket.id,
@@ -1246,10 +1330,7 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
       is_internal_note: true
     });
 
-    const needsUpdate = ticket.status !== 'closed';
     const { data: updated, error } = await sb.from('tickets').update({
-      status: needsUpdate ? 'resolved' : ticket.status,
-      resolved_at: needsUpdate ? new Date().toISOString() : ticket.resolved_at,
       has_unread: true,
       updated_at: new Date().toISOString()
     }).eq('id', ticket.id).select().single();
@@ -1262,9 +1343,20 @@ async function handleErpClaimUpdate(kind, oldRow, newRow){
       await loadMessages(ticket.id);
       renderTicketPanel(updated);
     }
-    toast(`Ticket #${updated.ticket_number} marked resolved — shipped from the ERP`);
-    renderNav();
-    if(S.page==='tickets' || S.page==='dashboard') renderPage();
+    toast(`Ticket #${updated.ticket_number}: shipped from the ERP`);
+    refreshView();
+    if(!['resolved','closed'].includes(updated.status)){
+      tgkAsk({
+        key: 'erp-' + ticket.id + '-' + (newRow.tracking_number || newRow.status),
+        title: 'Shipped from the ERP',
+        html: 'The ' + (kind==='warranty' ? 'warranty claim' : 'shipment error') + ' on ticket <b>#' + escapeHtml(String(updated.ticket_number)) + '</b>'
+          + (updated.customer_name ? ' (' + escapeHtml(updated.customer_name) + ')' : '') + ' has shipped'
+          + (newRow.carrier ? ' via ' + escapeHtml(newRow.carrier) : '') + (newRow.tracking_number ? ', tracking ' + escapeHtml(newRow.tracking_number) : '')
+          + '.<br><br>Is this ticket resolved?',
+        yes: 'Yes, resolve it', no: 'Not yet',
+        onYes: function(){ return updateTicketField(ticket.id, 'status', 'resolved'); }
+      });
+    }
   }catch(e){
     console.error('Failed to sync ERP shipment back to ticket:', e);
   }
@@ -1283,6 +1375,7 @@ function handleTicketRealtime(payload){
       desktopNotify('<span class="ic ic-ticket"></span>New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
     }
   } else if(payload.eventType === 'UPDATE'){
+    rtSeen('tickets', payload.new.id);
     if(idx !== -1) S.tickets[idx] = Object.assign({}, S.tickets[idx], payload.new);
     else S.tickets.unshift(payload.new);
     if(S.activeTicket && S.activeTicket.id === payload.new.id && idx !== -1) S.activeTicket = S.tickets[idx];
@@ -1823,6 +1916,7 @@ function goCategory(cat){
 function goPage(id){
   if(id==='activitylog' && !S.canViewActivityLog) id='dashboard'; // cosmetic; the database refuses non-viewers anyway
   S.page = id;
+  S._nrFrom = false;
   if(id==='tickets') S.filters.route = '';
   if(id==='orders') S.orderView = '';
   if(id==='reports') window._respCache = {}; // fresh response times each time Reports is opened
@@ -2706,7 +2800,7 @@ function renderDashboard(){
       const h = Math.max(0, Math.floor((Date.now()-it.ts)/3600000));
       const wait = h>=48 ? (Math.floor(h/24)+'d') : (h+'h');
       const overdue = h>=EMAIL_WAIT_HOURS;
-      const open = it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`;
+      const open = 'S._nrFrom=true; ' + (it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`);
       return `<tr class="rowlink" onclick="${open}"><td>${typePill[it.type]}</td><td class="pn">${escapeHtml(it.ref)}</td><td class="main-col">${escapeHtml(it.who)}</td><td>${escapeHtml(it.subject)}</td><td class="pn"><span style="color:${overdue?'var(--orange)':'var(--text3)'}">${overdue?'\u23f0 ':''}${wait}</span></td></tr>`;
     }).join('')}
   </tbody></table>${shown.length>10 ? `<div style="padding:10px 14px"><button class="btn btn-sm" onclick="goPage('needsreply')">View all ${shown.length}</button></div>` : ''}</div>`
@@ -5504,6 +5598,7 @@ async function updateEmailField(id, field, value, quiet, skipUndo){
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
     if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
+    rtExpect('emails', id);
     renderNav();
     if(LIVE_PAGES.includes(S.page)) renderPage();
     if(!skipUndo && JSON.stringify(before) !== JSON.stringify(value)){
@@ -6037,7 +6132,7 @@ async function loadOrdersFulfillment(){
     e._fulfillment = computeOrderFulfillment(byOrder[e.shopify_order_id]);
     if(e._fulfillment && e._fulfillment.allShipped && e.status!=='completed') toComplete.push(e);
   });
-  for(const e of toComplete){ await autoCompleteOrder(e.id); }
+  promptShippedOrders(toComplete);
 }
 window.loadOrdersFulfillment = loadOrdersFulfillment;
 async function refreshOrderFulfillment(id){
@@ -6046,7 +6141,7 @@ async function refreshOrderFulfillment(id){
   try{
     const { data } = await sb.from('sales').select('order_number,pn,qty,fulfillment_status,tracking_number,carrier,shipped_at').eq('order_number', e.shopify_order_id);
     e._fulfillment = computeOrderFulfillment(data||[]);
-    if(e._fulfillment && e._fulfillment.allShipped && e.status!=='completed' && e.status!=='archived'){ await autoCompleteOrder(id); }
+    if(e._fulfillment && e._fulfillment.allShipped && e.status!=='completed' && e.status!=='archived'){ promptShippedOrders([e]); }
     renderOrderFulfillmentBox(id);
     renderNav();
     if(S.page==='orders'||S.page==='emails') renderEmailsBody();
@@ -6444,7 +6539,7 @@ function emailNeedsReply(e){
   return !!e.has_unread;
 }
 function ticketNeedsReply(t){
-  if(!t || t.archived || t.merged_into_id || ['resolved','closed','waiting_customer'].includes(t.status)) return false;
+  if(!t || t.archived || t.merged_into_id || t.converted_order_id || ['resolved','closed','waiting_customer'].includes(t.status)) return false;
   if(t.last_direction==='inbound') return true;
   if(t.last_direction==='outbound') return false;
   return !!t.has_unread && ['open','pending'].includes(t.status);
@@ -6461,13 +6556,19 @@ function waitingPill(e){
   return '<span class="pill pill-orange" title="Customer waiting '+h+'h for a reply">\u23f0 Waiting '+disp+'</span>';
 }
 // Unified list of everything where the customer spoke last and no reply followed.
+// When the customer last spoke. Uses tickets.last_customer_message_at once the v2.12 SQL has run;
+// until then it falls back to updated_at, which is what the app used before.
+function ticketWaitingSince(t){
+  if('last_customer_message_at' in t) return t.last_customer_message_at || t.created_at;
+  return t.updated_at || t.created_at;
+}
 function needsReplyItems(){
   const items=[];
   (S.tickets||[]).forEach(t=>{ if(ticketNeedsReply(t)) items.push({
     type:'ticket', id:t.id, ref:'#'+t.ticket_number,
     who: t.customer_name || t.customer_email || 'Customer',
     subject: t.subject||'(no subject)',
-    ts: new Date(t.updated_at || t.created_at).getTime()
+    ts: new Date(ticketWaitingSince(t)).getTime()
   }); });
   (S.emails||[]).forEach(e=>{ if(emailNeedsReply(e)) items.push({
     type: e.mailbox==='orders'?'order':'email', id:e.id, ref: emailRef(e),
@@ -6491,7 +6592,8 @@ function renderNeedsReply(){
     + [['all','All'],['ticket','Tickets'],['email','Emails'],['order','Orders']].map(function(c){ return '<button class="btn btn-sm '+(nrType===c[0]?'btn-teal':'')+'" onclick="setNrType(\''+c[0]+'\')">'+c[1]+' ('+cnt(c[0])+')</button>'; }).join('')
     + '<span style="flex:1"></span>'
     + '<button class="btn btn-sm '+(nrDir==='oldest'?'btn-teal':'')+'" onclick="setNrDir(\'oldest\')">Waiting longest</button>'
-    + '<button class="btn btn-sm '+(nrDir==='newest'?'btn-teal':'')+'" onclick="setNrDir(\'newest\')">Newest first</button></div>';
+    + '<button class="btn btn-sm '+(nrDir==='newest'?'btn-teal':'')+'" onclick="setNrDir(\'newest\')">Newest first</button>'
+    + '<label class="checkbox-row" style="margin:0 0 0 8px;cursor:pointer"><input type="checkbox" '+(nrAutoNextOn()?'checked':'')+' onchange="setNrAutoNext(this.checked)"><span>Open next after I reply</span></label></div>';
   const typePill = { ticket:'<span class="pill pill-muted">Ticket</span>', email:'<span class="pill pill-teal">Email</span>', order:'<span class="pill pill-green">Order</span>' };
   el.innerHTML = `
     <div class="panel-title" style="border:none">Needs Reply${allItems.length?' ('+allItems.length+')':''}</div>
@@ -6502,7 +6604,7 @@ function renderNeedsReply(){
         const h=Math.floor((Date.now()-it.ts)/3600000);
         const wait = h>=48?(Math.floor(h/24)+'d'):(h+'h');
         const overdue = h>=EMAIL_WAIT_HOURS;
-        const open = it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`;
+        const open = 'S._nrFrom=true; ' + (it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`);
         return `<tr class="rowlink" onclick="${open}">
           <td>${typePill[it.type]}</td>
           <td class="pn">${escapeHtml(it.ref)}</td>
@@ -6738,14 +6840,20 @@ async function convertTicketToOrder(ticketId){
       rows.push({ email_id:order.id, direction: m.sender_type==='staff'?'outbound':'inbound', sender_name: m.sender_name||(m.sender_type==='staff'?'TGK Support':(t.customer_email||'Customer')), body: m.body||'', attachments: (m.attachments||[]), created_at: m.created_at });
     });
     if(rows.length){ const { error:mErr } = await sb.from('email_messages').insert(rows); if(mErr) throw mErr; }
-    await sb.from('tickets').update({ status:'resolved', converted_order_id: order.id, resolved_at:new Date().toISOString(), updated_at:new Date().toISOString() }).eq('id', ticketId);
+    await sb.from('tickets').update({ converted_order_id: order.id, updated_at:new Date().toISOString() }).eq('id', ticketId);
     try{ await sb.from('ticket_messages').insert({ ticket_id:ticketId, sender_type:'system', sender_name:'System', body:'Converted to order ORD-'+String(num).padStart(4,'0')+' by '+((S.user&&S.user.email)||'staff')+'. Communication continues on that order.', is_internal_note:true }); }catch(_){}
-    const ti=S.tickets.findIndex(x=>x.id===ticketId); if(ti!==-1){ S.tickets[ti].status='resolved'; S.tickets[ti].converted_order_id=order.id; }
+    const ti=S.tickets.findIndex(x=>x.id===ticketId); if(ti!==-1){ S.tickets[ti].converted_order_id=order.id; }
     S.emails.unshift(order);
     logOrderAudit(order.id,'Created from ticket','#'+t.ticket_number);
     toast('Created order ORD-'+String(num).padStart(4,'0'));
     closePanel(); renderNav();
     goPage('orders'); setTimeout(()=>openEmail(order.id), 60);
+    tgkAsk({
+      title: 'Ticket converted to an order',
+      html: 'Ticket <b>#' + escapeHtml(String(t.ticket_number)) + '</b> now has order <b>ORD-' + String(num).padStart(4,'0') + '</b>.<br><br>Is the ticket resolved?',
+      yes: 'Yes, resolve it', no: 'Not yet',
+      onYes: function(){ return updateTicketField(ticketId, 'status', 'resolved'); }
+    });
   }catch(err){
     if(createdOrderId){ try{ await sb.from('emails').delete().eq('id', createdOrderId); }catch(_){} const i=S.emails.findIndex(x=>x.id===createdOrderId); if(i!==-1) S.emails.splice(i,1); }
     toast('Convert failed: '+err.message, true);
@@ -6819,6 +6927,7 @@ async function updateTicketField(id, field, value, skipUndo){
       pushUndo({ label:'ticket #'+num+' '+field, undo:()=>updateTicketField(id, field, oldValue, true), redo:()=>updateTicketField(id, field, value, true) });
     }
     toast('Ticket updated');
+    rtExpect('tickets', id);
     renderNav();
     renderPage();
     if(S.activeTicket && S.activeTicket.id === id){
@@ -7691,6 +7800,16 @@ async function sendMessage(ticketId){
   }
 }
 window.sendMessage = sendMessage;
+(function(){
+  ['sendMessage','sendEmailReply'].forEach(function(name){
+    const orig = window[name];
+    window[name] = async function(id){
+      const r = await orig.apply(this, arguments);
+      try{ nrAdvance(id); }catch(_){}
+      return r;
+    };
+  });
+})();
 
 /* ============================================================
    ORDER NUMBER LOOKUP HELPER
@@ -7885,6 +8004,7 @@ function closeModal(){
   const ov = document.getElementById('modalOverlay');
   ov.classList.add('hidden');
   ov.innerHTML = '';
+  if(S._askOpen){ S._askOpen = false; setTimeout(_askNext, 200); }
 }
 window.closeModal = closeModal;
 
