@@ -460,6 +460,10 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
         <input type="checkbox" id="chatAvailableToggle" onchange="toggleChatAvailability(this.checked)">
         <span>Available for live chat</span>
       </label>
+      <label class="checkbox-row" style="margin-top:6px;cursor:pointer">
+        <input type="checkbox" id="soundToggle" onchange="setSoundOn(this.checked)">
+        <span>Sound on new messages</span>
+      </label>
       <button class="btn btn-sm" id="enablePushBtn" style="margin-top:8px;width:100%" onclick="enableSupportPush()">&#128276; Enable notifications</button>
       <div class="sync-sub" style="margin-top:6px;cursor:pointer" onclick="doLogout()">Sign out</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;padding:0 2px">
@@ -503,7 +507,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.12';
+const TGK_SUPPORT_VERSION = 'v2.13';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1042,6 +1046,7 @@ function subscribeRealtime(){
           const t = S.tickets.find(x=>x.id===m.ticket_id);
           const nowStr = new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
           toast('New reply on ticket' + (t ? ' #' + t.ticket_number : '') + ' from ' + (m.sender_name||'customer') + ' · ' + nowStr);
+          playChime();
           desktopNotify(
             '<span class="ic ic-chat"></span>New reply' + (t ? ' — Ticket #' + t.ticket_number : ''),
             (m.sender_name||'Customer') + ': ' + (m.body||'').slice(0,120),
@@ -1057,6 +1062,7 @@ function subscribeRealtime(){
           S.emails.unshift(payload.new);
           const isOrder = payload.new.mailbox==='orders';
           toast('<span class="ic ic-mail"></span>New ' + (isOrder?'order':'email') + ' from ' + (payload.new.customer_email||'someone'));
+          playChime();
           desktopNotify('<span class="ic ic-mail"></span>New ' + (isOrder?'Order':'Email'), (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
         }
       } else if(payload.eventType==='UPDATE'){
@@ -1125,7 +1131,7 @@ function subscribeRealtime(){
    Emails, Orders, Rebates etc. always agree. Debounced so a burst of events is one redraw,
    and held back (not lost) while you are typing in a field on the page.
    ============================================================ */
-const LIVE_PAGES = ['dashboard','needsreply','tickets','emails','orders','rebates','warranty','shiperrors','quarantine','livechat'];
+const LIVE_PAGES = ['dashboard','needsreply','followup','tickets','emails','orders','rebates','warranty','shiperrors','quarantine','livechat'];
 let _rvTimer = null;
 function typingInPage(){
   const ae = document.activeElement;
@@ -1233,7 +1239,7 @@ function _askNext(){
     + '<div style="font-size:var(--t-md);color:var(--text2);line-height:1.6">' + o.html + '</div>'
     + '<div class="modal-footer"><button class="btn" id="tgkAskNo">' + escapeHtml(o.no || 'Not yet') + '</button>'
     + '<button class="btn btn-primary" id="tgkAskYes">' + escapeHtml(o.yes || 'Yes') + '</button></div></div>';
-  document.getElementById('tgkAskNo').onclick = function(){ closeModal(); };
+  document.getElementById('tgkAskNo').onclick = function(){ try{ if(o.onNo) o.onNo(); }catch(_){} closeModal(); };
   document.getElementById('tgkAskYes').onclick = async function(){
     this.disabled = true;
     try{ await o.onYes(); }catch(e){ toast('Failed: ' + (e.message||e), true); }
@@ -1243,7 +1249,7 @@ function _askNext(){
 window.tgkAsk = tgkAsk;
 function promptShippedOrders(list){
   S._shipAsked = S._shipAsked || {};
-  const fresh = (list||[]).filter(e=>e && !S._shipAsked[e.id] && e.status!=='completed' && e.status!=='archived');
+  const fresh = (list||[]).filter(e=>e && !S._shipAsked[e.id] && !askDismissed('ship-' + e.id) && e.status!=='completed' && e.status!=='archived');
   if(!fresh.length) return;
   fresh.forEach(e=>{ S._shipAsked[e.id] = 1; });
   const nm = e => escapeHtml(emailRef(e)) + ' (' + escapeHtml((orderDisplayName(e)||e.customer_email||'order')) + ')';
@@ -1253,6 +1259,7 @@ function promptShippedOrders(list){
   tgkAsk({
     title: fresh.length===1 ? 'Order shipped' : fresh.length + ' orders shipped',
     html: html, yes: fresh.length===1 ? 'Mark complete' : 'Mark all complete', no: 'Not yet',
+    onNo: function(){ askDismiss(fresh.map(function(e){ return 'ship-' + e.id; })); },
     onYes: async function(){ for(const e of fresh){ await setOrderComplete(e.id, true); } }
   });
 }
@@ -1270,6 +1277,7 @@ function nrAdvance(id){
   if(items.some(i=>i.id===id)) return; // the reply did not go out, or it was an internal note
   if(S.page==='needsreply'){
     if((S.nrType||'all')!=='all') items = items.filter(i=>i.type===S.nrType);
+    items = items.filter(nrWhoMatch);
     if((S.nrDir||'oldest')==='newest') items = items.slice().reverse();
   } else if(S.page==='dashboard' && (S.dashNr||'all')!=='all'){
     items = items.filter(i=>i.type===S.dashNr);
@@ -1293,6 +1301,230 @@ function rtExpect(table, id){
   }, 8000);
 }
 function rtSeen(table, id){ if(S._rt) delete S._rt[table + ':' + id]; }
+
+/* ============================================================
+   v2.13 HELPERS
+   1 tab title + sound   2 owner filters + claim   3 shared saved views   4 hold row order
+   5 duplicate tickets   7 remembered "Not yet"    8 follow-ups on waiting-on-customer tickets
+   ============================================================ */
+
+/* ---- 1. Tab title count and optional chime ---- */
+const TAB_BASE_TITLE = (document.title || 'Support Center').replace(/^\(\d+\)\s*/, '');
+function updateTabTitle(){
+  let n = 0; try{ n = needsReplyItems().length; }catch(_){}
+  const prefix = n ? '(' + n + ') ' : '';
+  document.title = prefix + TAB_BASE_TITLE;
+  if(window.parent && window.parent !== window){
+    try{
+      if(S._parentTitle == null) S._parentTitle = String(window.parent.document.title || '').replace(/^\(\d+\)\s*/, '');
+      window.parent.document.title = prefix + S._parentTitle;   // works when the Command Center is the same site
+    }catch(_){}
+    try{ window.parent.postMessage({ type:'tgk-support-count', needsReply:n }, '*'); }catch(_){}
+  }
+}
+window.addEventListener('pagehide', function(){
+  try{ if(window.parent && window.parent !== window && S._parentTitle != null) window.parent.document.title = S._parentTitle; }catch(_){}
+});
+function soundOn(){ try{ return localStorage.getItem('tgk_sound') === '1'; }catch(_){ return false; } }
+let _ac = null, _lastChime = 0;
+function playChime(force){
+  if(!force && !soundOn()) return;
+  const now = Date.now(); if(!force && now - _lastChime < 1500) return; _lastChime = now;
+  try{
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    if(_ac.state === 'suspended') _ac.resume();
+    [[880, 0], [1175, 0.13]].forEach(function(n){
+      const o = _ac.createOscillator(), g = _ac.createGain(), t0 = _ac.currentTime + n[1];
+      o.type = 'sine'; o.frequency.value = n[0];
+      g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.15, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+      o.connect(g); g.connect(_ac.destination); o.start(t0); o.stop(t0 + 0.45);
+    });
+  }catch(_){}
+}
+function setSoundOn(v){ try{ localStorage.setItem('tgk_sound', v ? '1' : '0'); }catch(_){} if(v) playChime(true); }
+window.setSoundOn = setSoundOn;
+window.addEventListener('load', function(){ const c = document.getElementById('soundToggle'); if(c) c.checked = soundOn(); });
+setTimeout(function(){ const c = document.getElementById('soundToggle'); if(c) c.checked = soundOn(); }, 0);
+
+/* ---- 2. Owner on Needs Reply, filter, and optional claim-on-open ---- */
+function myEmail(){ return String((S.user && S.user.email) || '').toLowerCase(); }
+function nrWhoMatch(i){
+  const w = S.nrWho || 'all', o = String(i.owner || '').toLowerCase();
+  if(w === 'mine') return o === myEmail();
+  if(w === 'unassigned') return !o;
+  return true;
+}
+function setNrWho(w){ S.nrWho = w; renderNeedsReply(); }
+window.setNrWho = setNrWho;
+function claimOnOpenOn(){ try{ return localStorage.getItem('tgk_claim_open') === '1'; }catch(_){ return false; } }
+function setClaimOnOpen(v){ try{ localStorage.setItem('tgk_claim_open', v ? '1' : '0'); }catch(_){} }
+window.setClaimOnOpen = setClaimOnOpen;
+function ownerShort(o){ return String(o || '').split('@')[0]; }
+function nrOwnerCell(o){
+  if(!o) return '<span style="color:var(--text3)">Unassigned</span>';
+  if(String(o).toLowerCase() === myEmail()) return '<span style="color:var(--teal)">You</span>';
+  return '<span style="color:var(--orange)">' + escapeHtml(ownerShort(o)) + '</span>';
+}
+function claimIfWanted(kind, id){
+  const rec = kind === 'ticket' ? (S.tickets||[]).find(x=>x.id===id) : (S.emails||[]).find(x=>x.id===id);
+  if(!rec || rec.archived || rec.status === 'archived') return;
+  const me = (S.user && S.user.email) || '';
+  if(rec.assigned_to){
+    if(String(rec.assigned_to).toLowerCase() !== myEmail()) toast('Already assigned to ' + ownerShort(rec.assigned_to));
+    return;
+  }
+  if(!claimOnOpenOn() || !me) return;
+  if(kind === 'ticket') updateTicketField(id, 'assigned_to', me, true);
+  else updateEmailField(id, 'assigned_to', me, true, true);
+}
+
+/* ---- 3. Saved views live in support_settings (follow you between computers, team views are shared) ---- */
+function svKey(){ return 'saved_views:' + myEmail(); }
+function getSavedViews(){
+  const v = S.settings && S.settings[svKey()];
+  if(Array.isArray(v)) return v;
+  let local = []; try{ local = JSON.parse(localStorage.getItem(savedViewsKey()) || '[]'); }catch(_){}
+  if(local.length && S.settingsTable === 'ok' && !S._svMigrated){ S._svMigrated = true; S.settings[svKey()] = local; saveSetting(svKey(), local); }
+  return local;
+}
+function setSavedViews(v){
+  if(S.settings) S.settings[svKey()] = v;
+  if(S.settingsTable === 'ok') saveSetting(svKey(), v);
+  try{ localStorage.setItem(savedViewsKey(), JSON.stringify(v)); }catch(_){}
+}
+function getTeamViews(){ const v = S.settings && S.settings['saved_views:shared']; return Array.isArray(v) ? v : []; }
+function setTeamViews(v){ if(S.settings) S.settings['saved_views:shared'] = v; if(S.settingsTable === 'ok') saveSetting('saved_views:shared', v); }
+
+/* ---- 4. Hold the order of the list while a ticket or email is open ---- */
+function holdListOrder(){
+  if(S._hold) return;
+  try{
+    S._hold = null;
+    const t = S.page === 'tickets' ? filteredTickets().map(x=>x.id) : null;
+    const e = (S.page === 'emails' || S.page === 'orders') ? emailFiltered().map(x=>x.id) : null;
+    S._hold = (t || e) ? { tickets:t, emails:e } : null;
+  }catch(_){ S._hold = null; }
+}
+function releaseListOrder(){ if(S._hold){ S._hold = null; try{ refreshView(); }catch(_){} } }
+
+/* ---- 5. Duplicate tickets: same customer, same subject, still open ---- */
+function dupSubjectKey(sj){ return String(sj || '').toLowerCase().replace(/^(\s*(re|fwd?|fw)\s*:\s*)+/, '').replace(/\s+/g, ' ').trim(); }
+function dupDismissed(){ try{ return JSON.parse(localStorage.getItem('tgk_dup_ok') || '{}'); }catch(_){ return {}; } }
+function dupMap(){
+  const groups = {}, ok = dupDismissed(), out = {};
+  (S.tickets||[]).forEach(function(t){
+    if(t.merged_into_id || t.archived || t.is_live_chat || ['resolved','closed'].includes(t.status)) return;
+    const em = String(t.customer_email || '').trim().toLowerCase(), sj = dupSubjectKey(t.subject);
+    if(!em || !sj) return;
+    (groups[em + '|' + sj] = groups[em + '|' + sj] || []).push(t);
+  });
+  Object.keys(groups).forEach(function(k){
+    const g = groups[k]; if(g.length < 2) return;
+    g.sort(function(a,b){ return new Date(a.created_at) - new Date(b.created_at); });
+    const first = g[0];
+    for(let i = 1; i < g.length; i++){
+      if(ok[g[i].id]) continue;
+      if(new Date(g[i].created_at) - new Date(first.created_at) > 7 * 86400000) continue;
+      out[g[i].id] = first;
+    }
+  });
+  return out;
+}
+function dupDismiss(id){
+  const m = dupDismissed(); m[id] = Date.now();
+  try{ localStorage.setItem('tgk_dup_ok', JSON.stringify(m)); }catch(_){}
+  const b = document.getElementById('dupBanner'); if(b) b.remove();
+  toast('Marked as not a duplicate'); refreshView();
+  if(document.getElementById('dupModalList')) openDupModal();
+}
+window.dupDismiss = dupDismiss;
+function dupBanner(){
+  const n = Object.keys(dupMap()).length;
+  if(!n) return '';
+  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;margin-bottom:10px;border:1px solid rgba(224,123,40,.35);background:var(--orange-dim);border-radius:var(--radius-sm);font-size:var(--t-md)">'
+    + '<span>' + n + ' possible duplicate' + (n===1?'':'s') + ' (same customer and subject)</span><span style="flex:1"></span>'
+    + '<button class="btn btn-sm" onclick="openDupModal()">Review</button></div>';
+}
+function openDupModal(){
+  const dm = dupMap(), ids = Object.keys(dm);
+  const ov = document.getElementById('modalOverlay'); ov.classList.remove('hidden');
+  const rows = ids.map(function(id){
+    const d = S.tickets.find(x=>x.id===id), f = dm[id]; if(!d) return '';
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--border)">'
+      + '<div style="font-size:var(--t-md);font-weight:500">#' + d.ticket_number + ' duplicates #' + f.ticket_number + '</div>'
+      + '<div style="font-size:var(--t-sm);color:var(--text3);margin:2px 0 8px">' + escapeHtml(d.subject || '') + ' \u00b7 ' + escapeHtml(d.customer_name || d.customer_email || '') + ' \u00b7 ' + timeAgo(d.created_at) + '</div>'
+      + '<button class="btn btn-sm btn-teal" onclick="closeModal();confirmMerge(\'' + d.id + '\',\'' + f.id + '\')">Merge #' + d.ticket_number + ' into #' + f.ticket_number + '</button> '
+      + '<button class="btn btn-sm" onclick="dupDismiss(\'' + d.id + '\')">Not a duplicate</button></div>';
+  }).join('');
+  ov.innerHTML = '<div class="modal"><div class="modal-title">Possible duplicates</div><div id="dupModalList" style="max-height:60vh;overflow-y:auto">'
+    + (rows || '<div class="empty">No duplicates found.</div>') + '</div><div class="modal-footer"><button class="btn" onclick="closeModal()">Close</button></div></div>';
+}
+window.openDupModal = openDupModal;
+function addDupBanner(t){
+  try{
+    if(!t) return; const f = dupMap()[t.id]; if(!f) return;
+    const tr = document.getElementById('tkTracker'); if(!tr || document.getElementById('dupBanner')) return;
+    tr.insertAdjacentHTML('beforebegin', '<div id="dupBanner" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border:1px solid rgba(224,123,40,.35);background:var(--orange-dim);border-radius:var(--radius-sm);font-size:var(--t-md)">'
+      + '<span>Possible duplicate of <b>#' + f.ticket_number + '</b> (same customer and subject)</span><span style="flex:1"></span>'
+      + '<button class="btn btn-sm btn-teal" onclick="confirmMerge(\'' + t.id + '\',\'' + f.id + '\')">Merge into #' + f.ticket_number + '</button>'
+      + '<button class="btn btn-sm" onclick="dupDismiss(\'' + t.id + '\')">Not a duplicate</button></div>');
+  }catch(_){}
+}
+
+/* ---- 7. "Not yet" is remembered for 24 hours ---- */
+function askDismissed(key){
+  try{ const m = JSON.parse(localStorage.getItem('tgk_ask_no') || '{}'); return !!m[key] && Date.now() - m[key] < 86400000; }catch(_){ return false; }
+}
+function askDismiss(keys){
+  try{
+    const m = JSON.parse(localStorage.getItem('tgk_ask_no') || '{}'), now = Date.now();
+    (Array.isArray(keys) ? keys : [keys]).forEach(function(k){ m[k] = now; });
+    Object.keys(m).forEach(function(k){ if(now - m[k] > 7 * 86400000) delete m[k]; });
+    localStorage.setItem('tgk_ask_no', JSON.stringify(m));
+  }catch(_){}
+}
+
+/* ---- 8. Follow up: waiting on the customer, and they've gone quiet ---- */
+function followDays(){ const n = Number(S.settings && S.settings.followup_days); return (isFinite(n) && n > 0) ? n : 3; }
+function followSnoozeMap(){ const m = S.settings && S.settings.followup_snooze; return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; }
+function followUpItems(){
+  const lim = followDays() * 86400000, now = Date.now(), sn = followSnoozeMap(), out = [];
+  (S.tickets||[]).forEach(function(t){
+    if(t.status !== 'waiting_customer' || t.archived || t.merged_into_id || t.converted_order_id) return;
+    if(t.last_direction === 'inbound') return;                       // the customer spoke last, that is a reply for you, not a follow-up
+    const since = new Date(t.last_reply_at || t.updated_at || t.created_at).getTime();
+    if(now - since < lim) return;
+    if(sn[t.id] && sn[t.id] > now) return;
+    out.push({ id:t.id, ref:'#' + t.ticket_number, who:t.customer_name || t.customer_email || 'Customer', subject:t.subject || '(no subject)', since:since, owner:t.assigned_to || '' });
+  });
+  return out.sort(function(a,b){ return a.since - b.since; });
+}
+async function setFollowDays(n){ if(await saveSetting('followup_days', Number(n))) renderFollowUp(); }
+async function snoozeFollow(id, days){
+  const m = Object.assign({}, followSnoozeMap()), now = Date.now();
+  Object.keys(m).forEach(function(k){ if(m[k] < now) delete m[k]; });
+  m[id] = now + days * 86400000;
+  if(await saveSetting('followup_snooze', m)){ toast('Snoozed for ' + days + ' day' + (days===1?'':'s')); refreshView(); }
+}
+async function resolveFollow(id){ await updateTicketField(id, 'status', 'resolved'); refreshView(); }
+window.setFollowDays = setFollowDays; window.snoozeFollow = snoozeFollow; window.resolveFollow = resolveFollow;
+function renderFollowUp(){
+  const el = document.getElementById('content'), items = followUpItems(), d = followDays();
+  const now = Date.now();
+  el.innerHTML = '<div class="panel-title" style="border:none">Follow up' + (items.length ? ' (' + items.length + ')' : '') + '</div>'
+    + '<div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">Tickets marked Waiting on customer where nobody has heard back. Replying here restarts the clock.</div>'
+    + '<div class="filter-bar" style="margin-bottom:10px"><span style="font-size:var(--t-md)">Show tickets quiet for</span>'
+    + '<select class="form-input" style="width:auto" onchange="setFollowDays(this.value)">' + [1,2,3,5,7,14].map(function(n){ return '<option value="' + n + '"' + (n===d?' selected':'') + '>' + n + ' day' + (n===1?'':'s') + '</option>'; }).join('') + '</select></div>'
+    + (items.length ? '<div class="tbl-wrap"><table><thead><tr><th>#</th><th>Customer</th><th>Subject</th><th>Quiet for</th><th>Owner</th><th></th></tr></thead><tbody>'
+      + items.map(function(it){
+        const days = Math.floor((now - it.since) / 86400000);
+        return '<tr class="rowlink" onclick="openTicket(\'' + it.id + '\')"><td class="pn">' + escapeHtml(it.ref) + '</td><td class="main-col">' + escapeHtml(it.who) + '</td><td>' + escapeHtml(it.subject) + '</td>'
+          + '<td class="pn"><span style="color:' + (days >= d * 2 ? 'var(--orange)' : 'var(--text3)') + '">' + days + 'd</span></td><td>' + nrOwnerCell(it.owner) + '</td>'
+          + '<td onclick="event.stopPropagation()" style="white-space:nowrap"><button class="btn btn-sm" onclick="snoozeFollow(\'' + it.id + '\',2)">Snooze 2d</button> <button class="btn btn-sm btn-teal" onclick="resolveFollow(\'' + it.id + '\')">Resolved</button></td></tr>';
+      }).join('') + '</tbody></table></div>'
+      : '<div class="tbl-wrap"><div class="empty">Nobody has gone quiet. Nothing to follow up.</div></div>');
+}
+window.renderFollowUp = renderFollowUp;
 
 /* ============================================================
    ERP → TICKET PING-BACK
@@ -1369,9 +1601,11 @@ function handleTicketRealtime(payload){
     try{ setTimeout(tkAutoFile, 800); }catch(_){}
     if(payload.new.is_live_chat){
       toast('<span class="ic ic-chat"></span>New live chat from ' + (payload.new.customer_name||'a visitor'));
+      playChime();
       desktopNotify('<span class="ic ic-chat"></span>New Live Chat', (payload.new.customer_name||'A visitor') + ' started a chat', payload.new.id);
     } else {
       toast('New ticket: ' + payload.new.subject);
+      playChime();
       desktopNotify('<span class="ic ic-ticket"></span>New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
     }
   } else if(payload.eventType === 'UPDATE'){
@@ -1391,6 +1625,7 @@ function handleTicketRealtime(payload){
 const NAV = [
   { id:'dashboard', label:'Dashboard', section:'Overview' },
   { id:'needsreply', label:'Needs Reply', badgeKey:'needsreply', section:'Inbox' },
+  { id:'followup', label:'Follow up', badgeKey:'followup', section:'Inbox' },
   { id:'livechat', label:'Live Chat', badgeKey:'livechat', section:'Inbox', hidden:true }, // hidden from the menu for now; remove hidden:true to bring it back
   { id:'emails', label:'Emails', badgeKey:'emails', section:'Inbox' },
   { id:'orders', label:'Orders', badgeKey:'orders', section:'Inbox' },
@@ -1507,6 +1742,10 @@ function renderNav(){
       const nr = needsReplyItems().length;
       if(nr){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${nr}</span>`; alertClass='alert-nav'; }
     }
+    if(n.badgeKey==='followup'){
+      const fu = followUpItems().length;
+      if(fu) badge = `<span class="nav-badge" style="color:var(--orange);background:var(--orange-dim);border-color:rgba(224,123,40,.2)">${fu}</span>`;
+    }
     if(n.badgeKey==='emails'){
       if(counts.unreadEmails){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)">${counts.unreadEmails}</span>`; alertClass='alert-nav'; }
     }
@@ -1534,6 +1773,7 @@ function renderNav(){
       <span class="nav-dot"></span>${n.label}${badge}
     </button>` + (isAll ? renderFormsSubnav() : (isOrd ? renderOrdersSubnav() : ''));
   }).join('');
+  try{ updateTabTitle(); }catch(_){}
 }
 
 function toggleMobileSidebar(){
@@ -1962,6 +2202,7 @@ function renderPage(){
   if(S.page === 'quarantine') return renderQuarantineList();
   if(S.page === 'customers') return renderCustomerLookup();
   if(S.page === 'needsreply') return renderNeedsReply();
+  if(S.page === 'followup') return renderFollowUp();
   if(S.page === 'reports') return renderReports();
   if(S.page === 'settings') return renderSettings();
   if(S.page === 'activitylog') return renderAdminActivityLog();
@@ -2813,8 +3054,9 @@ function renderDashboard(){
   }).join('') + row(TK_ROUTE_SORTING.label, topicCounts.sorting||0, "goRoute('sorting')", true);
 
   document.getElementById('content').innerHTML = `
-    <div class="kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+    <div class="kpi-grid kpi-grid-6">
       ${kpi('kpi-red','Needs reply', all.length, "goPage('needsreply')")}
+      ${kpi('kpi-orange','Follow up', followUpItems().length, "goPage('followup')")}
       ${kpi('','Unread email', unreadEmails, "goPage('emails')")}
       ${kpi('kpi-teal','Active orders', activeOrdersList.length, "goPage('orders')")}
       ${kpi('kpi-red','Urgent', urgent, "goPage('tickets'); setTimeout(()=>{S.filters.priority='urgent'; S.filters.status='__active__'; renderTicketsList();},50)")}
@@ -2929,8 +3171,9 @@ function renderTicketsList(){
       <button class="btn btn-sm" onclick="openTemplateManager()"> Templates</button>
       <button class="btn btn-sm" onclick="exportTicketsToCSV()"><span class="ic ic-download"></span>Export CSV</button>
       ${HISTORY_LOADED.tickets ? '' : `<button class="btn btn-sm" title="Older resolved/closed tickets beyond ${RECENT_WINDOW_DAYS} days aren't loaded by default -- click to fetch everything" onclick="loadFullHistory('tickets')">Load full history</button>`}
-      <select class="form-input" style="width:auto" onchange="handleSavedView(this.value); this.value=''"><option value="">Saved views...</option>${savedViewsOptions()}<option value="__save__">+ Save current view</option></select>
+      <select class="form-input" style="width:auto" onchange="handleSavedView(this.value); this.value=''"><option value="">Saved views...</option>${savedViewsOptions()}<option value="__save__">+ Save current view</option><option value="__delete__">- Delete a view...</option></select>
     </div>
+    ${dupBanner()}
     <div id="ticketsListBody">${renderBulkActionBar()}${ticketTable(filteredTickets(), true)}</div>
   `;
 }
@@ -2948,20 +3191,38 @@ function savedViewsKey(){ return 'tgk_saved_views_' + ((S.user&&S.user.email)||'
 function getSavedViews(){ try{ return JSON.parse(localStorage.getItem(savedViewsKey())||'[]'); }catch(_){ return []; } }
 function setSavedViews(v){ try{ localStorage.setItem(savedViewsKey(), JSON.stringify(v)); }catch(_){} }
 function savedViewsOptions(){
-  const v=getSavedViews();
-  if(!v.length) return '';
-  return '<optgroup label="My views">'+v.map((x,i)=>'<option value="v:'+i+'">'+escapeHtml(x.name)+'</option>').join('')+'</optgroup>';
+  const v=getSavedViews(), tv=getTeamViews();
+  let h='';
+  if(v.length) h += '<optgroup label="My views">'+v.map((x,i)=>'<option value="v:'+i+'">'+escapeHtml(x.name)+'</option>').join('')+'</optgroup>';
+  if(tv.length) h += '<optgroup label="Team views">'+tv.map((x,i)=>'<option value="t:'+i+'">'+escapeHtml(x.name)+'</option>').join('')+'</optgroup>';
+  return h;
 }
 function handleSavedView(val){
   if(!val) return;
   if(val==='__save__'){
     const name = prompt('Name this view (saves the current filters):');
     if(!name) return;
-    const v=getSavedViews(); v.push({ name:name.trim(), filters:{...S.filters} }); setSavedViews(v);
-    toast('View saved'); renderTicketsList(); return;
+    const shared = confirm('Share "' + name.trim() + '" with the whole team?\n\nOK = team view, Cancel = just for you');
+    const entry = { name:name.trim(), filters:{...S.filters} };
+    if(shared){ const tv=getTeamViews().slice(); tv.push(entry); setTeamViews(tv); }
+    else { const v=getSavedViews().slice(); v.push(entry); setSavedViews(v); }
+    toast(shared ? 'Team view saved' : 'View saved'); renderTicketsList(); return;
   }
-  const m = val.match(/^v:(\d+)$/); if(!m) return;
-  const v=getSavedViews(); const view=v[parseInt(m[1],10)]; if(!view) return;
+  if(val==='__delete__'){
+    const mine=getSavedViews().slice(), team=getTeamViews().slice();
+    const names=mine.map(x=>x.name).concat(team.map(x=>x.name+' (team)'));
+    if(!names.length){ toast('No saved views to delete'); return; }
+    const pick = prompt('Delete which view? Type its name:\n\n' + names.join('\n'));
+    if(!pick) return;
+    const p = pick.trim().toLowerCase();
+    let i = mine.findIndex(x=>x.name.toLowerCase()===p);
+    if(i!==-1){ mine.splice(i,1); setSavedViews(mine); toast('View deleted'); renderTicketsList(); return; }
+    i = team.findIndex(x=>(x.name+' (team)').toLowerCase()===p || x.name.toLowerCase()===p);
+    if(i!==-1){ team.splice(i,1); setTeamViews(team); toast('Team view deleted'); renderTicketsList(); return; }
+    toast('No view with that name', true); return;
+  }
+  const m = val.match(/^([vt]):(\d+)$/); if(!m) return;
+  const v = m[1]==='t' ? getTeamViews() : getSavedViews(); const view=v[parseInt(m[2],10)]; if(!view) return;
   // Confirm delete with modifier: shift-click isn't available on select; offer via prompt on re-pick.
   S.filters = { status:'__active__', priority:'', source:'', category:'', tag:'', assignedTo:'', staleOnly:false, showArchived:false, q:'', ...view.filters };
   renderTicketsList();
@@ -3378,10 +3639,16 @@ function sortVal(kind, key, r){
 }
 function applySort(kind, list){
   const s = getSort(kind), d = s.dir==='asc' ? 1 : -1;
-  return list.slice().sort(function(a,b){
+  const out = list.slice().sort(function(a,b){
     const x = sortVal(kind,s.key,a), y = sortVal(kind,s.key,b);
     return x<y ? -d : x>y ? d : 0;
   });
+  const h = S._hold && S._hold[kind];
+  if(!h) return out;
+  // A ticket or email is open: keep rows where they were so the list does not jump under you.
+  // Anything new that was not in the list before goes to the top.
+  const pos = new Map(h.map(function(id,i){ return [id,i]; }));
+  return out.filter(r=>!pos.has(r.id)).concat(out.filter(r=>pos.has(r.id)).sort((a,b)=>pos.get(a.id)-pos.get(b.id)));
 }
 function sortTh(kind, key, text){
   const s = getSort(kind), on = s.key===key;
@@ -3456,6 +3723,7 @@ const PRIORITY_PILL = { low:'pill-muted', medium:'pill-yellow', high:'pill-orang
 
 function ticketTable(list, enableBulk){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">No tickets found.</div></div>`;
+  const _dm = dupMap();
   const allSelected = enableBulk && list.length>0 && list.every(t=>S.selectedTickets.has(t.id));
   return `<div class="tk-desktop"><div class="tbl-wrap"><table>
     <thead><tr>
@@ -3469,7 +3737,7 @@ function ticketTable(list, enableBulk){
         <tr class="rowlink" onclick="${enableBulk?'':`openTicket('${t.id}')`}">
           ${enableBulk ? `<td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedTickets.has(t.id)?'checked':''} onchange="toggleTicketSelect('${t.id}', this.checked)"></td>` : ''}
           <td class="pn" ${enableBulk?`style="cursor:pointer" onclick="openTicket('${t.id}')"`:''}>#${t.ticket_number}</td>
-          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.archived?' <span class="pill pill-muted"><span class="ic ic-database"></span>Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)"><span class="ic ic-box"></span></span>':''}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${_dm[t.id]?` <span class="pill pill-orange" title="Same customer and subject as #${_dm[t.id].ticket_number}">Dup of #${_dm[t.id].ticket_number}</span>`:''}${t.archived?' <span class="pill pill-muted"><span class="ic ic-database"></span>Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)"><span class="ic ic-box"></span></span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}${ticketIsDealer(t)?' '+TK_DEALER_PILL:''}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td>${t.category?`<span class="pill ${tkCategoryColor(t.category)}">${escapeHtml(t.category)}</span>`:''}</td>
@@ -4809,6 +5077,7 @@ function closePanel(){
   document.getElementById('tk-panel').classList.remove('open');
   S.activeTicket = null;
   S.activeEmail = null;
+  releaseListOrder();
 }
 window.closePanel = closePanel;
 
@@ -6567,13 +6836,13 @@ function needsReplyItems(){
   (S.tickets||[]).forEach(t=>{ if(ticketNeedsReply(t)) items.push({
     type:'ticket', id:t.id, ref:'#'+t.ticket_number,
     who: t.customer_name || t.customer_email || 'Customer',
-    subject: t.subject||'(no subject)',
+    subject: t.subject||'(no subject)', owner: t.assigned_to||'',
     ts: new Date(ticketWaitingSince(t)).getTime()
   }); });
   (S.emails||[]).forEach(e=>{ if(emailNeedsReply(e)) items.push({
     type: e.mailbox==='orders'?'order':'email', id:e.id, ref: emailRef(e),
     who: (e.mailbox==='orders' ? orderDisplayName(e) : e.customer_email) || 'Customer',
-    subject: e.subject||'(no subject)',
+    subject: e.subject||'(no subject)', owner: e.assigned_to||'',
     ts: new Date(e.last_message_at || e.created_at).getTime()
   }); });
   return items.sort((a,b)=>a.ts-b.ts); // oldest waiting first
@@ -6585,21 +6854,27 @@ function renderNeedsReply(){
   const el=document.getElementById('content');
   const allItems = needsReplyItems();
   const nrType = S.nrType || 'all', nrDir = S.nrDir || 'oldest';
-  let items = nrType==='all' ? allItems : allItems.filter(i=>i.type===nrType);
+  let items = (nrType==='all' ? allItems : allItems.filter(i=>i.type===nrType)).filter(nrWhoMatch);
   if(nrDir==='newest') items = items.slice().reverse();
+  const nrWho = S.nrWho || 'all', _me = myEmail();
+  const wcnt = k => k==='all' ? allItems.length : (k==='mine' ? allItems.filter(i=>String(i.owner||'').toLowerCase()===_me).length : allItems.filter(i=>!i.owner).length);
   const cnt = k => k==='all' ? allItems.length : allItems.filter(i=>i.type===k).length;
   const chips = '<div class="filter-bar" style="margin-bottom:10px">'
     + [['all','All'],['ticket','Tickets'],['email','Emails'],['order','Orders']].map(function(c){ return '<button class="btn btn-sm '+(nrType===c[0]?'btn-teal':'')+'" onclick="setNrType(\''+c[0]+'\')">'+c[1]+' ('+cnt(c[0])+')</button>'; }).join('')
     + '<span style="flex:1"></span>'
     + '<button class="btn btn-sm '+(nrDir==='oldest'?'btn-teal':'')+'" onclick="setNrDir(\'oldest\')">Waiting longest</button>'
     + '<button class="btn btn-sm '+(nrDir==='newest'?'btn-teal':'')+'" onclick="setNrDir(\'newest\')">Newest first</button>'
-    + '<label class="checkbox-row" style="margin:0 0 0 8px;cursor:pointer"><input type="checkbox" '+(nrAutoNextOn()?'checked':'')+' onchange="setNrAutoNext(this.checked)"><span>Open next after I reply</span></label></div>';
+    + '<label class="checkbox-row" style="margin:0 0 0 8px;cursor:pointer"><input type="checkbox" '+(nrAutoNextOn()?'checked':'')+' onchange="setNrAutoNext(this.checked)"><span>Open next after I reply</span></label></div>'
+    + '<div class="filter-bar" style="margin-bottom:10px">'
+    + [['all','Everyone'],['mine','Mine'],['unassigned','Unassigned']].map(function(c){ return '<button class="btn btn-sm '+(nrWho===c[0]?'btn-teal':'')+'" onclick="setNrWho(\''+c[0]+'\')">'+c[1]+' ('+wcnt(c[0])+')</button>'; }).join('')
+    + '<span style="flex:1"></span>'
+    + '<label class="checkbox-row" style="margin:0;cursor:pointer" title="Opening an unassigned item makes it yours, so nobody else answers it too"><input type="checkbox" '+(claimOnOpenOn()?'checked':'')+' onchange="setClaimOnOpen(this.checked)"><span>Claim when I open</span></label></div>';
   const typePill = { ticket:'<span class="pill pill-muted">Ticket</span>', email:'<span class="pill pill-teal">Email</span>', order:'<span class="pill pill-green">Order</span>' };
   el.innerHTML = `
     <div class="panel-title" style="border:none">Needs Reply${allItems.length?' ('+allItems.length+')':''}</div>
     <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">Everything where the customer spoke last and no reply has gone out yet \u2014 across tickets, emails, and orders.</div>
     ${chips}
-    ${items.length ? `<div class="tbl-wrap"><table><thead><tr><th>Type</th><th>#</th><th>From</th><th>Subject</th><th>Waiting</th></tr></thead><tbody>
+    ${items.length ? `<div class="tbl-wrap"><table><thead><tr><th>Type</th><th>#</th><th>From</th><th>Subject</th><th>Owner</th><th>Waiting</th></tr></thead><tbody>
       ${items.map(it=>{
         const h=Math.floor((Date.now()-it.ts)/3600000);
         const wait = h>=48?(Math.floor(h/24)+'d'):(h+'h');
@@ -6610,6 +6885,7 @@ function renderNeedsReply(){
           <td class="pn">${escapeHtml(it.ref)}</td>
           <td class="main-col">${escapeHtml(it.who)}</td>
           <td>${escapeHtml(it.subject)}</td>
+          <td>${nrOwnerCell(it.owner)}</td>
           <td class="pn"><span style="color:${overdue?'var(--orange)':'var(--text3)'}">${overdue?'\u23f0 ':''}${wait}</span></td>
         </tr>`;
       }).join('')}
@@ -7800,6 +8076,21 @@ async function sendMessage(ticketId){
   }
 }
 window.sendMessage = sendMessage;
+(function(){
+  ['openTicket','openEmail'].forEach(function(name){
+    const orig = window[name]; if(typeof orig !== 'function') return;
+    window[name] = async function(id){
+      holdListOrder();
+      const r = await orig.apply(this, arguments);
+      try{ claimIfWanted(name === 'openTicket' ? 'ticket' : 'email', id); }catch(_){}
+      return r;
+    };
+  });
+  const origPanel = window.renderTicketPanel;
+  if(typeof origPanel === 'function'){
+    window.renderTicketPanel = function(t){ const r = origPanel.apply(this, arguments); addDupBanner(t); return r; };
+  }
+})();
 (function(){
   ['sendMessage','sendEmailReply'].forEach(function(name){
     const orig = window[name];
