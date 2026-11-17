@@ -216,7 +216,7 @@ input[type=text],input[type=email],select,textarea{background:var(--bg);border-c
 select.form-input{cursor:pointer}
 
 /* Modal / overlay */
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:700;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
 .overlay.hidden{display:none}
 .modal{background:var(--bg);border:1px solid transparent;border-radius:var(--r-lg);width:480px;max-width:96vw;max-height:90vh;overflow-y:auto;padding:24px;box-shadow:0 16px 48px rgba(14,20,24,.16),0 0 0 1px var(--border2)}
 .modal-title{font-size:var(--t-lg);font-weight:700;margin-bottom:18px}
@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.09';
+const TGK_SUPPORT_VERSION = 'v2.10';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1026,7 +1026,7 @@ async function loadMessages(ticketId){
 function subscribeRealtime(){
   sb.channel('support-tickets')
     .on('postgres_changes', { event:'*', schema:'public', table:'tickets' }, payload=>{
-      if(isUserActivelyWorking() && S.activeTicket) return;
+      // Always take the data. Typing in the open ticket never needs to block the lists from updating.
       handleTicketRealtime(payload);
     })
     .on('postgres_changes', { event:'INSERT', schema:'public', table:'ticket_messages' }, payload=>{
@@ -1060,12 +1060,12 @@ function subscribeRealtime(){
           desktopNotify('<span class="ic ic-mail"></span>New ' + (isOrder?'Order':'Email'), (payload.new.customer_email||'') + ': ' + (payload.new.subject||''), null);
         }
       } else if(payload.eventType==='UPDATE'){
-        if(idx!==-1) S.emails[idx] = payload.new;
+        if(idx!==-1){ S.emails[idx] = Object.assign({}, S.emails[idx], payload.new); if(S.activeEmail && S.activeEmail.id===S.emails[idx].id) S.activeEmail = S.emails[idx]; }
+        else S.emails.unshift(payload.new);
       } else if(payload.eventType==='DELETE'){
         if(idx!==-1) S.emails.splice(idx,1);
       }
-      renderNav();
-      if(S.page==='emails' || S.page==='orders') renderEmailsList();
+      refreshView();
     })
     .on('postgres_changes', { event:'*', schema:'public', table:'sales' }, payload=>{
       const on = payload.new?.order_number || payload.old?.order_number;
@@ -1107,8 +1107,108 @@ function subscribeRealtime(){
       if(S.page === 'settings') renderSettings();
       else if(S.page === 'tickets' || S.page === 'dashboard') renderPage();
     })
-    .subscribe();
+    .subscribe(function(status){
+      if(status === 'SUBSCRIBED'){
+        if(S._rtWasDown){ S._rtWasDown = false; softRefresh(); }
+      } else if(status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED'){
+        S._rtWasDown = true;
+      }
+    });
 }
+
+/* ============================================================
+   LIVE REFRESH (v2.10)
+   One place that redraws the sidebar badges and whatever page is showing.
+   Every realtime event and every edit calls it, so the Dashboard, Needs Reply,
+   Emails, Orders, Rebates etc. always agree. Debounced so a burst of events is one redraw,
+   and held back (not lost) while you are typing in a field on the page.
+   ============================================================ */
+const LIVE_PAGES = ['dashboard','needsreply','tickets','emails','orders','rebates','warranty','shiperrors','quarantine','livechat'];
+let _rvTimer = null;
+function typingInPage(){
+  const ae = document.activeElement;
+  if(!ae) return false;
+  const c = document.getElementById('content');
+  return !!(c && c.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.type !== 'checkbox' && ae.type !== 'radio');
+}
+function refreshView(){
+  clearTimeout(_rvTimer);
+  _rvTimer = setTimeout(function(){
+    try{ renderNav(); }catch(_){}
+    if(!LIVE_PAGES.includes(S.page)) return;
+    if(typingInPage()){ S._refreshPending = true; return; }
+    S._refreshPending = false;
+    try{ renderPage(); }catch(_){}
+  }, 120);
+}
+window.refreshView = refreshView;
+document.addEventListener('focusout', function(){
+  if(S._refreshPending) setTimeout(function(){ if(S._refreshPending && !typingInPage()) refreshView(); }, 200);
+});
+// Pull anything changed since we last looked (after sleep, tab switch, or a dropped connection).
+async function softRefresh(){
+  if(!S.user || S._softBusy) return;
+  S._softBusy = true;
+  try{
+    const since = new Date((S._lastSync || Date.now() - 600000) - 120000).toISOString();
+    const syncStart = Date.now();
+    const [tr, er] = await Promise.all([
+      sb.from('tickets').select('*').gte('updated_at', since).limit(500),
+      sb.from('emails').select('*').gte('updated_at', since).limit(500)
+    ]);
+    const merge = function(list, rows){
+      (rows||[]).forEach(function(r){
+        const i = list.findIndex(x=>x.id===r.id);
+        if(i===-1) list.unshift(r); else list[i] = Object.assign({}, list[i], r);
+      });
+    };
+    if(tr && tr.data){ merge(S.tickets, tr.data); if(S.activeTicket){ const f = S.tickets.find(x=>x.id===S.activeTicket.id); if(f) S.activeTicket = f; } }
+    if(er && er.data){ merge(S.emails, er.data); if(S.activeEmail){ const f = S.emails.find(x=>x.id===S.activeEmail.id); if(f) S.activeEmail = f; } }
+    S._lastSync = syncStart;
+    refreshView();
+  }catch(_){ /* non-critical, the next event or refocus tries again */ }
+  S._softBusy = false;
+}
+window.softRefresh = softRefresh;
+(function(){
+  let hiddenAt = 0;
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden){ hiddenAt = Date.now(); }
+    else if(hiddenAt && Date.now() - hiddenAt > 20000){ softRefresh(); }
+  });
+  window.addEventListener('online', function(){ softRefresh(); });
+  setInterval(function(){ if(!document.hidden) softRefresh(); }, 120000);
+})();
+
+/* ============================================================
+   POPUPS ALWAYS WIN (v2.10)
+   Anything that opens the shared popup layer (Create Claim, Refund, Return Label, Merge, Archive,
+   New Ticket...) slides the open ticket/email panel out of the way first, then slides it back
+   when the popup closes. The panel is only hidden, never closed, so a half-written reply and the
+   thread scroll position are still there when you come back.
+   ============================================================ */
+(function(){
+  function modalVisible(ov){ return !ov.classList.contains('hidden') && (ov.innerHTML||'').trim() !== ''; }
+  function sync(){
+    const ov = document.getElementById('modalOverlay'), pn = document.getElementById('tk-panel'), bg = document.getElementById('tk-overlay');
+    if(!ov || !pn || !bg) return;
+    if(modalVisible(ov)){
+      if(pn.classList.contains('open') && !S._panelParked){
+        S._panelParked = true;
+        pn.classList.remove('open'); bg.classList.remove('open');
+      }
+    } else if(S._panelParked){
+      S._panelParked = false;
+      if(S.activeTicket || S.activeEmail){ pn.classList.add('open'); bg.classList.add('open'); }
+    }
+  }
+  function start(){
+    const ov = document.getElementById('modalOverlay');
+    if(!ov){ setTimeout(start, 200); return; }
+    new MutationObserver(sync).observe(ov, { attributes:true, attributeFilter:['class'], childList:true });
+  }
+  start();
+})();
 
 /* ============================================================
    ERP → TICKET PING-BACK
@@ -1183,12 +1283,13 @@ function handleTicketRealtime(payload){
       desktopNotify('<span class="ic ic-ticket"></span>New Ticket #' + payload.new.ticket_number, payload.new.subject, payload.new.id);
     }
   } else if(payload.eventType === 'UPDATE'){
-    if(idx !== -1) S.tickets[idx] = payload.new;
+    if(idx !== -1) S.tickets[idx] = Object.assign({}, S.tickets[idx], payload.new);
+    else S.tickets.unshift(payload.new);
+    if(S.activeTicket && S.activeTicket.id === payload.new.id && idx !== -1) S.activeTicket = S.tickets[idx];
   } else if(payload.eventType === 'DELETE'){
     if(idx !== -1) S.tickets.splice(idx,1);
   }
-  renderNav();
-  if(S.page === 'tickets' || S.page === 'dashboard') renderPage();
+  refreshView();
 }
 
 /* ============================================================
@@ -2709,6 +2810,10 @@ function renderTicketsList(){
         ${S.team.map(m=>`<option value="${m.email}" ${S.filters.assignedTo===m.email?'selected':''}>${escapeHtml(m.display_name||m.email)}</option>`).join('')}
       </select>
       <label class="checkbox-row" style="margin:0;cursor:pointer">
+        <input type="checkbox" ${S.filters.needsReply?'checked':''} onchange="S.filters.needsReply=this.checked; renderTicketsList()">
+        <span>Needs reply</span>
+      </label>
+      <label class="checkbox-row" style="margin:0;cursor:pointer">
         <input type="checkbox" ${S.filters.staleOnly?'checked':''} onchange="S.filters.staleOnly=this.checked; renderTicketsList()">
         <span>Stale only</span>
       </label>
@@ -3151,6 +3256,43 @@ async function deleteTemplate(id){
 }
 
 
+// ---- Sorting (v2.10): newest activity first by default, click a column header to change ----
+const SORT_DEFAULTS = { tickets:{ key:'updated_at', dir:'desc' }, emails:{ key:'last_message_at', dir:'desc' } };
+function getSort(kind){ S.sort = S.sort || {}; return S.sort[kind] || (S.sort[kind] = Object.assign({}, SORT_DEFAULTS[kind])); }
+const PRIORITY_RANK = { low:1, medium:2, high:3, urgent:4 };
+function sortVal(kind, key, r){
+  if(kind==='tickets'){
+    if(key==='ticket_number') return Number(r.ticket_number)||0;
+    if(key==='customer') return String(r.customer_name||r.customer_email||'').toLowerCase();
+    if(key==='priority') return PRIORITY_RANK[r.priority]||0;
+    if(key==='updated_at') return new Date(r.updated_at||r.created_at||0).getTime();
+    return String(r[key]==null?'':r[key]).toLowerCase();
+  }
+  if(key==='ref') return Number((r.display_number!=null?r.display_number:r.email_number)||0);
+  if(key==='from') return String((r.mailbox==='orders' ? (typeof orderDisplayName==='function'?orderDisplayName(r):'') : r.customer_email)||'').toLowerCase();
+  if(key==='last_message_at') return new Date(r.last_message_at||r.created_at||0).getTime();
+  return String(r[key]==null?'':r[key]).toLowerCase();
+}
+function applySort(kind, list){
+  const s = getSort(kind), d = s.dir==='asc' ? 1 : -1;
+  return list.slice().sort(function(a,b){
+    const x = sortVal(kind,s.key,a), y = sortVal(kind,s.key,b);
+    return x<y ? -d : x>y ? d : 0;
+  });
+}
+function sortTh(kind, key, text){
+  const s = getSort(kind), on = s.key===key;
+  return '<th class="sortable" style="cursor:pointer;user-select:none;white-space:nowrap" title="Sort by '+text+'" onclick="setSort(\''+kind+'\',\''+key+'\')">'+text+(on ? (s.dir==='asc'?' \u25B2':' \u25BC') : '<span style="opacity:.25"> \u21C5</span>')+'</th>';
+}
+function setSort(kind, key){
+  const s = getSort(kind);
+  if(s.key===key) s.dir = s.dir==='asc' ? 'desc' : 'asc';
+  else { s.key = key; s.dir = (key==='updated_at'||key==='last_message_at'||key==='priority') ? 'desc' : 'asc'; }
+  // headers carry the arrow, so redraw the whole list shell
+  if(kind==='tickets') renderTicketsList(); else renderEmailsList();
+}
+window.setSort = setSort;
+
 function filteredTickets(){
   let list = S.tickets.slice();
   const f = S.filters;
@@ -3180,6 +3322,7 @@ function filteredTickets(){
   if(f.assignedTo === '__unassigned__') list = list.filter(t=>!t.assigned_to);
   else if(f.assignedTo) list = list.filter(t=>t.assigned_to===f.assignedTo);
   if(f.staleOnly) list = list.filter(isStale);
+  if(f.needsReply) list = list.filter(ticketNeedsReply);
   if(f.q){
     const q = f.q.toLowerCase();
     list = list.filter(t=>
@@ -3190,7 +3333,7 @@ function filteredTickets(){
       (t.pn||'').toLowerCase().includes(q)
     );
   }
-  return list;
+  return applySort('tickets', list);
 }
 
 function label(s){ return (s||'').replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase()); }
@@ -3214,7 +3357,9 @@ function ticketTable(list, enableBulk){
   return `<div class="tk-desktop"><div class="tbl-wrap"><table>
     <thead><tr>
       ${enableBulk ? `<th style="width:28px"><input type="checkbox" ${allSelected?'checked':''} onchange="toggleSelectAllTickets(this.checked, ${JSON.stringify(list.map(t=>t.id))})"></th>` : ''}
-      <th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Category</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>
+      ${enableBulk
+        ? sortTh('tickets','ticket_number','#')+sortTh('tickets','subject','Subject')+sortTh('tickets','customer','Customer')+sortTh('tickets','order_number','Order')+sortTh('tickets','category','Category')+sortTh('tickets','source','Source')+'<th>Tags</th>'+sortTh('tickets','priority','Priority')+sortTh('tickets','status','Status')+sortTh('tickets','updated_at','Updated')
+        : '<th>#</th><th>Subject</th><th>Customer</th><th>Order</th><th>Category</th><th>Source</th><th>Tags</th><th>Priority</th><th>Status</th><th>Updated</th>'}
     </tr></thead>
     <tbody>
       ${list.map(t=>`
@@ -5318,13 +5463,14 @@ function emailFiltered(){
   if(f.view==='archived') list = list.filter(e=>e.status==='archived');
   else if(f.view==='completed') list = list.filter(e=>e.status==='completed');
   else if(f.view==='unread') list = list.filter(e=>e.status!=='archived' && e.status!=='completed' && e.has_unread);
+  else if(f.view==='needs') list = list.filter(emailNeedsReply);
   else list = list.filter(e=>e.status!=='archived' && e.status!=='completed');
   if(f.q){
     const q=f.q.toLowerCase();
     const bodyHits = window._emailBodyMatches || null;
     list = list.filter(e=>(e.subject||'').toLowerCase().includes(q) || (e.customer_email||'').toLowerCase().includes(q) || (e.po_number||'').toLowerCase().includes(q) || (bodyHits && bodyHits.has(e.id)));
   }
-  return list;
+  return applySort('emails', list);
 }
 async function runEmailBodySearch(q){
   q=(q||'').trim();
@@ -5349,6 +5495,8 @@ async function updateEmailField(id, field, value, quiet, skipUndo){
     if(error) throw error;
     const i=S.emails.findIndex(x=>x.id===id); if(i!==-1) S.emails[i]=data;
     if(S.activeEmail && S.activeEmail.id===id) S.activeEmail=data;
+    renderNav();
+    if(LIVE_PAGES.includes(S.page)) renderPage();
     if(!skipUndo && JSON.stringify(before) !== JSON.stringify(value)){
       pushUndo({ label:'order/email '+field, undo:()=>updateEmailField(id, field, before, true, true), redo:()=>updateEmailField(id, field, value, true, true) });
     }
@@ -5362,8 +5510,8 @@ function renderEmailsList(){
   const f = S.emailFilters;
   const orders = currentMailbox()==='orders';
   const views = orders
-    ? [['open','Active'],['completed','Completed'],['archived','Archived']]
-    : [['open','Inbox'],['unread','Unread'],['archived','Archived']];
+    ? [['open','Active'],['needs','Needs Reply'],['completed','Completed'],['archived','Archived']]
+    : [['open','Inbox'],['needs','Needs Reply'],['unread','Unread'],['archived','Archived']];
   if(!views.some(v=>v[0]===f.view)) f.view='open';
   el.innerHTML = `
     <div class="filter-bar">
@@ -5496,7 +5644,7 @@ function emailListOrderMeta(e){
 function emailTable(list){
   if(!list.length) return `<div class="tbl-wrap"><div class="empty">${currentMailbox()==='orders'?'No orders yet. Mail to orders@ lands here.':"No emails here yet. Fresh mail to support@ (anything that isn't a reply to a ticket) lands here."}</div></div>`;
   const allSel = list.length && list.every(e=>S.selectedEmails.has(e.id));
-  return `<div class="tbl-wrap"><table><thead><tr><th style="width:26px"><input type="checkbox" ${allSel?'checked':''} onclick="toggleSelectAllEmails(this.checked)"></th><th>#</th><th>From</th><th>Subject</th><th>Status</th><th>Last message</th></tr></thead><tbody>
+  return `<div class="tbl-wrap"><table><thead><tr><th style="width:26px"><input type="checkbox" ${allSel?'checked':''} onclick="toggleSelectAllEmails(this.checked)"></th>${sortTh('emails','ref','#')}${sortTh('emails','from','From')}${sortTh('emails','subject','Subject')}${sortTh('emails','status','Status')}${sortTh('emails','last_message_at','Last message')}</tr></thead><tbody>
     ${list.map(e=>`
       <tr class="rowlink" onclick="openEmail('${e.id}')">
         <td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedEmails.has(e.id)?'checked':''} onclick="event.stopPropagation(); toggleEmailSelect('${e.id}', this.checked)"></td>
@@ -6320,13 +6468,26 @@ function needsReplyItems(){
   }); });
   return items.sort((a,b)=>a.ts-b.ts); // oldest waiting first
 }
+function setNrType(t){ S.nrType = t; renderNeedsReply(); }
+function setNrDir(d){ S.nrDir = d; renderNeedsReply(); }
+window.setNrType = setNrType; window.setNrDir = setNrDir;
 function renderNeedsReply(){
   const el=document.getElementById('content');
-  const items = needsReplyItems();
+  const allItems = needsReplyItems();
+  const nrType = S.nrType || 'all', nrDir = S.nrDir || 'oldest';
+  let items = nrType==='all' ? allItems : allItems.filter(i=>i.type===nrType);
+  if(nrDir==='newest') items = items.slice().reverse();
+  const cnt = k => k==='all' ? allItems.length : allItems.filter(i=>i.type===k).length;
+  const chips = '<div class="filter-bar" style="margin-bottom:10px">'
+    + [['all','All'],['ticket','Tickets'],['email','Emails'],['order','Orders']].map(function(c){ return '<button class="btn btn-sm '+(nrType===c[0]?'btn-teal':'')+'" onclick="setNrType(\''+c[0]+'\')">'+c[1]+' ('+cnt(c[0])+')</button>'; }).join('')
+    + '<span style="flex:1"></span>'
+    + '<button class="btn btn-sm '+(nrDir==='oldest'?'btn-teal':'')+'" onclick="setNrDir(\'oldest\')">Waiting longest</button>'
+    + '<button class="btn btn-sm '+(nrDir==='newest'?'btn-teal':'')+'" onclick="setNrDir(\'newest\')">Newest first</button></div>';
   const typePill = { ticket:'<span class="pill pill-muted">Ticket</span>', email:'<span class="pill pill-teal">Email</span>', order:'<span class="pill pill-green">Order</span>' };
   el.innerHTML = `
-    <div class="panel-title" style="border:none">Needs Reply${items.length?' ('+items.length+')':''}</div>
-    <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">Everything where the customer spoke last and no reply has gone out yet \u2014 across tickets, emails, and orders. Oldest first.</div>
+    <div class="panel-title" style="border:none">Needs Reply${allItems.length?' ('+allItems.length+')':''}</div>
+    <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">Everything where the customer spoke last and no reply has gone out yet \u2014 across tickets, emails, and orders.</div>
+    ${chips}
     ${items.length ? `<div class="tbl-wrap"><table><thead><tr><th>Type</th><th>#</th><th>From</th><th>Subject</th><th>Waiting</th></tr></thead><tbody>
       ${items.map(it=>{
         const h=Math.floor((Date.now()-it.ts)/3600000);
@@ -6650,7 +6811,7 @@ async function updateTicketField(id, field, value, skipUndo){
     }
     toast('Ticket updated');
     renderNav();
-    if(S.page!=='dashboard') renderPage();
+    renderPage();
     if(S.activeTicket && S.activeTicket.id === id){
       renderTicketPanel(data);
     }
