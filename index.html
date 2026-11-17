@@ -503,7 +503,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.10';
+const TGK_SUPPORT_VERSION = 'v2.11';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -2676,68 +2676,77 @@ function runDashboardSearch(){
 }
 window.runDashboardSearch = runDashboardSearch;
 
+function setDashNr(t){ S.dashNr = t; renderDashboard(); }
+window.setDashNr = setDashNr;
 function renderDashboard(){
+  // v2.10 layout: a slim strip of counts, the Needs Reply queue as the main block,
+  // then active orders and open tickets by topic. Everything is clickable and mirrors the sidebar.
   const t = S.tickets.filter(x=>!x.merged_into_id && !x.archived);
-  const open = t.filter(x=>x.status==='open').length;
   const urgent = t.filter(x=>x.priority==='urgent' && !['resolved','closed'].includes(x.status)).length;
-  const today = t.filter(x=> new Date(x.created_at).toDateString() === new Date().toDateString()).length;
   const stale = t.filter(isStale).length;
-  const resolved = t.filter(x=>x.resolved_at);
-  const avgDays = resolved.length ? (resolved.reduce((s,x)=> s + (new Date(x.resolved_at)-new Date(x.created_at)),0) / resolved.length / 86400000).toFixed(1) : '\u2014';
-  const activeChats = S.tickets.filter(x=>x.is_live_chat && !x.archived && !['resolved','closed'].includes(x.status)).length;
-
   const emails = S.emails||[];
   const unreadEmails = emails.filter(e=>e.mailbox!=='orders' && e.status!=='archived' && e.has_unread).length;
-  const activeOrdersList = emails.filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.status!=='completed')
-    .sort((a,b)=> new Date(b.last_message_at||b.created_at) - new Date(a.last_message_at||a.created_at));
-  const activeOrders = activeOrdersList.length;
-  const hasOrders = emails.some(e=>e.mailbox==='orders');
+  const activeOrdersList = emails.filter(e=>e.mailbox==='orders' && e.status!=='archived' && e.status!=='completed');
+  const kinds = { dealer:0, customer:0, needsdealer:0 };
+  activeOrdersList.forEach(e=>{ kinds[orderKind(e)]++; });
+  const topicCounts = {};
+  S.tickets.filter(tkIsActiveTicket).forEach(x=>{ const k = tkRoute(x); topicCounts[k] = (topicCounts[k]||0) + 1; });
 
-  const me = (S.user&&S.user.email)||'';
-  const assignedMe = t.filter(x=>x.assigned_to===me && !['resolved','closed'].includes(x.status)).length
-    + emails.filter(e=>e.assigned_to===me && e.status!=='archived' && e.status!=='completed').length;
+  const all = needsReplyItems();
+  const nrType = S.dashNr || 'all';
+  const shown = (nrType==='all' ? all : all.filter(i=>i.type===nrType));
+  const cnt = k => k==='all' ? all.length : all.filter(i=>i.type===k).length;
+  const typePill = { ticket:'<span class="pill pill-muted">Ticket</span>', email:'<span class="pill pill-teal">Email</span>', order:'<span class="pill pill-green">Order</span>' };
+  const chip = (k, lab) => `<button class="btn btn-sm ${nrType===k?'btn-teal':''}" onclick="setDashNr('${k}')">${lab} (${cnt(k)})</button>`;
+  const kpi = (cls, label, val, js) => `<div class="kpi ${cls}" style="cursor:pointer" onclick="${js}"><div class="kpi-label">${label}</div><div class="kpi-value">${val}</div></div>`;
+  const row = (labelText, count, js, red) => `<div onclick="${js}" style="display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border);cursor:pointer"><span>${escapeHtml(labelText)}</span><span style="font-family:var(--mono);font-weight:600;${count&&red?'color:var(--red)':''}">${count}</span></div>`;
 
-  const el = document.getElementById('content');
-  el.innerHTML = `
-    <div class="filter-bar" style="margin-bottom:20px">
-      <div class="search-wrap" style="max-width:480px">
+  const queue = shown.length ? `<div class="tbl-wrap"><table><thead><tr><th>Type</th><th>#</th><th>From</th><th>Subject</th><th>Waiting</th></tr></thead><tbody>
+    ${shown.slice(0,10).map(it=>{
+      const h = Math.max(0, Math.floor((Date.now()-it.ts)/3600000));
+      const wait = h>=48 ? (Math.floor(h/24)+'d') : (h+'h');
+      const overdue = h>=EMAIL_WAIT_HOURS;
+      const open = it.type==='ticket' ? `openTicket('${it.id}')` : `openEmail('${it.id}')`;
+      return `<tr class="rowlink" onclick="${open}"><td>${typePill[it.type]}</td><td class="pn">${escapeHtml(it.ref)}</td><td class="main-col">${escapeHtml(it.who)}</td><td>${escapeHtml(it.subject)}</td><td class="pn"><span style="color:${overdue?'var(--orange)':'var(--text3)'}">${overdue?'\u23f0 ':''}${wait}</span></td></tr>`;
+    }).join('')}
+  </tbody></table>${shown.length>10 ? `<div style="padding:10px 14px"><button class="btn btn-sm" onclick="goPage('needsreply')">View all ${shown.length}</button></div>` : ''}</div>`
+    : `<div class="tbl-wrap"><div class="empty">Nothing waiting on a reply. You're all caught up.</div></div>`;
+
+  const topicRows = TK_ROUTES.map(r=>{
+    const js = r.key==='rebate' ? "goPage('rebates')" : `goRoute('${r.key}')`;
+    const c = r.key==='rebate' ? rebateReviewItems().length : (topicCounts[r.key]||0);
+    return row(r.label, c, js, false);
+  }).join('') + row(TK_ROUTE_SORTING.label, topicCounts.sorting||0, "goRoute('sorting')", true);
+
+  document.getElementById('content').innerHTML = `
+    <div class="kpi-grid" style="grid-template-columns:repeat(5,minmax(0,1fr))">
+      ${kpi('kpi-red','Needs reply', all.length, "goPage('needsreply')")}
+      ${kpi('','Unread email', unreadEmails, "goPage('emails')")}
+      ${kpi('kpi-teal','Active orders', activeOrdersList.length, "goPage('orders')")}
+      ${kpi('kpi-red','Urgent', urgent, "goPage('tickets'); setTimeout(()=>{S.filters.priority='urgent'; S.filters.status='__active__'; renderTicketsList();},50)")}
+      ${kpi('kpi-orange','Stale (&gt;'+STALE_THRESHOLD_HOURS+'h)', stale, "goPage('tickets'); setTimeout(()=>{S.filters.staleOnly=true; renderTicketsList();},50)")}
+    </div>
+    <div class="panel-title" style="border:none;margin-top:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span>Needs your reply</span><span style="font-size:var(--t-sm);color:var(--text3);font-weight:400">oldest first</span>
+      <span style="flex:1"></span>
+      ${chip('all','All')}${chip('ticket','Tickets')}${chip('email','Emails')}${chip('order','Orders')}
+    </div>
+    ${queue}
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin-top:16px">
+      <div class="tbl-wrap"><div class="panel-title" style="border:none;padding:12px 14px 6px">Active orders</div>
+        ${row('Dealer orders', kinds.dealer, "goOrderView('dealer')")}${row('Customer orders', kinds.customer, "goOrderView('customer')")}${row('Needs dealer', kinds.needsdealer, "goOrderView('needsdealer')", true)}
+      </div>
+      <div class="tbl-wrap"><div class="panel-title" style="border:none;padding:12px 14px 6px">Open tickets by topic</div>
+        ${topicRows}
+      </div>
+    </div>
+    <div class="filter-bar" style="margin-top:16px">
+      <div class="search-wrap" style="max-width:420px">
         <span class="search-icon"><span class="ic ic-search"></span></span>
         <input type="text" id="dashSearchInput" placeholder="Search tickets by subject, customer, or order #..." onkeydown="if(event.key==='Enter')runDashboardSearch()">
       </div>
       <button class="btn btn-primary" onclick="runDashboardSearch()">Search</button>
     </div>
-    <div class="kpi-grid kpi-grid-6">
-      <div class="kpi kpi-red" style="cursor:pointer" onclick="goPage('needsreply')"><div class="kpi-label">Needs Reply</div><div class="kpi-value">${needsReplyItems().length}</div></div>
-      <div class="kpi" style="cursor:pointer" onclick="goPage('tickets')"><div class="kpi-label">Open Tickets</div><div class="kpi-value">${open}</div></div>
-      <div class="kpi kpi-red" style="cursor:pointer" onclick="goPage('emails')"><div class="kpi-label">Unread Emails</div><div class="kpi-value">${unreadEmails}</div></div>
-      <div class="kpi kpi-teal" style="cursor:pointer" onclick="goPage('orders')"><div class="kpi-label">Active Orders</div><div class="kpi-value">${activeOrders}</div></div>
-      <div class="kpi kpi-red" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters.priority='urgent'; S.filters.status='__active__'; renderTicketsList();},50)"><div class="kpi-label">Urgent Unresolved</div><div class="kpi-value">${urgent}</div></div>
-      <div class="kpi kpi-orange" style="cursor:pointer" onclick="goPage('tickets'); setTimeout(()=>{S.filters.staleOnly=true; renderTicketsList();},50)"><div class="kpi-label">Stale (&gt;${STALE_THRESHOLD_HOURS}h)</div><div class="kpi-value">${stale}</div></div>
-    </div>
-    <div class="panel" style="padding:0;display:flex;flex-wrap:wrap;overflow:hidden">
-      ${[
-        ['New Today', today, '', ''],
-        ['Active Chats', activeChats, activeChats?'var(--teal)':'', "goPage('livechat')"],
-        ['Avg Resolution', avgDays==='\u2014'?'\u2014':(avgDays+'d'), '', ''],
-        ['Assigned to Me', assignedMe, '', "goPage('tickets'); setTimeout(()=>{S.filters.assignedTo='"+me+"'; renderTicketsList();},50)"]
-      ].map((s,idx,arr)=>`<div style="flex:1;min-width:130px;padding:14px 18px;${idx<arr.length-1?'border-right:1px solid var(--border);':''}${s[3]?'cursor:pointer':''}" ${s[3]?`onclick="${s[3]}"`:''}>
-        <div style="font-family:var(--mono);font-size:22px;font-weight:600;line-height:1;color:${s[2]||'var(--text)'}">${s[1]}</div>
-        <div style="font-size:var(--t-xs);color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:6px">${s[0]}</div>
-      </div>`).join('')}
-    </div>
-    ${activeOrders ? `
-    <div class="panel-title" style="border:none;margin-top:8px">Active Orders (${activeOrders})</div>
-    <div class="tbl-wrap"><table><thead><tr><th>#</th><th>Dealer / From</th><th>Status</th><th>PO</th><th>Received</th></tr></thead><tbody>
-      ${activeOrdersList.slice(0,8).map(e=>`<tr class="rowlink" onclick="openEmail('${e.id}')">
-        <td class="pn">${emailRef(e)}${e.has_unread?' <span class="pill pill-red">new</span>':''}</td>
-        <td class="main-col">${escapeHtml(dealerName(e.dealer_id)||(e.ship_name||'').trim()||e.customer_email||'\u2014')}${e.shopify_order_id?' <span class="pill pill-green" title="Order '+escapeHtml(String(e.shopify_order_id))+' created in Shopify"><span class="ic ic-box"></span>Shopify order</span>':(e.shopify_draft_id?' <span class="pill pill-teal" title="Draft sent to Shopify"><span class="ic ic-box"></span>Sent to Shopify</span>':'')}</td>
-        <td>${e._fulfillment?('<span class="pill '+e._fulfillment.color+'">'+escapeHtml(e._fulfillment.label)+'</span>'):(e.shopify_order_id?'<span style="color:var(--text3)">\u2014</span>':'')}</td>
-        <td class="pn">${e.po_number?escapeHtml(e.po_number):'\u2014'}</td>
-        <td class="pn">${timeAgo(e.last_message_at||e.created_at)}</td>
-      </tr>`).join('')}
-    </tbody></table></div>` : ''}
-    <div class="panel-title" style="border:none;margin-top:8px">Recent Tickets</div>
-    ${ticketTable(t.slice(0,10))}
   `;
 }
 
