@@ -507,7 +507,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.13';
+const TGK_SUPPORT_VERSION = 'v2.16';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1067,6 +1067,7 @@ function subscribeRealtime(){
         }
       } else if(payload.eventType==='UPDATE'){
         rtSeen('emails', payload.new.id);
+        if(idx!==-1 && payload.new.updated_at && S.emails[idx].updated_at && new Date(payload.new.updated_at) < new Date(S.emails[idx].updated_at)) return;
         if(idx!==-1){ S.emails[idx] = Object.assign({}, S.emails[idx], payload.new); if(S.activeEmail && S.activeEmail.id===S.emails[idx].id) S.activeEmail = S.emails[idx]; }
         else S.emails.unshift(payload.new);
       } else if(payload.eventType==='DELETE'){
@@ -1460,6 +1461,24 @@ function openDupModal(){
     + (rows || '<div class="empty">No duplicates found.</div>') + '</div><div class="modal-footer"><button class="btn" onclick="closeModal()">Close</button></div></div>';
 }
 window.openDupModal = openDupModal;
+function addMergeBanner(t){
+  try{
+    if(!t) return;
+    const tr = document.getElementById('tkTracker'); if(!tr || document.getElementById('mergeBanner')) return;
+    const box = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;margin:8px 0;border:1px solid var(--border);background:var(--bg3);border-radius:var(--radius-sm);font-size:var(--t-md)';
+    if(t.merged_into_id){
+      const tgt = S.tickets.find(x=>x.id===t.merged_into_id);
+      tr.insertAdjacentHTML('beforebegin', '<div id="mergeBanner" style="' + box + '"><span>This ticket was merged into <b>#' + (tgt ? tgt.ticket_number : '?') + '</b>. Its messages now live there.</span><span style="flex:1"></span>'
+        + (tgt ? '<button class="btn btn-sm btn-teal" onclick="openTicket(\'' + tgt.id + '\')">Open #' + tgt.ticket_number + '</button>' : '') + '</div>');
+      return;
+    }
+    const kids = S.tickets.filter(x=>x.merged_into_id === t.id);
+    if(kids.length){
+      tr.insertAdjacentHTML('beforebegin', '<div id="mergeBanner" style="' + box + '"><span>Merged into this ticket:</span>'
+        + kids.map(function(k){ return '<button class="btn btn-sm" onclick="openTicket(\'' + k.id + '\')" title="' + escapeHtml(k.subject || '') + '">#' + k.ticket_number + '</button>'; }).join('') + '</div>');
+    }
+  }catch(_){}
+}
 function addDupBanner(t){
   try{
     if(!t) return; const f = dupMap()[t.id]; if(!f) return;
@@ -1610,6 +1629,7 @@ function handleTicketRealtime(payload){
     }
   } else if(payload.eventType === 'UPDATE'){
     rtSeen('tickets', payload.new.id);
+    if(idx !== -1 && payload.new.updated_at && S.tickets[idx].updated_at && new Date(payload.new.updated_at) < new Date(S.tickets[idx].updated_at)) return;
     if(idx !== -1) S.tickets[idx] = Object.assign({}, S.tickets[idx], payload.new);
     else S.tickets.unshift(payload.new);
     if(S.activeTicket && S.activeTicket.id === payload.new.id && idx !== -1) S.activeTicket = S.tickets[idx];
@@ -2356,6 +2376,7 @@ function rebateCardPaint(t){
     <div class="rb-grid"><div>
       <div class="rb-label">Order ${t.order_number ? '#'+escapeHtml(t.order_number) : ''}${sum ? ' (found in Shopify)' : ''}</div>
       ${st.loading ? '<div class="rb-note">Looking up the order...</div>' : (linesHtml ? `<table>${linesHtml}</table>` : '')}
+      ${(sum && sum.paid_currency && sum.currency && String(sum.paid_currency).toUpperCase() !== String(sum.currency).toUpperCase()) ? `<div class="rb-note" style="margin:8px 0">The customer paid in <b>${escapeHtml(String(sum.paid_currency).toUpperCase())}</b> (about ${escapeHtml(String(sum.paid_currency).toUpperCase())} ${Number(sum.items_total_paid||0).toFixed(2)} for these items). The amounts below are in ${escapeHtml(String(sum.currency).toUpperCase())}; the refund goes back in ${escapeHtml(String(sum.paid_currency).toUpperCase())} at the order's exchange rate.</div>` : ''}
       <div class="rb-amt"><label for="rbItems" style="font-size:13px">Items total (after discounts, no shipping or tax)</label>
         <div style="position:relative"><span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text3)">$</span><input class="form-input" id="rbItems" type="number" step="0.01" min="0" value="${escapeHtml(st.itemsTotal)}" oninput="rebateOnItems('${id}',this.value)" style="padding-left:22px"></div></div>
       <div class="rb-amt"><label for="rbAmount" style="font-size:13px;font-weight:700">Rebate (5%)</label>
@@ -2390,6 +2411,14 @@ function rebateOnItems(id, v){
 function rebateOnAmount(id, v){ const st = rebateState(id); st.amount = v; st.amountEdited = true; rebateSyncBtn(id); }
 window.rebateOnItems = rebateOnItems; window.rebateOnAmount = rebateOnAmount;
 
+// Shopify refuses a refund whose currency differs from the order's payment currency. Say that in plain words.
+function refundErrorText(msg, orderNo){
+  const m = String(msg || '');
+  if(!/must match parent transaction/i.test(m)) return null;
+  const cur = (/parent transaction\s+([A-Z]{3})/.exec(m) || [])[1] || 'another currency';
+  return 'Order #' + orderNo + ' was paid in ' + cur + ', and the refund service sends US dollars, so Shopify refused it. Nothing was refunded. Refund this one from Shopify directly for now.';
+}
+window.refundErrorText = refundErrorText;
 async function rebateSend(id){
   const t = S.tickets.find(x=>x.id === id);
   const st = rebateState(id);
@@ -2404,6 +2433,7 @@ async function rebateSend(id){
   if(st.summary && Number(st.summary.refunded_total) > 0) msg += '\n\nNote: this order already has ' + rebateMoney(st.summary.refunded_total) + ' refunded.';
   if(!confirm(msg)) return;
   st.busy = true; rebateSyncBtn(id);
+  let paidNote = '';
   try{
     const sess = await sb.auth.getSession();
     const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
@@ -2417,10 +2447,11 @@ async function rebateSend(id){
     }catch(netErr){ throw new Error('Could not reach the refund service. Check order #' + t.order_number + ' in Shopify for a refund before trying again.'); }
     const result = await resp.json().catch(()=>({}));
     if(!resp.ok || result.ok === false) throw new Error(result.error || 'Refund failed');
+    if(result.currency && String(result.currency).toUpperCase() !== 'USD' && result.amount_in_currency) paidNote = ' (' + String(result.currency).toUpperCase() + ' ' + Number(result.amount_in_currency).toFixed(2) + ' to the customer)';
     st.sentLocal = amount;            // the money has moved: lock this ticket for good, whatever happens next
   }catch(e){
     st.busy = false; rebateSyncBtn(id);
-    toast('Rebate failed: ' + (e.message || e), true);
+    toast(refundErrorText(e.message || e, t.order_number) || ('Rebate failed: ' + (e.message || e)), true);
     return;
   }
   // Money is sent. Everything below is bookkeeping, and must never make it look as if the rebate failed.
@@ -2435,7 +2466,7 @@ async function rebateSend(id){
   // updateTicketField reports its own errors instead of throwing, so check what the ticket really looks like now.
   const after = S.tickets.find(x=>x.id === id);
   if(!(after && after.status === 'resolved' && (after.shopify_refund_id || Number(after.refund_amount) > 0))) saved = false;
-  if(saved) toast('Rebate of ' + rebateMoney(amount) + ' sent');
+  if(saved) toast('Rebate of ' + rebateMoney(amount) + ' sent' + paidNote);
   else{ st.saveWarn = true; toast('Rebate of ' + rebateMoney(amount) + ' was SENT, but the ticket could not be updated. Mark it Resolved yourself.', true); }
   st.busy = false;
   try{ renderTicketPanel(S.tickets.find(x=>x.id === id) || S.activeTicket); }catch(_e){}
@@ -3126,6 +3157,7 @@ function renderTicketsList(){
         <option value="__active__" ${S.filters.status==='__active__'?'selected':''}>Active (not resolved/closed)</option>
         <option value="" ${S.filters.status===''?'selected':''}>All Statuses</option>
         ${['open','pending','waiting_customer','resolved','closed'].map(s=>`<option value="${s}" ${S.filters.status===s?'selected':''}>${label(s)}</option>`).join('')}
+        <option value="__merged__" ${S.filters.status==='__merged__'?'selected':''}>Merged tickets</option>
       </select>
       <select class="form-input" style="width:auto" onchange="S.filters.priority=this.value; renderTicketsList()">
         <option value="">All Priorities</option>
@@ -3671,7 +3703,11 @@ function filteredTickets(){
   // guard the source ticket reappears the moment the status filter is anything
   // other than "Active" (All Statuses, a category, a search), which reads as
   // "the merge didn't work" even though it did.
-  list = list.filter(t=>!t.merged_into_id);
+  // v2.14: still out of the working queues, but never lost. Typing in the search box finds them,
+  // and the "Merged" status option lists them all. Each one shows where it went.
+  const searching = !!(f.q && String(f.q).trim());
+  if(f.status === '__merged__') list = list.filter(t=>t.merged_into_id);
+  else if(!searching) list = list.filter(t=>!t.merged_into_id);
   if(!f.showArchived) list = list.filter(t=>!t.archived);
   // The default status view only ever shows active work - correct on its own, but it was
   // ALSO silently applying on top of "Show Archived", meaning that checkbox alone was never
@@ -3679,8 +3715,9 @@ function filteredTickets(){
   // archived live chat now is, since archiving properly ends it first). Checking a box
   // labeled "Show Archived" should be enough on its own - it shouldn't also require someone
   // to separately notice and change an unrelated status filter to actually see the result.
-  if(f.status === '__active__' && !f.showArchived) list = list.filter(t=>!['resolved','closed'].includes(t.status));
-  else if(f.status && f.status !== '__active__') list = list.filter(t=>t.status===f.status);
+  if(f.status === '__merged__'){ /* every status */ }
+  else if(f.status === '__active__' && !f.showArchived) list = list.filter(t=>t.merged_into_id ? searching : !['resolved','closed'].includes(t.status));
+  else if(f.status && f.status !== '__active__') list = list.filter(t=>t.merged_into_id ? searching : t.status===f.status);
   if(f.priority) list = list.filter(t=>t.priority===f.priority);
   if(f.source) list = list.filter(t=>t.source===f.source);
   if(f.route) list = list.filter(t=>tkRoute(t)===f.route);
@@ -3737,7 +3774,7 @@ function ticketTable(list, enableBulk){
         <tr class="rowlink" onclick="${enableBulk?'':`openTicket('${t.id}')`}">
           ${enableBulk ? `<td onclick="event.stopPropagation()"><input type="checkbox" ${S.selectedTickets.has(t.id)?'checked':''} onchange="toggleTicketSelect('${t.id}', this.checked)"></td>` : ''}
           <td class="pn" ${enableBulk?`style="cursor:pointer" onclick="openTicket('${t.id}')"`:''}>#${t.ticket_number}</td>
-          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${_dm[t.id]?` <span class="pill pill-orange" title="Same customer and subject as #${_dm[t.id].ticket_number}">Dup of #${_dm[t.id].ticket_number}</span>`:''}${t.archived?' <span class="pill pill-muted"><span class="ic ic-database"></span>Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)"><span class="ic ic-box"></span></span>':''}</td>
+          <td class="main-col" style="${t.has_unread?'font-weight:700':''}${enableBulk?';cursor:pointer':''}" ${enableBulk?`onclick="openTicket('${t.id}')"`:''}>${escapeHtml(t.subject)}${t.merged_into_id?` <span class="pill pill-muted" title="This ticket was merged into another one">Merged into #${((S.tickets.find(x=>x.id===t.merged_into_id)||{}).ticket_number)||'?'}</span>`:''}${_dm[t.id]?` <span class="pill pill-orange" title="Same customer and subject as #${_dm[t.id].ticket_number}">Dup of #${_dm[t.id].ticket_number}</span>`:''}${t.archived?' <span class="pill pill-muted"><span class="ic ic-database"></span>Archived</span>':''}${t.has_unread?` <span class="pill pill-red" title="Unread messages">${t.unread_count||1} new · ${timeAgo(t.updated_at)}</span>`:''}${isStale(t)?` <span class="pill pill-orange" title="No update in over ${STALE_THRESHOLD_HOURS}h">⏰ Stale</span>`:''}${(t.warranty_claim_id||t.shipment_error_id)?' <span title="Sent to ERP/Warehouse" style="color:var(--green)"><span class="ic ic-box"></span></span>':''}</td>
           <td>${escapeHtml(t.customer_name||t.customer_email||'—')}${ticketIsDealer(t)?' '+TK_DEALER_PILL:''}</td>
           <td>${t.order_number ? '#'+escapeHtml(t.order_number) : '—'}</td>
           <td>${t.category?`<span class="pill ${tkCategoryColor(t.category)}">${escapeHtml(t.category)}</span>`:''}</td>
@@ -7204,6 +7241,9 @@ async function updateTicketField(id, field, value, skipUndo){
     }
     toast('Ticket updated');
     rtExpect('tickets', id);
+    // Done tickets are never left selected or duplicated, so they cannot linger in the Active grid.
+    if(field==='status' && (value==='resolved'||value==='closed')){ try{ S.selectedTickets.delete(id); }catch(_){} }
+    S.tickets = S.tickets.filter(function(x, i, a){ return a.findIndex(function(y){ return y.id === x.id; }) === i; });
     renderNav();
     renderPage();
     if(S.activeTicket && S.activeTicket.id === id){
@@ -7742,7 +7782,7 @@ async function submitRefund(ticketId){
     closeModal();
     toast(`Refund of $${refundAmount.toFixed(2)} processed successfully`);
   }catch(e){
-    toast('Refund failed: ' + e.message, true);
+    toast(refundErrorText(e.message, t.order_number) || ('Refund failed: ' + e.message), true);
     btn.disabled = false;
     btn.textContent = 'Process Refund';
   }
@@ -7946,9 +7986,10 @@ async function confirmMerge(sourceId, targetId){
 
     closeModal();
     closePanel();
-    toast(`Merged into ticket #${updatedTarget.ticket_number}`);
+    toast(`Merged #${source.ticket_number} into #${updatedTarget.ticket_number}`);
     renderNav();
     renderPage();
+    openTicket(targetId);   // show where it went, with the merged ticket listed in the banner
   }catch(e){
     toast('Merge failed: ' + e.message, true);
   }
@@ -8088,7 +8129,7 @@ window.sendMessage = sendMessage;
   });
   const origPanel = window.renderTicketPanel;
   if(typeof origPanel === 'function'){
-    window.renderTicketPanel = function(t){ const r = origPanel.apply(this, arguments); addDupBanner(t); return r; };
+    window.renderTicketPanel = function(t){ const r = origPanel.apply(this, arguments); addMergeBanner(t); addDupBanner(t); return r; };
   }
 })();
 (function(){
