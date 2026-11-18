@@ -507,7 +507,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.16';
+const TGK_SUPPORT_VERSION = 'v2.17';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -1272,6 +1272,7 @@ function setNrAutoNext(v){ try{ localStorage.setItem('tgk_nr_next', v ? '1' : '0
 window.setNrAutoNext = setNrAutoNext;
 function nrAdvance(id){
   if(!S._nrFrom || !nrAutoNextOn()) return;
+  if(S._noAdvance || S._askOpen || _askQ.length) return;   // a question is waiting for you: stay put
   const cur = S.activeTicket || S.activeEmail;
   if(!cur || cur.id !== id) return;
   let items = needsReplyItems();
@@ -2461,18 +2462,27 @@ async function rebateSend(id){
     if(updated){ const i = S.tickets.findIndex(x=>x.id === id); if(i !== -1) S.tickets[i] = updated; S.activeTicket = updated; }
     const cur = S.tickets.find(x=>x.id === id);
     if(cur && !(cur.shopify_refund_id || Number(cur.refund_amount) > 0)) await updateTicketField(id, 'refund_amount', amount);
-    await updateTicketField(id, 'status', 'resolved');
   }catch(e){ saved = false; }
   // updateTicketField reports its own errors instead of throwing, so check what the ticket really looks like now.
   const after = S.tickets.find(x=>x.id === id);
-  if(!(after && after.status === 'resolved' && (after.shopify_refund_id || Number(after.refund_amount) > 0))) saved = false;
+  if(!(after && (after.shopify_refund_id || Number(after.refund_amount) > 0))) saved = false;
   if(saved) toast('Rebate of ' + rebateMoney(amount) + ' sent' + paidNote);
-  else{ st.saveWarn = true; toast('Rebate of ' + rebateMoney(amount) + ' was SENT, but the ticket could not be updated. Mark it Resolved yourself.', true); }
+  else{ st.saveWarn = true; toast('Rebate of ' + rebateMoney(amount) + ' was SENT, but the ticket could not be updated. Check the ticket before doing anything else.', true); }
   st.busy = false;
   try{ renderTicketPanel(S.tickets.find(x=>x.id === id) || S.activeTicket); }catch(_e){}
   try{ renderNav(); if(S.page === 'rebates') renderRebatesList(); }catch(_e){}
   if(!saved){ try{ rebateDraft(rebateConfirmText(S.tickets.find(x=>x.id === id), amount)); }catch(_e){} return; }   // keep the warning on screen; staff send the drafted confirmation after fixing the ticket
+  // Stay on this ticket while the confirmation goes out and while the question below is answered.
+  S._noAdvance = true;
   try{ await rebateSendConfirmation(id, amount); }catch(e){ toast('Rebate sent. The confirmation email did not go out: ' + (e.message || e), true); }
+  finally{ S._noAdvance = false; }
+  tgkAsk({
+    key: 'rebate-resolve-' + id,
+    title: 'Rebate sent',
+    html: 'The <b>' + rebateMoney(amount) + '</b> rebate for ticket <b>#' + escapeHtml(String((S.tickets.find(x=>x.id === id) || {}).ticket_number || '')) + '</b> has been refunded through Shopify.<br><br>Is this ticket resolved?',
+    yes: 'Yes, resolve it', no: 'Not yet',
+    onYes: function(){ return updateTicketField(id, 'status', 'resolved'); }
+  });
 }
 function rebateConfirmText(t, amount){
   const first = String((t && t.customer_name) || '').trim().split(/\s+/)[0] || 'there';
