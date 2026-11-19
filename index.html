@@ -507,7 +507,7 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.20';
+const TGK_SUPPORT_VERSION = 'v2.21';
 const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -6143,6 +6143,70 @@ window.markEmailUnread = markEmailUnread;
    Lets staff turn a dealer PO email into a Shopify draft order. Pricing is
    pulled live from Shopify by the create-draft-order function -- staff enter
    SKU + qty only. The dealer's wholesale % applies as an order discount. */
+/* ---- [v2.21] DEALER PROMOTIONS ON SHOPIFY ORDERS ------------------------------------------------------------------------------------------------
+   Promotions are made in the ERP (Dealers > Promotions) and saved in the shared settings table as dealer_promos; a "stacks on top" promotion is already turned
+   into a total % off MSRP per group of dealers there, so this only has to read them. For a dealer order the discount % now defaults to the BETTER of the
+   dealer's usual % and a live promotion for that dealer. A promotion with a minimum order is judged on the order at the dealer's usual prices, the same
+   rule the dealer portal uses, so it needs the live totals: press Preview total, and the % switches over by itself if the order qualifies. A % typed by
+   hand is never overridden. */
+function scToday(){ return new Intl.DateTimeFormat('en-CA',{timeZone:'America/Chicago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()); }
+function dealerLivePromos(dealerId){
+  if(!dealerId) return [];
+  const list = S.settings && S.settings.dealer_promos; if(!Array.isArray(list)) return [];
+  const today = scToday();
+  return list.filter(p=>{
+    if(!p || p.active===false || !(Number(p.discount_pct)>0)) return false;
+    if(p.starts_on && String(p.starts_on).slice(0,10) > today) return false;
+    if(p.ends_on && String(p.ends_on).slice(0,10) < today) return false;
+    const ids=(p.dealer_ids||[]).map(String);
+    return !ids.length || ids.indexOf(String(dealerId))>=0;
+  }).sort((a,b)=>Number(b.discount_pct)-Number(a.discount_pct));
+}
+// The order's total at full price, worked out from the live Shopify totals whether their "subtotal" is before or after the order discount.
+function orderMsrpSubtotal(t, pctUsed){
+  const sub=Number(t&&t.subtotal), disc=Number(t&&t.discount)||0;
+  if(!isFinite(sub)) return null;
+  if(!(disc>0)) return sub;
+  const p=Number(pctUsed)||0; if(!(p>0)||!(sub>0)) return sub+disc;
+  const r=disc/sub;
+  return Math.abs(r-p/100) <= Math.abs(r-p/(100-p)) ? sub : sub+disc;
+}
+function orderPromoDecision(e){
+  const dealerPct = dealerWholesalePct(e.dealer_id)||0;
+  const promos = dealerLivePromos(e.dealer_id).filter(p=>Number(p.discount_pct)>dealerPct);
+  if(!promos.length) return null;
+  const t = window._orderTotals && window._orderTotals[e.id];
+  const msrp = t ? orderMsrpSubtotal(t, (window._orderTotalsPct||{})[e.id]) : null;
+  const usual = msrp!=null ? msrp*(1-dealerPct/100) : null;
+  let applied=null, needsPreview=null, short=null;
+  for(const p of promos){   // best first
+    const min=Number(p.min_order)||0;
+    if(min<=0 || (usual!=null && usual>=min)){ applied=p; break; }
+    if(usual==null){ if(!needsPreview) needsPreview=p; } else if(!short) short={p, need:min-usual};
+  }
+  return {dealerPct, applied, needsPreview, short, usual};
+}
+function orderDefaultPct(e){
+  if(e.order_discount_pct!=null) return Number(e.order_discount_pct);
+  const d=orderPromoDecision(e);
+  return d && d.applied ? Number(d.applied.discount_pct) : (dealerWholesalePct(e.dealer_id)||0);
+}
+function orderPromoNote(e){
+  const live = dealerLivePromos(e.dealer_id), dealerPct = dealerWholesalePct(e.dealer_id)||0;
+  const mine = live.filter(p=>Number(p.discount_pct)>dealerPct);
+  if(!mine.length) return '';
+  const box=(color,html)=>`<div style="margin-top:6px;padding:7px 9px;border-radius:var(--r-sm);font-size:var(--t-xs);line-height:1.5;border:1px solid ${color};background:var(--bg2)">${html}</div>`;
+  const label=p=>`<strong>${escapeHtml(p.name||'Promotion')}</strong> \u2014 ${Number(p.discount_pct)}% total${p.note?` <span style="color:var(--text3)">(${escapeHtml(p.note)})</span>`:''}`;
+  if(e.order_discount_pct!=null){
+    return box('var(--border)',`A promotion is live for this dealer: ${label(mine[0])}. The % above was set by hand. <a href="#" onclick="updateEmailField('${e.id}','order_discount_pct','',true).then(()=>{clearOrderTotals();rerenderOrderBuilder();});return false" style="color:var(--teal)">Switch back to automatic</a>`);
+  }
+  const d=orderPromoDecision(e);
+  const parts=[];
+  if(d&&d.applied) parts.push(`<span style="color:var(--teal);font-weight:700">Promotion applied:</span> ${label(d.applied)}.`);
+  if(d&&d.needsPreview) parts.push(`${d.applied?'A better promotion':'Promotion available'}: ${label(d.needsPreview)}, with a $${Number(d.needsPreview.min_order).toLocaleString()} minimum at the dealer's usual prices. <strong>Press Preview total</strong> to check it.`);
+  if(d&&d.short) parts.push(`${label(d.short.p)} needs $${Number(d.short.p.min_order).toLocaleString()} at the dealer's usual prices; this order is about $${Math.max(0,d.short.need).toFixed(2)} short.`);
+  return parts.length?box(d&&d.applied?'rgba(13,148,136,.4)':'var(--border)',parts.join('<br>')):'';
+}
 function dealerWholesalePct(id){ if(!id) return null; const d=(S.dealers||[]).find(x=>String(x.id)===String(id)); return d && d.discount_pct!=null ? Math.round(d.discount_pct*1000)/10 : null; }
 function orderLinesFor(e){
   if(window._orderLinesFor !== e.id){
@@ -6332,7 +6396,7 @@ function renderTotalsStrip(t){
     <div style="font-size:var(--t-xs);color:var(--text3);margin-top:4px">Live from Shopify \u00b7 preview only, nothing created yet${t.fn_version?' \u00b7 fn '+escapeHtml(t.fn_version):''}</div>
   </div>`;
 }
-async function previewOrderTotals(id){
+async function previewOrderTotals(id, again){
   const payload = orderDraftPayload(id);
   if(!payload) return;
   if(!payload.line_items.length){ toast('Add at least one line item to preview', true); return; }
@@ -6348,7 +6412,16 @@ async function previewOrderTotals(id){
     if(!resp.ok) throw new Error(result.error||'Calculate failed');
     window._orderTotals = window._orderTotals || {};
     window._orderTotals[id] = result;
+    window._orderTotalsPct = window._orderTotalsPct || {};
+    window._orderTotalsPct[id] = payload.discount_pct;
     rerenderOrderBuilder();
+    // [v2.21] A promotion minimum can only be judged once the totals are known. If that changes the % this order should use, price it once more so the
+    // numbers on screen are the ones that will be sent. (Never when the % was typed by hand, and never more than once.)
+    const _em=(S.emails||[]).find(x=>x.id===id);
+    if(!again && _em && _em.order_discount_pct==null){
+      const _want=orderDefaultPct(_em);
+      if(Math.abs(_want-(Number(payload.discount_pct)||0))>0.001){ return previewOrderTotals(id, true); }
+    }
   }catch(err){
     toast('Preview failed: '+err.message, true);
     const b=document.getElementById('previewBtn'); if(b){ b.disabled=false; b.textContent='Preview total'; }
@@ -6480,7 +6553,7 @@ function renderDealerHistory(e){
 
 function renderOrderBuilder(e){
   const lines = orderLinesFor(e);
-  const pct = (e.order_discount_pct!=null ? e.order_discount_pct : (dealerWholesalePct(e.dealer_id) || 0));
+  const pct = (e.order_discount_pct!=null ? e.order_discount_pct : orderDefaultPct(e));   // [v2.21] the better of the dealer's % and a live promotion
   const created = e.shopify_draft_id;
   return `
   <div class="linked-box" id="orderBuilder">
@@ -6515,6 +6588,7 @@ function renderOrderBuilder(e){
       <div class="form-group"><label class="form-label">Dealer discount %</label><input class="form-input" id="orderDiscPct" type="number" min="0" max="100" step="0.5" value="${pct}" onchange="updateEmailField('${e.id}','order_discount_pct',this.value,true); clearOrderTotals()"></div>
       <div class="form-group"><label class="form-label">Billing code / ref (optional)</label><input class="form-input" value="${escapeHtml(e.order_discount_code||'')}" placeholder="e.g. URO-1234" onchange="updateEmailField('${e.id}','order_discount_code',this.value)"></div>
     </div>
+    ${orderPromoNote(e)}
     <div class="form-row cols-2" style="margin-top:6px">
       <div class="form-group"><label class="form-label">Shipping method</label>
         <input class="form-input" id="orderShipMethod" list="shipMethodsList" value="${escapeHtml(e.shipping_method||'')}" placeholder="e.g. Ground" onchange="updateEmailField('${e.id}','shipping_method',this.value,true); clearOrderTotals()">
@@ -6557,6 +6631,11 @@ window.saveOrderLines=saveOrderLines;
 
 async function createShopifyDraft(id){
   const e=(S.emails||[]).find(x=>x.id===id); if(!e) return;
+  // [v2.21] A live promotion with a minimum order has to be checked against the live totals first, or the order could go out without it (or with it when it does not qualify).
+  if(e.order_discount_pct==null){
+    const _pd=orderPromoDecision(e);
+    if(_pd && _pd.needsPreview && !(window._orderTotals && window._orderTotals[id])){ toast('A promotion ('+(_pd.needsPreview.name||'')+') with a minimum order applies to this dealer. Press Preview total first so the minimum can be checked.', true); return null; }
+  }
   const lines=(window._orderLines||[]).filter(l=>l.sku&&l.sku.trim()).map(l=>({sku:l.sku.trim(), qty:Math.max(1,parseInt(l.qty)||1), price:(l.price!=null&&String(l.price).trim()!=='')?Number(l.price):null, desc:l.desc||''}));
   if(!lines.length){ toast('Add at least one line item', true); return; }
   const btn=document.getElementById('createDraftBtn'); if(btn){ btn.disabled=true; btn.textContent='Creating in Shopify...'; }
