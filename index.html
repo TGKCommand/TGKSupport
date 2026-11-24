@@ -507,8 +507,8 @@ html:has(#tk-panel.open) #tgk-devtrk-banner{display:none!important}
    ============================================================ */
 const SUPABASE_URL = "https://piamamighqiielfztgic.supabase.co";
 
-const TGK_SUPPORT_VERSION = 'v2.21';
-const TGK_SUPPORT_BUILD_DATE = '2026-11-02';
+const TGK_SUPPORT_VERSION = 'v2.22';
+const TGK_SUPPORT_BUILD_DATE = '2026-11-24';
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBpYW1hbWlnaHFpaWVsZnp0Z2ljIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc4NjkxMzUsImV4cCI6MjA5MzQ0NTEzNX0.YwLflTw6F4cRzmY78QoAY6Zud2IHGVP5xL_yvMFxheA";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -748,6 +748,7 @@ async function afterLogin(user){
   goPage('dashboard');
   setupBackButton();
   subscribeRealtime();
+  try{ flaggedStart(); }catch(_){}
   window._tgkSupportLoaded = true; try{ _tgkAnnounceReady(); }catch(_){} // [v1.99] lets the Command Center open an exact item
 
   try{
@@ -983,6 +984,7 @@ async function loadAll(){
     await loadEmails();
     await loadOrdersFulfillment();
     await loadQuarantine();
+    await loadFlagged(true);
   }catch(e){
     toast('Failed to load data: ' + e.message, true);
   }
@@ -1129,7 +1131,7 @@ function subscribeRealtime(){
    Emails, Orders, Rebates etc. always agree. Debounced so a burst of events is one redraw,
    and held back (not lost) while you are typing in a field on the page.
    ============================================================ */
-const LIVE_PAGES = ['dashboard','needsreply','followup','tickets','emails','orders','rebates','warranty','shiperrors','quarantine','livechat'];
+const LIVE_PAGES = ['dashboard','needsreply','followup','tickets','emails','orders','flagged','rebates','warranty','shiperrors','quarantine','livechat'];
 let _rvTimer = null;
 function typingInPage(){
   const ae = document.activeElement;
@@ -1657,6 +1659,7 @@ const NAV = [
   { id:'livechat', label:'Live Chat', badgeKey:'livechat', section:'Inbox', hidden:true }, // hidden from the menu for now; remove hidden:true to bring it back
   { id:'emails', label:'Emails', badgeKey:'emails', section:'Inbox' },
   { id:'orders', label:'Orders', badgeKey:'orders', section:'Inbox' },
+  { id:'flagged', label:'Flagged Orders', badgeKey:'flagged', section:'Inbox' },
   { id:'quarantine', label:'Held (Spam)', badgeKey:'quarantine', section:'Inbox' },
   { id:'tickets', label:'All forms', badgeKey:'tickets', section:'Website forms' },
   { id:'rebates', label:'Rebates', badgeKey:'rebates', section:'Website forms', inGroup:true },
@@ -1789,6 +1792,10 @@ function renderNav(){
     }
     if(n.badgeKey==='shiperrors'){
       if(counts.shipErrorsCount){ badge = `<span class="nav-badge">${counts.shipErrorsCount}</span>`; alertClass='alert-nav'; }
+    }
+    if(n.badgeKey==='flagged'){
+      const fl = flaggedOpenCount();
+      if(fl){ badge = `<span class="nav-badge" style="color:var(--red);background:var(--red-dim);border-color:rgba(220,38,38,.25)" title="${fl} flagged order${fl===1?'':'s'} waiting for a decision">${fl}</span>`; alertClass='alert-nav'; }
     }
     if(n.badgeKey==='quarantine'){
       if(counts.quarantineCount){ badge = `<span class="nav-badge" style="color:var(--orange);background:var(--orange-dim);border-color:rgba(224,123,40,.2)">${counts.quarantineCount}</span>`; alertClass='alert-nav'; }
@@ -2167,6 +2174,334 @@ function goPage(id){
 }
 window.goPage = goPage;
 
+/* ============================================================
+   FLAGGED ORDERS (v2.22)
+   Orders Shopify flags INVESTIGATE (or CANCEL) are put ON HOLD in ShipStation automatically by the flagged-orders
+   function (ops-cron runs it every 2 minutes) and listed here. Staff email the customer to confirm they placed the
+   order (a normal ticket, so the customer's reply lands in the ticket thread), then press:
+     Confirm         the order comes OFF hold in ShipStation and the ERP and can ship.
+     Cancel & refund the order is cancelled in Shopify with a full refund to the original payment method.
+   Safety: confirmations before either; the buttons lock while it works; the function lets only ONE decision through
+   (two people clicking at once cannot both act); a failed step puts the order back in review and says why.
+   Reads flagged_orders / flagged_order_events directly (live updates); every change goes through the function.
+   ============================================================ */
+const FLAGGED_URL = SUPABASE_URL + '/functions/v1/flagged-orders';
+const FLAGGED_OPEN = ['flagged','awaiting_customer','confirming','cancelling'];
+S.flagged = S.flagged || [];
+S.flaggedTab = S.flaggedTab || 'review';
+S.fl = S.fl || { events:{}, replies:{}, busy:false, draft:{}, view:'detail', openId:null, cfg:null, cfgLoading:false, sweeping:false, cancelNotify:true, cancelNote:'' };
+function flaggedBare(n){ return String(n||'').replace(/^#/,''); }
+function flaggedOpenCount(){ return (S.flagged||[]).filter(f=>FLAGGED_OPEN.includes(f.status)).length; }
+function flaggedGet(id){ return (S.flagged||[]).find(f=>f.id===id) || null; }
+function flaggedMoney(f){ if(f.total_amount==null) return '\u2014'; const cur = String(f.currency||'USD').toUpperCase(); return '$' + Number(f.total_amount).toFixed(2) + (cur && cur!=='USD' ? ' ' + cur : ''); }
+function flaggedApply(row){ if(!row || !row.id) return; const i=(S.flagged||[]).findIndex(x=>x.id===row.id); if(i>=0) S.flagged[i]=row; else S.flagged.unshift(row); try{ renderNav(); }catch(_){} }
+function flaggedTicket(f){ return f && f.ticket_id ? (S.tickets||[]).find(t=>t.id===f.ticket_id) || null : null; }
+function flaggedRiskPill(f){ return String(f.risk_level||'').toUpperCase()==='CANCEL' ? '<span class="pill pill-red" title="Shopify recommends cancelling this order">Shopify: cancel</span>' : '<span class="pill pill-orange" title="Shopify recommends investigating this order">Shopify: investigate</span>'; }
+function flaggedHoldPill(f){
+  if(f.status==='confirmed') return '<span class="pill pill-muted">Released</span>';
+  if(f.status==='cancelled') return '<span class="pill pill-muted">Will not ship</span>';
+  const h=f.hold_state;
+  if(h==='held') return '<span class="pill pill-green" title="On hold in ShipStation and the ERP">On hold</span>';
+  if(h==='pending') return '<span class="pill pill-yellow" title="ShipStation has not imported this order yet. It is held the moment it does.">Waiting for ShipStation</span>';
+  if(h==='too_late') return '<span class="pill pill-red" title="'+escapeHtml(f.hold_error||'')+'">Already shipped</span>';
+  if(h==='failed') return '<span class="pill pill-red" title="'+escapeHtml(f.hold_error||'')+'">Hold failed</span>';
+  if(h==='released') return '<span class="pill pill-muted">Released</span>';
+  return '<span class="pill pill-muted">'+escapeHtml(label(h||''))+'</span>';
+}
+function flaggedStatusPill(f){
+  const t = flaggedTicket(f), replied = !!(t && t.has_unread);
+  if(f.status==='flagged') return '<span class="pill pill-orange">Needs contact</span>';
+  if(f.status==='awaiting_customer') return replied ? '<span class="pill pill-green">Customer replied</span>' : '<span class="pill pill-teal">Waiting on customer</span>';
+  if(f.status==='confirming') return '<span class="pill pill-yellow">Releasing\u2026</span>';
+  if(f.status==='cancelling') return '<span class="pill pill-yellow">Cancelling\u2026</span>';
+  if(f.status==='confirmed') return '<span class="pill pill-green">Confirmed</span>';
+  if(f.status==='cancelled') return '<span class="pill pill-muted">Cancelled &amp; refunded</span>';
+  return '<span class="pill pill-muted">'+escapeHtml(label(f.status||''))+'</span>';
+}
+
+/* ---------- loading, live updates, and the function ---------- */
+async function loadFlagged(quiet){
+  try{
+    const { data, error } = await sb.from('flagged_orders').select('*').order('created_at',{ascending:false}).limit(500);
+    if(error) throw error;
+    S.flagged = data || []; S.flaggedMissing = false;
+  }catch(e){
+    const m = String((e && e.message) || e || '');
+    if(/does not exist|schema cache|relation/i.test(m)){ S.flaggedMissing = true; S.flagged = S.flagged || []; }
+    else if(!quiet) logSilent('loadFlagged', e);
+  }
+  try{ renderNav(); }catch(_){}
+  if(S.page==='flagged'){ try{ refreshView(); }catch(_){} }
+  if(S.fl.openId){ try{ flaggedPaint(); }catch(_){} }
+}
+window.loadFlagged = loadFlagged;
+function flaggedStart(){
+  try{   // its own channel, so a problem here can never disturb the rest of the live updates
+    sb.channel('support-flagged').on('postgres_changes', { event:'*', schema:'public', table:'flagged_orders' }, function(p){
+      if(p.eventType==='DELETE'){ S.flagged = (S.flagged||[]).filter(x=>x.id!==(p.old && p.old.id)); }
+      else if(p.new){ const isNew = !flaggedGet(p.new.id); flaggedApply(p.new); if(isNew && p.eventType==='INSERT' && S.page!=='flagged') toast('Order ' + p.new.order_number + ' was flagged by Shopify and is being held for review'); }
+      if(S.fl.openId){ try{ flaggedPaint(); }catch(_){} }
+      try{ refreshView(); }catch(_){}
+    }).subscribe();
+  }catch(_){}
+  setInterval(function(){ if(!document.hidden && S.user) loadFlagged(true); }, 90000);   // a safety net if live updates are ever down
+  setTimeout(function(){ flaggedSweepNow(true); }, 5000);                                // find and hold anything new right away, without waiting for the schedule
+}
+async function flaggedFn(action, body){
+  const sess = await sb.auth.getSession();
+  const tok = sess && sess.data && sess.data.session && sess.data.session.access_token;
+  if(!tok) throw new Error('Your sign-in expired. Sign in again, then retry.');
+  let resp;
+  try{ resp = await fetch(FLAGGED_URL, { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer ' + tok, 'apikey':SUPABASE_ANON_KEY }, body: JSON.stringify(Object.assign({ action:action }, body||{})) }); }
+  catch(e){ throw new Error('Could not reach the flagged-orders service. Check your connection and try again.'); }
+  const j = await resp.json().catch(()=>({}));
+  if(!resp.ok){ const err = new Error(j.error || j.message || ('The request failed (' + resp.status + ')')); err.status = resp.status; err.body = j; throw err; }
+  return j;
+}
+async function flaggedSweepNow(silent){
+  if(S.fl.sweeping) return; S.fl.sweeping = true; if(!silent && S.page==='flagged') flaggedRepaintList();
+  try{
+    const j = await flaggedFn('sweep', {});
+    await loadFlagged(true);
+    if(!silent) toast(j.ok === false && j.error ? ('Checked, with a problem: ' + j.error) : ('Checked ShipStation: ' + (j.summary || 'done')), j.ok === false && !!j.error);
+  }catch(e){ if(!silent) toast('Could not check: ' + e.message, true); }
+  S.fl.sweeping = false; if(S.page==='flagged') flaggedRepaintList();
+}
+async function flaggedLoadCfg(){ if(S.fl.cfgLoading) return; S.fl.cfgLoading = true; S.fl.cfgTried = Date.now(); try{ const j = await flaggedFn('get_config', {}); S.fl.cfg = j.config || S.fl.cfg || null; }catch(_){ S.fl.cfg = S.fl.cfg || null; } S.fl.cfgLoading = false; if(S.page==='flagged') flaggedRepaintList(); }
+async function flaggedToggleAuto(){
+  const cfg = S.fl.cfg; if(!cfg || S.role!=='admin') return;
+  const next = !cfg.auto_hold;
+  if(!confirm(next ? 'Turn automatic holding ON? Flagged orders will be put on hold in ShipStation as soon as ShipStation has them.' : 'Turn automatic holding OFF?\n\nFlagged orders will still be listed here, but they will NOT be held in ShipStation unless you press "Hold now" on each one, so they could ship.')) return;
+  try{ const j = await flaggedFn('set_config', { auto_hold: next }); S.fl.cfg = j.config; toast('Automatic holding is ' + (j.config.auto_hold ? 'ON' : 'OFF')); logApp('flagged:auto_hold','flagged_order',null,'Automatic holding turned ' + (j.config.auto_hold ? 'on' : 'off')); }
+  catch(e){ toast(e.message, true); }
+  if(S.page==='flagged') flaggedRepaintList();
+}
+
+/* ---------- the queue ---------- */
+function flaggedRepaintList(){ if(S.page==='flagged'){ try{ renderFlaggedList(); }catch(_){} } }
+function renderFlaggedList(){
+  const el = document.getElementById('content'); if(!el) return;
+  if(S.flaggedMissing){
+    el.innerHTML = '<div class="tbl-wrap"><div class="empty">Flagged Orders is not set up yet.<div style="font-size:var(--t-sm);margin-top:8px;color:var(--text3)">Run <b>flagged_orders.sql</b> once in the Supabase SQL editor, deploy the <b>flagged-orders</b> function, then reload this page.</div></div></div>';
+    return;
+  }
+  const all = (S.flagged||[]).slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  const groups = { review: all.filter(f=>FLAGGED_OPEN.includes(f.status)), confirmed: all.filter(f=>f.status==='confirmed'), cancelled: all.filter(f=>f.status==='cancelled'), all: all };
+  const tab = groups[S.flaggedTab] ? S.flaggedTab : 'review';
+  const tabBtn = (id, lbl) => `<button type="button" class="btn btn-sm ${tab===id?'btn-teal':''}" onclick="S.flaggedTab='${id}';renderFlaggedList()">${lbl} (${groups[id].length})</button>`;
+  const cfg = S.fl.cfg;
+  const autoBtn = cfg ? `<button type="button" class="btn btn-sm" ${S.role==='admin'?'':'disabled title="Only an admin can change this"'} onclick="flaggedToggleAuto()" title="Whether flagged orders are put on hold in ShipStation automatically">Automatic hold: <b style="color:${cfg.auto_hold?'var(--green,#16a34a)':'var(--red)'}">${cfg.auto_hold?'ON':'OFF'}</b></button>` : '';
+  const rows = groups[tab];
+  const empty = { review:'No flagged orders are waiting for a decision.', confirmed:'No confirmed orders yet.', cancelled:'No cancelled orders yet.', all:'No orders have been flagged yet.' }[tab];
+  el.innerHTML = `
+    <p style="font-size:var(--t-md);color:var(--text3);margin-bottom:14px">Orders Shopify flags as risky are put <b>on hold in ShipStation</b> automatically. Open one, email the customer to confirm they placed it, then <b>Confirm</b> (it goes back to Open and can ship) or <b>Cancel &amp; refund</b> (cancelled and refunded in Shopify).</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;align-items:center">${tabBtn('review','To review')}${tabBtn('confirmed','Confirmed')}${tabBtn('cancelled','Cancelled')}${tabBtn('all','All')}
+      <span style="flex:1"></span>${autoBtn}<button type="button" class="btn btn-sm" ${S.fl.sweeping?'disabled':''} onclick="flaggedSweepNow(false)" title="Looks for newly flagged orders and puts them on hold in ShipStation right now">${S.fl.sweeping?'Checking\u2026':'&#8635; Check ShipStation now'}</button></div>
+    ${!rows.length ? `<div class="tbl-wrap"><div class="empty">${empty}</div></div>` : `
+    <div class="tbl-wrap"><table><thead><tr><th>Order</th><th>Customer</th><th>Total</th><th>Shopify</th><th>ShipStation</th><th>Review</th><th>Flagged</th></tr></thead>
+    <tbody>${rows.map(f=>`
+      <tr style="cursor:pointer" onclick="flaggedOpen('${escapeHtml(f.id)}')">
+        <td class="pn">${escapeHtml(f.order_number||'')}</td>
+        <td>${escapeHtml(f.customer_name||'\u2014')}<div style="font-size:var(--t-sm);color:var(--text3)">${escapeHtml(f.customer_email||'')}</div></td>
+        <td class="pn">${escapeHtml(flaggedMoney(f))}</td>
+        <td>${flaggedRiskPill(f)}</td>
+        <td>${flaggedHoldPill(f)}</td>
+        <td>${flaggedStatusPill(f)}</td>
+        <td>${escapeHtml(timeAgo(f.created_at))}</td>
+      </tr>`).join('')}</tbody></table></div>`}`;
+  if(!S.fl.cfg && !S.fl.cfgLoading && (!S.fl.cfgTried || Date.now() - S.fl.cfgTried > 60000)) flaggedLoadCfg();   // once, then at most once a minute: a failing request must never loop
+}
+
+/* ---------- one order: the review panel ---------- */
+function flaggedOpen(id){
+  const f = flaggedGet(id); if(!f) return;
+  S.fl.openId = id; S.fl.view = 'detail'; S.fl.cancelNotify = true; S.fl.cancelNote = '';
+  const ov = document.getElementById('modalOverlay'); ov.classList.remove('hidden');
+  flaggedPaint(); flaggedLoadExtras(id);
+}
+function flaggedClose(){ S.fl.openId = null; S.fl.view = 'detail'; closeModal(); }
+async function flaggedLoadExtras(id){
+  const f = flaggedGet(id); if(!f) return;
+  try{ const r = await sb.from('flagged_order_events').select('*').eq('flagged_id', id).order('at',{ascending:true}); S.fl.events[id] = r.data || []; }catch(_){ S.fl.events[id] = S.fl.events[id] || []; }
+  if(f.ticket_id){
+    try{
+      const msgs = await loadMessages(f.ticket_id);
+      const last = (msgs||[]).filter(m=>m.sender_type==='customer' && !m.is_internal_note).slice(-1)[0];
+      S.fl.replies[id] = last || null;
+    }catch(_){ /* the ticket link still works */ }
+  }
+  if(S.fl.openId===id) flaggedPaint();
+}
+function flaggedAddrLine(a){ if(!a) return '\u2014'; return [a.name, a.address1, a.address2, [a.city, a.province, a.zip].filter(Boolean).join(' '), a.country].filter(Boolean).map(escapeHtml).join('<br>'); }
+function flaggedAddrKey(a){ return a ? [a.address1, a.zip].map(x=>String(x||'').toLowerCase().replace(/[^a-z0-9]/g,'')).join('|') : ''; }
+function flaggedPaint(){
+  const ov = document.getElementById('modalOverlay'); const f = flaggedGet(S.fl.openId);
+  if(!ov || !f || ov.classList.contains('hidden')) return;
+  ov.innerHTML = S.fl.view==='email' ? flaggedEmailHtml(f) : (S.fl.view==='cancel' ? flaggedCancelHtml(f) : flaggedDetailHtml(f));
+}
+function flaggedDetailHtml(f){
+  const open = ['flagged','awaiting_customer'].includes(f.status), busy = S.fl.busy;
+  const rs = f.risk_summary || {}, facts = []; (rs.assessments||[]).forEach(a=>(a.facts||[]).forEach(x=>facts.push(x)));
+  const factColor = x => /NEGATIVE/i.test(x.sentiment||'') ? 'var(--red)' : (/POSITIVE/i.test(x.sentiment||'') ? 'var(--green,#16a34a)' : 'var(--text3)');
+  const differ = f.ship_to && f.bill_to && flaggedAddrKey(f.ship_to) !== flaggedAddrKey(f.bill_to);
+  const t = flaggedTicket(f), reply = S.fl.replies[f.id], evs = S.fl.events[f.id] || [];
+  const sec = (title, body) => `<div style="border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;margin-bottom:10px"><div style="font-size:var(--t-xs);font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text3);margin-bottom:6px">${title}</div>${body}</div>`;
+  const items = (f.items||[]).map(i=>`<div>${escapeHtml(String(i.quantity||1))} &times; ${escapeHtml(i.title||i.sku||'')}${i.sku?` <span class="pn" style="color:var(--text3)">${escapeHtml(i.sku)}</span>`:''}</div>`).join('') || '<div style="color:var(--text3)">\u2014</div>';
+  const holdMsg = f.status==='confirmed' ? 'Released: it goes ahead.' : (f.status==='cancelled' ? 'Cancelled: it will not ship.' : ({ held:'On hold in ShipStation and the ERP until you decide.', pending:'ShipStation has not imported this order yet. It is held the moment it does (checked every 2 minutes).', failed:'The hold failed. It is tried again automatically.', too_late:'ShipStation already shows this order as shipped.' }[f.hold_state] || ''));
+  const canHold = open && ['pending','failed'].includes(f.hold_state);
+  const decided = f.decided_by ? `<div style="font-size:var(--t-sm);color:var(--text3);margin-top:6px">${escapeHtml(label(f.decision||''))} by ${escapeHtml(f.decided_by)} ${escapeHtml(timeAgo(f.decided_at))}${f.decision_note?': '+escapeHtml(f.decision_note):''}</div>` : '';
+  return `
+    <div class="modal" style="width:880px;max-width:96vw">
+      <div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:220px"><div class="modal-title" style="margin-bottom:6px">Order ${escapeHtml(f.order_number||'')}</div><div style="display:flex;gap:6px;flex-wrap:wrap">${flaggedRiskPill(f)}${flaggedHoldPill(f)}${flaggedStatusPill(f)}</div></div>
+        <div style="text-align:right"><div style="font-size:var(--t-xl,22px);font-weight:700">${escapeHtml(flaggedMoney(f))}</div><div style="font-size:var(--t-sm);color:var(--text3)">flagged ${escapeHtml(timeAgo(f.created_at))}</div></div>
+      </div>
+      ${f.cancel_error?`<div style="margin-bottom:10px;padding:9px 12px;background:var(--red-dim);color:var(--red);border-radius:var(--r-md);font-size:var(--t-sm)"><b>The last cancel did not go through:</b> ${escapeHtml(f.cancel_error)}</div>`:''}
+      ${f.hold_error&&open?`<div style="margin-bottom:10px;padding:9px 12px;background:var(--red-dim);color:var(--red);border-radius:var(--r-md);font-size:var(--t-sm)">${escapeHtml(f.hold_error)}</div>`:''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:0 14px">
+        <div>
+          ${sec('Customer', `<div style="font-weight:600">${escapeHtml(f.customer_name||'\u2014')}</div><div>${f.customer_email?`<a href="mailto:${escapeHtml(f.customer_email)}">${escapeHtml(f.customer_email)}</a>`:'<span style="color:var(--red)">No email on file</span>'}</div>${f.customer_phone?`<div>${escapeHtml(f.customer_phone)}</div>`:''}${rs.customer_orders?`<div style="font-size:var(--t-sm);color:var(--text3)">${escapeHtml(String(rs.customer_orders))} order(s) with us</div>`:''}${(f.payment_gateways||[]).length?`<div style="font-size:var(--t-sm);color:var(--text3)">Paid with ${escapeHtml((f.payment_gateways||[]).join(', '))}</div>`:''}`)}
+          ${sec('Items', items)}
+          ${sec('Ship to / Bill to'+(differ?' <span class="pill pill-orange" style="text-transform:none;letter-spacing:0">different</span>':''), `<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:var(--t-sm)"><div><b>Ship to</b><br>${flaggedAddrLine(f.ship_to)}</div><div><b>Bill to</b><br>${flaggedAddrLine(f.bill_to)}</div></div>`)}
+          ${sec('Why Shopify flagged it', facts.length ? facts.map(x=>`<div style="color:${factColor(x)}">&bull; ${escapeHtml(x.text||'')}</div>`).join('') : `<div style="color:var(--text3)">Shopify's recommendation: ${escapeHtml(f.risk_level||'')}. ${f.details_at?'It gave no further detail.':'Details are being read from Shopify.'}</div>`)}
+        </div>
+        <div>
+          ${sec('ShipStation hold', `<div>${flaggedHoldPill(f)} <span style="font-size:var(--t-sm);color:var(--text3)">${escapeHtml(holdMsg)}</span></div>${canHold?`<button class="btn btn-sm" style="margin-top:8px" ${busy?'disabled':''} onclick="flaggedHoldNow('${escapeHtml(f.id)}')">Hold in ShipStation now</button>`:''}`)}
+          ${sec('Customer contact', f.contacted_at ? `<div>Emailed by ${escapeHtml(f.contacted_by||'')} ${escapeHtml(timeAgo(f.contacted_at))}.</div>${reply?`<div style="margin-top:8px;padding:8px 10px;background:var(--bg3);border-radius:var(--r-md);font-size:var(--t-sm)"><b>Customer replied</b> <span style="color:var(--text3)">${escapeHtml(timeAgo(reply.created_at))}</span><div style="white-space:pre-wrap;margin-top:4px">${escapeHtml(String(reply.body||'').slice(0,600))}</div></div>`:'<div style="color:var(--text3);font-size:var(--t-sm);margin-top:4px">No reply yet.</div>'}` : '<div style="color:var(--text3)">Not emailed yet.</div>')}
+          ${sec('History', evs.length ? `<div style="font-size:var(--t-sm);max-height:190px;overflow:auto">${evs.map(e=>`<div style="padding:3px 0;border-top:1px solid var(--border)"><span style="color:var(--text3)">${escapeHtml(timeAgo(e.at))}</span> &middot; ${escapeHtml(e.message||e.kind)}<span style="color:var(--text3)"> &mdash; ${escapeHtml(String(e.actor||'').split('@')[0])}</span></div>`).join('')}</div>` : '<div style="color:var(--text3)">Loading\u2026</div>')}
+          ${decided}
+        </div>
+      </div>
+      <div class="modal-footer" style="flex-wrap:wrap;justify-content:space-between">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" ${open&&!busy&&f.customer_email?'':'disabled'} onclick="flaggedEmailOpen('${escapeHtml(f.id)}')">${f.contacted_at?'Email again':'Email customer'}</button>
+          ${t?`<button class="btn" onclick="flaggedOpenTicket('${escapeHtml(f.id)}')">Open ticket #${escapeHtml(String(t.ticket_number||''))}</button>`:''}
+          <button class="btn btn-sm" ${busy?'disabled':''} onclick="flaggedRefresh('${escapeHtml(f.id)}')" title="Read the order and Shopify's risk facts again">&#8635; Refresh</button>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="flaggedClose()">Close</button>
+          <button class="btn btn-danger" ${open&&!busy?'':'disabled'} onclick="flaggedCancelOpen('${escapeHtml(f.id)}')">Cancel &amp; refund\u2026</button>
+          <button class="btn btn-teal" ${open&&!busy?'':'disabled'} onclick="flaggedConfirm('${escapeHtml(f.id)}')">Confirm order</button>
+        </div>
+      </div>
+    </div>`;
+}
+async function flaggedOpenTicket(id){ const f = flaggedGet(id); if(!f || !f.ticket_id) return; flaggedClose(); goPage('tickets'); try{ openTicket(f.ticket_id); }catch(_){} }
+
+/* ---------- actions that need no extra input ---------- */
+async function flaggedRun(id, fnAction, body, okMsg, logText){
+  const f = flaggedGet(id); if(!f || S.fl.busy) return null;
+  S.fl.busy = true; flaggedPaint();
+  try{
+    const j = await flaggedFn(fnAction, Object.assign({ id:id }, body||{}));
+    if(j.row) flaggedApply(j.row);
+    if(okMsg) toast(typeof okMsg==='function' ? okMsg(j) : okMsg);
+    if(logText) logApp('flagged:'+fnAction, 'flagged_order', id, logText);
+    S.fl.busy = false; flaggedLoadExtras(id); flaggedPaint(); try{ refreshView(); }catch(_){}
+    return j;
+  }catch(e){
+    if(e.body && e.body.row) flaggedApply(e.body.row);
+    toast(e.message || 'Something went wrong', true);
+    S.fl.busy = false; flaggedLoadExtras(id); flaggedPaint();
+    return null;
+  }
+}
+function flaggedHoldNow(id){ return flaggedRun(id, 'hold_now', {}, j=>j.row && j.row.hold_state==='held' ? 'Order held in ShipStation' : 'Checked: ' + ((j.row && j.row.hold_error) || 'ShipStation has not imported it yet'), 'Pressed Hold now'); }
+function flaggedRefresh(id){ return flaggedRun(id, 'refresh', {}, 'Details refreshed from Shopify', null); }
+async function flaggedConfirm(id){
+  const f = flaggedGet(id); if(!f || S.fl.busy) return;
+  const msg = 'Confirm order ' + f.order_number + (f.customer_name ? ' for ' + f.customer_name : '') + '?\n\nThe order comes OFF HOLD in ShipStation and the ERP and can ship.\n\nOnly confirm if you are satisfied the customer placed it.';
+  if(!confirm(msg)) return;
+  const j = await flaggedRun(id, 'confirm', {}, 'Order ' + f.order_number + ' confirmed and released', 'Confirmed order ' + f.order_number + ' and released the hold');
+  if(j && j.row && j.row.status==='confirmed'){ S.fl.view = 'detail'; flaggedPaint(); }
+}
+
+/* ---------- cancel & refund ---------- */
+function flaggedCancelOpen(id){ S.fl.view = 'cancel'; flaggedPaint(); }
+function flaggedCancelHtml(f){
+  const busy = S.fl.busy;
+  return `
+    <div class="modal" style="width:560px;max-width:96vw">
+      <div class="modal-title">Cancel &amp; refund order ${escapeHtml(f.order_number||'')}</div>
+      <div style="font-size:var(--t-md);line-height:1.5;margin-bottom:12px">This cancels the order in <b>Shopify</b> and <b>refunds ${escapeHtml(flaggedMoney(f))} in full</b> to the way ${escapeHtml(f.customer_name||'the customer')} paid, and puts the stock back. The order never ships. It <b>cannot be undone from here</b>.</div>
+      <label style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;font-size:var(--t-md)"><input type="checkbox" id="flCancelNotify" ${S.fl.cancelNotify?'checked':''} onchange="S.fl.cancelNotify=this.checked" style="margin-top:3px"><span>Email ${escapeHtml(f.customer_email||'the customer')} that the order was cancelled and refunded (sent by Shopify)</span></label>
+      <div class="form-group"><label class="form-label">Note (kept on the Shopify order and in the history)</label><textarea class="form-input" id="flCancelNote" rows="2" oninput="S.fl.cancelNote=this.value" placeholder="Why it was cancelled">${escapeHtml(S.fl.cancelNote||'')}</textarea></div>
+      <div class="modal-footer"><button class="btn" ${busy?'disabled':''} onclick="S.fl.view='detail';flaggedPaint()">Back</button><button class="btn btn-danger" ${busy?'disabled':''} onclick="flaggedCancelGo('${escapeHtml(f.id)}')">${busy?'Cancelling\u2026':'Cancel order &amp; refund'}</button></div>
+    </div>`;
+}
+async function flaggedCancelGo(id){
+  const f = flaggedGet(id); if(!f || S.fl.busy) return;
+  if(!confirm('Cancel order ' + f.order_number + ' and REFUND ' + flaggedMoney(f) + ' to the original payment method?\n\nThis is a REAL cancellation and refund in Shopify. It cannot be undone from here.')) return;
+  const j = await flaggedRun(id, 'cancel', { notify_customer: !!S.fl.cancelNotify, note: S.fl.cancelNote || '' }, j=>j.done ? 'Order ' + f.order_number + ' cancelled and refunded' : 'Cancel requested. Shopify is finishing the cancellation and refund; this order updates by itself.', 'Cancelled order ' + f.order_number + ' and refunded it');
+  S.fl.view = 'detail'; flaggedPaint();
+}
+
+/* ---------- email the customer (a normal ticket, so the reply lands in its thread) ---------- */
+function flaggedEmailTemplate(f){
+  const first = String(f.customer_name||'').trim().split(/\s+/)[0] || 'there';
+  const items = (f.items||[]).map(i=>(i.quantity||1) + ' x ' + (i.title||i.sku)).join(', ');
+  return 'Hi ' + first + ',\n\nThank you for your order ' + f.order_number + ' with TGK Motorsport' + (items ? ' (' + items + ')' : '') + '.\n\nAs a routine security step, we check some orders before they ship. Could you please reply to this email to confirm that you placed this order?\n\nIf you did not place it, just tell us and we will cancel it and refund you right away.\n\nPlease do not send card numbers or other payment details by email.\n\nThank you,\n' + friendlyStaffName() + '\nTGK Motorsport';
+}
+function flaggedEmailOpen(id){
+  const f = flaggedGet(id); if(!f) return;
+  if(!f.customer_email){ toast('There is no customer email on file for this order', true); return; }
+  if(S.fl.draft[id]==null) S.fl.draft[id] = flaggedEmailTemplate(f);
+  S.fl.view = 'email'; flaggedPaint();
+}
+function flaggedEmailHtml(f){
+  const busy = S.fl.busy;
+  return `
+    <div class="modal" style="width:640px;max-width:96vw">
+      <div class="modal-title">Email ${escapeHtml(f.customer_name||'the customer')} about order ${escapeHtml(f.order_number||'')}</div>
+      <div style="font-size:var(--t-sm);color:var(--text3);margin-bottom:10px">To <b>${escapeHtml(f.customer_email||'')}</b>. ${f.ticket_id?'It goes in the existing ticket.':'This opens a support ticket, so their reply arrives in the ticket thread and shows as "Customer replied" here.'}</div>
+      <div class="form-group"><label class="form-label">Message</label><textarea class="form-input" id="flEmailBody" rows="17" oninput="S.fl.draft['${escapeHtml(f.id)}']=this.value" style="font-family:inherit">${escapeHtml(S.fl.draft[f.id]||'')}</textarea></div>
+      <div class="modal-footer"><button class="btn" ${busy?'disabled':''} onclick="S.fl.view='detail';flaggedPaint()">Back</button><button class="btn btn-primary" ${busy?'disabled':''} onclick="flaggedEmailSend('${escapeHtml(f.id)}')">${busy?'Sending\u2026':'Send email'}</button></div>
+    </div>`;
+}
+async function flaggedEmailSend(id){
+  const f = flaggedGet(id); if(!f || S.fl.busy) return;
+  const body = String(S.fl.draft[id]||'').trim();
+  if(!body){ toast('Write a message first', true); return; }
+  if(!f.customer_email){ toast('There is no customer email on file for this order', true); return; }
+  S.fl.busy = true; flaggedPaint();
+  let step = 'opening the ticket';
+  try{
+    let ticket = flaggedTicket(f);
+    if(!ticket && f.ticket_id){ const r = await sb.from('tickets').select('*').eq('id', f.ticket_id).maybeSingle(); ticket = r && r.data || null; if(ticket) S.tickets.unshift(ticket); }
+    if(!ticket){
+      const basic = { source:'manual', status:'waiting_customer', priority:'high', subject:'Order ' + f.order_number + ': please confirm your order', order_number: flaggedBare(f.order_number), customer_name: f.customer_name || null, customer_email: f.customer_email };
+      let res = await sb.from('tickets').insert(Object.assign({}, basic, { category:'Order Verification' })).select().single();
+      if(res.error) res = await sb.from('tickets').insert(basic).select().single();   // never fail just because of an extra field
+      if(res.error) throw res.error;
+      ticket = res.data; S.tickets.unshift(ticket);
+      try{ await sb.from('ticket_messages').insert({ ticket_id: ticket.id, sender_type:'system', sender_name:'System', body:'Opened from Flagged Orders. Shopify flagged order ' + f.order_number + ' (' + (f.risk_level||'investigate') + ') and it is on hold. Confirm or cancel it from Flagged Orders once the customer replies.', is_internal_note:true }); }catch(_){ logSilent('flagged: system note', _); }
+    }
+    step = 'saving the message';
+    const ins = await sb.from('ticket_messages').insert({ ticket_id: ticket.id, sender_type:'staff', sender_name: S.user.email, body, is_internal_note:false }).select().single();
+    if(ins.error) throw ins.error;
+    if(S.messages[ticket.id]) S.messages[ticket.id].push(ins.data);
+    step = 'sending the email';
+    const subject = 'TGK Motorsport Support #' + String(ticket.ticket_number).padStart(4,'0');
+    const resp = await fetch(`${SUPABASE_URL}/functions/v1/send-ticket-email`, { method:'POST', headers:{ 'Content-Type':'application/json', 'Authorization':`Bearer ${SUPABASE_ANON_KEY}`, 'apikey':SUPABASE_ANON_KEY }, body: JSON.stringify({ ticket_id: ticket.id, ticket_number: ticket.ticket_number, message_id: ins.data.id, to: f.customer_email, subject, body, attachments: [], staff_name: friendlyStaffName() }) });
+    const result = await resp.json().catch(()=>({}));
+    if(!resp.ok) throw new Error(result.error || 'The email service refused it');
+    step = 'recording it';
+    try{ if(ticket.status !== 'waiting_customer') await sb.from('tickets').update({ status:'waiting_customer' }).eq('id', ticket.id); }catch(_){ /* the status is a convenience */ }
+    const j = await flaggedFn('contacted', { id, ticket_id: ticket.id, to: f.customer_email, subject });
+    if(j.row) flaggedApply(j.row);
+    delete S.fl.draft[id];
+    toast('Emailed ' + f.customer_email + '. Their reply will appear in ticket #' + ticket.ticket_number);
+    logApp('flagged:email', 'flagged_order', id, 'Emailed ' + f.customer_email + ' to confirm order ' + f.order_number);
+    S.fl.view = 'detail';
+  }catch(e){
+    toast('Email not sent (' + step + '): ' + ((e && e.message) || e) + (step==='sending the email' ? '. The message is saved in the ticket.' : ''), true);
+  }
+  S.fl.busy = false; flaggedPaint(); flaggedLoadExtras(id); try{ refreshView(); }catch(_){}
+}
+window.flaggedOpen = flaggedOpen; window.flaggedClose = flaggedClose; window.flaggedConfirm = flaggedConfirm; window.flaggedCancelOpen = flaggedCancelOpen; window.flaggedCancelGo = flaggedCancelGo;
+window.flaggedEmailOpen = flaggedEmailOpen; window.flaggedEmailSend = flaggedEmailSend; window.flaggedHoldNow = flaggedHoldNow; window.flaggedRefresh = flaggedRefresh; window.flaggedOpenTicket = flaggedOpenTicket;
+window.flaggedSweepNow = flaggedSweepNow; window.flaggedToggleAuto = flaggedToggleAuto; window.renderFlaggedList = renderFlaggedList;
+
 function setupBackButton(){
   // Trap the phone/browser Back button so it dismisses the current layer instead of closing the app.
   // Order: modal -> ticket panel -> mobile sidebar drawer -> non-dashboard page. One spare history
@@ -2198,6 +2533,7 @@ function renderPage(){
   if(S.page === 'orders') return renderEmailsList();
   if(S.page === 'warranty') return renderWarrantyList();
   if(S.page === 'shiperrors') return renderShipErrorsList();
+  if(S.page === 'flagged') return renderFlaggedList();
   if(S.page === 'rebates') return renderRebatesList();
   if(S.page === 'quarantine') return renderQuarantineList();
   if(S.page === 'customers') return renderCustomerLookup();
@@ -2537,7 +2873,7 @@ const ALOG_FN_LABELS = {
   'send-ticket-email':'Sent ticket email', 'send-email-reply':'Sent email reply',
   'create-draft-order':'Shopify draft order', 'process-shopify-refund':'Processed Shopify refund',
   'generate-return-label':'Generated return label', 'get-return-rate':'Quoted return shipping rate',
-  'anthropic-proxy':'Used AI assist'
+  'anthropic-proxy':'Used AI assist', 'flagged-orders':'Flagged order action'
 };
 // Tag every edge-function call with who made it. Wraps fetch once; never changes the request or response.
 (function installActivityFetchHook(){
